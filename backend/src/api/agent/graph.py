@@ -10,23 +10,28 @@ from langgraph.graph import START, MessagesState, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from api.agent.prompts import SYSTEM_PROMPT
+from api.agent.prompts import build_system_prompt
 
 
 def build_agent(
-    models: Mapping[str, BaseChatModel], tools: list[BaseTool], *, default_model: str
+    models: Mapping[str, BaseChatModel],
+    tools: list[BaseTool],
+    *,
+    default_model: str,
+    system_prompt: str | None = None,
 ) -> CompiledStateGraph:
     """Compiles the agent graph.
 
     `models` maps model ids to chat models; pick one per run with
-    `config={"configurable": {"model": "<id>"}}`.
+    `config={"configurable": {"model": "<id>"}}`. The default system prompt lists `tools`.
     """
+    prompt = SystemMessage(system_prompt or build_system_prompt(tools, unavailable={}))
     bound = {model_id: model.bind_tools(tools) for model_id, model in models.items()}
 
     async def call_model(state: MessagesState, config: RunnableConfig) -> dict:
         model_id = config.get("configurable", {}).get("model", default_model)
         model = bound.get(model_id, bound[default_model])
-        response = await model.ainvoke([SystemMessage(SYSTEM_PROMPT), *state["messages"]], config)
+        response = await model.ainvoke([prompt, *state["messages"]], config)
         return {"messages": [response]}
 
     graph = StateGraph(MessagesState)

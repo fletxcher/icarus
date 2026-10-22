@@ -1,6 +1,7 @@
 """Builds the long-lived services shared by every request."""
 
 import logging
+import shutil
 from dataclasses import dataclass
 from typing import NoReturn
 
@@ -9,6 +10,7 @@ from pymongo.asynchronous.database import AsyncDatabase
 
 from api.agent.graph import build_agent
 from api.agent.models import ModelOption, available_models, create_chat_model
+from api.agent.prompts import build_system_prompt
 from api.agent.titles import TitleGenerator
 from api.agent.tools import build_tools
 from api.chats.repository import ChatRepository
@@ -65,6 +67,30 @@ class Services:
             await self.vm.close()
 
 
+XFOIL_CAPABILITY = "XFOIL airfoil analysis and airfoil search"
+CFD_CAPABILITY = "CFD simulations"
+
+
+def xfoil_unavailable(settings: Settings) -> str | None:
+    """Why XFOIL can't run with this setup, or None if it can."""
+    if settings.xfoil_runner == "vm":
+        return None if settings.vm_host else "the simulation VM isn't configured"
+    if shutil.which(settings.xfoil_path) is None:
+        return "XFOIL isn't installed on the server"
+    if settings.xfoil_display == "xvfb" and shutil.which("xvfb-run") is None:
+        return "xvfb isn't installed on the server, which XFOIL needs to run"
+    return None
+
+
+def unavailable_capabilities(settings: Settings) -> dict[str, str]:
+    unavailable = {}
+    if reason := xfoil_unavailable(settings):
+        unavailable[XFOIL_CAPABILITY] = reason
+    if not settings.vm_host:
+        unavailable[CFD_CAPABILITY] = "the simulation VM isn't configured"
+    return unavailable
+
+
 def build_services(settings: Settings, db: AsyncDatabase) -> Services:
     vm: CommandRunner = SSHRunner(settings) if settings.vm_host else UnconfiguredRunner()
     xfoil = XfoilService(
@@ -77,6 +103,16 @@ def build_services(settings: Settings, db: AsyncDatabase) -> Services:
     simulations = SimulationService(
         db, vm, workdir=settings.vm_workdir, script=settings.vm_cfd_script
     )
+
+    # Only tools that can run are given to the model; the prompt names the rest as missing.
+    unavailable = unavailable_capabilities(settings)
+    for capability, reason in unavailable.items():
+        logger.warning("%s unavailable: %s", capability, reason)
+    tools = build_tools(
+        xfoil if XFOIL_CAPABILITY not in unavailable else None,
+        simulations if CFD_CAPABILITY not in unavailable else None,
+    )
+    logger.info("agent tools: %s", ", ".join(tool.name for tool in tools))
 
     models = available_models(settings)
     chats = ChatRepository(db)
@@ -100,7 +136,10 @@ def build_services(settings: Settings, db: AsyncDatabase) -> Services:
         logger.info("models available: %s", ", ".join(option.id for option in models))
         chat_models = {option.id: create_chat_model(option, settings) for option in models}
         agent = build_agent(
-            chat_models, build_tools(xfoil, simulations), default_model=default_model
+            chat_models,
+            tools,
+            default_model=default_model,
+            system_prompt=build_system_prompt(tools, unavailable),
         )
         if settings.auto_title:
             titles = TitleGenerator(chats, chat_models)

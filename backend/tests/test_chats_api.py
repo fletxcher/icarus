@@ -4,6 +4,7 @@ import httpx
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
+from openrouter.errors import OpenRouterError
 
 from api.agent.graph import build_agent
 from tests.conftest import ScriptedModel, use_scripted_agent
@@ -56,7 +57,13 @@ def test_send_message_streams_tool_calls_and_persists_reply(client: TestClient):
 
     names = [name for name, _ in events]
     assert names == ["start", "tool_call", "tool_result", "token", "done"]
-    assert events[2][1] == {"id": "call-1", "name": "add", "status": "success", "content": "5"}
+    assert events[2][1] == {
+        "id": "call-1",
+        "name": "add",
+        "status": "success",
+        "content": "5",
+        "artifact": None,
+    }
 
     messages = client.get(f"/api/threads/{thread_id}").json()["messages"]
     assert [(m["role"], m["content"], m["status"]) for m in messages] == [
@@ -181,3 +188,26 @@ def test_reasoning_blocks_are_streamed_and_stored(client: TestClient):
         {"type": "reasoning", "text": "Consider Re."},
         {"type": "text", "text": "Use 2412."},
     ]
+
+
+def test_openrouter_errors_are_explained_with_the_providers_reason(client: TestClient):
+    class DailyQuotaModel(ScriptedModel):
+        async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
+            request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+            raise OpenRouterError(
+                "Rate limit exceeded: free-models-per-day. Add 10 credits to unlock more",
+                httpx.Response(429, request=request, text="{}"),
+            )
+
+    model = DailyQuotaModel(replies=[], seen=[])
+    client.app.state.services.agent = build_agent(
+        {"mistral-medium-3-5": model}, [], default_model="mistral-medium-3-5"
+    )
+    thread_id = create_thread(client)
+
+    events = read_events(client, thread_id, {"content": "hi"})
+
+    message = events[-1][1]["message"]
+    assert events[-1][0] == "error"
+    assert message.startswith("OpenRouter's rate limit was exceeded.")
+    assert "free-models-per-day" in message

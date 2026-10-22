@@ -9,6 +9,7 @@ import { regenerateReply } from "@/stores/chat-actions";
 import { useChatStore, useIsGenerating } from "@/stores/chat-store";
 import { ActionButton } from "./action-button";
 import { Markdown } from "./markdown";
+import { PlotBlock, type PlotFigure } from "./plot-block";
 import { ReasoningBlock } from "./reasoning-block";
 import { ToolCallBlock } from "./tool-call-block";
 
@@ -76,6 +77,10 @@ function Part({ part, isActive }: { part: MessagePart; isActive: boolean }) {
     case "reasoning":
       return <ReasoningBlock text={part.text} isActive={isActive} />;
     case "tool":
+      // A finished plot shows the figure itself; anything else shows the tool call.
+      if (part.name === "create_plot" && part.status === "success" && part.artifact) {
+        return <PlotBlock figure={part.artifact as unknown as PlotFigure} />;
+      }
       return <ToolCallBlock part={part} />;
     case "text":
       return <Markdown content={part.text} />;

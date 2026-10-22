@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ChartLineIcon,
   ChevronRightIcon,
   CircleCheckIcon,
   CircleXIcon,
@@ -22,6 +23,7 @@ const TOOLS: Record<string, { label: string; icon: LucideIcon }> = {
   search_naca4_airfoils: { label: "Airfoil search", icon: SearchIcon },
   submit_cfd_simulation: { label: "CFD simulation", icon: CpuIcon },
   get_simulation_status: { label: "Simulation status", icon: CpuIcon },
+  create_plot: { label: "Plot", icon: ChartLineIcon },
 };
 
 const STATUS = {

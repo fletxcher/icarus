@@ -57,6 +57,9 @@ def make_service(runner: FakeRunner, display: str = "xvfb") -> XfoilService:
 
 def test_naca_designation_is_normalized():
     assert PolarRequest(naca=" naca 2412 ", reynolds=1e6).naca == "2412"
+    # Models sometimes send numbers; leading zeros are restored.
+    assert PolarRequest(naca=2412, reynolds=1e6).naca == "2412"
+    assert PolarRequest(naca=12, reynolds=1e6).naca == "0012"
     with pytest.raises(ValidationError):
         PolarRequest(naca="24x2", reynolds=1e6)
 

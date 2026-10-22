@@ -17,6 +17,8 @@ export type ToolPart = {
   args: Record<string, unknown>;
   status: ToolStatus;
   result: string | null;
+  /** Structured output for the UI, e.g. create_plot's Plotly figure. */
+  artifact?: Record<string, unknown> | null;
 };
 
 /** A reply in the order it happened: reasoning, tool calls and text, possibly interleaved. */
@@ -72,7 +74,14 @@ export type StreamEvent =
   | { type: "reasoning"; text: string }
   | { type: "token"; text: string }
   | { type: "tool_call"; id: string; name: string; args: Record<string, unknown> }
-  | { type: "tool_result"; id: string; name: string; status: "success" | "error"; content: string }
+  | {
+      type: "tool_result";
+      id: string;
+      name: string;
+      status: "success" | "error";
+      content: string;
+      artifact: Record<string, unknown> | null;
+    }
   | { type: "title"; title: string }
   | { type: "done"; message_id: string }
   | { type: "error"; message: string };

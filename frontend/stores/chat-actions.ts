@@ -125,7 +125,23 @@ async function runTurn(threadId: string, content?: string, attachments: Attachme
     updateMessages(threadId, (messages) => [...messages, optimistic]);
   }
 
-  let replyId: string | null = null;
+  // Shown right away as "thinking" (the server may hold the reply briefly so a new chat's
+  // title can arrive first); it takes the real id when the server starts the reply.
+  let replyId = `pending-${crypto.randomUUID()}`;
+  const placeholder: Message = {
+    id: replyId,
+    thread_id: threadId,
+    role: "assistant",
+    content: "",
+    status: "streaming",
+    model,
+    parts: [],
+    attachments: [],
+    error: null,
+    created_at: new Date().toISOString(),
+  };
+  updateMessages(threadId, (messages) => [...messages, placeholder]);
+
   const updateReply = (update: (message: Message) => Message) =>
     updateMessages(threadId, (messages) =>
       messages.map((message) => (message.id === replyId ? update(message) : message)),
@@ -139,20 +155,9 @@ async function runTurn(threadId: string, content?: string, attachments: Attachme
     };
     for await (const event of streamReply(threadId, body, controller.signal)) {
       if (event.type === "start") {
-        replyId = event.message_id;
-        const reply: Message = {
-          id: replyId,
-          thread_id: threadId,
-          role: "assistant",
-          content: "",
-          status: "streaming",
-          model,
-          parts: [],
-          attachments: [],
-          error: null,
-          created_at: new Date().toISOString(),
-        };
-        updateMessages(threadId, (messages) => [...messages, reply]);
+        const realId = event.message_id;
+        updateReply((message) => ({ ...message, id: realId }));
+        replyId = realId;
       } else if (event.type === "title") {
         renameLocally(threadId, event.title);
       } else {

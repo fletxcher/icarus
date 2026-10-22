@@ -4,6 +4,7 @@ import { useState } from "react";
 import { BrainIcon, ChevronRightIcon } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { Markdown } from "./markdown";
 
 /** The model's thinking: open while it streams, tucked away once the answer starts. */
 export function ReasoningBlock({ text, isActive }: { text: string; isActive: boolean }) {
@@ -19,8 +20,11 @@ export function ReasoningBlock({ text, isActive }: { text: string; isActive: boo
         <ChevronRightIcon className="size-3.5 transition-transform group-data-[state=open]:rotate-90" />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="mt-1 border-l-2 pl-4 text-sm leading-6 whitespace-pre-wrap text-muted-foreground">
-          {text}
+        <div className="mt-1 border-l-2 pl-4">
+          <Markdown
+            content={text}
+            className="text-sm leading-6 [--tw-prose-body:var(--color-muted-foreground)] prose-p:my-2"
+          />
         </div>
       </CollapsibleContent>
     </Collapsible>

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langgraph.graph.state import CompiledStateGraph
 
-from api.agent.stream import stream_turn
+from api.agent.stream import stream_turn, title_first
 from api.chats.schemas import (
     MessageCreate,
     Thread,
@@ -18,6 +18,9 @@ from api.chats.schemas import (
 from api.dependencies import ServicesDep
 
 router = APIRouter(prefix="/threads", tags=["threads"])
+
+# How long a chat's first reply is held so its new title can be shown first.
+TITLE_WAIT_S = 5.0
 
 
 def _not_found() -> HTTPException:
@@ -127,12 +130,10 @@ async def send_message(
     thread_id: str, turn: Annotated[Turn, Depends(start_turn)], services: ServicesDep
 ) -> AsyncIterator[ServerSentEvent]:
     """Adds a user message (omit `content` to regenerate) and streams the assistant's reply."""
-    async for event in stream_turn(
-        turn.agent,
-        services.chats,
-        services.files,
-        thread_id=thread_id,
-        model=turn.model,
-        title=turn.title,
-    ):
+    events = stream_turn(
+        turn.agent, services.chats, services.files, thread_id=thread_id, model=turn.model
+    )
+    if turn.title is not None:
+        events = title_first(events, turn.title, wait_s=TITLE_WAIT_S)
+    async for event in events:
         yield event

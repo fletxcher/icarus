@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, Field
+from pydantic import AfterValidator, BaseModel, BeforeValidator, Field
 
 from api.compute.runner import CommandResult, CommandRunner
 
@@ -27,6 +27,11 @@ INPUT_FILE = "input.txt"
 NACA_PATTERN = re.compile(r"^\d{4,5}$")
 
 
+def _naca_from_number(value: object) -> object:
+    """Models sometimes send the designation as a number; 12 means NACA 0012."""
+    return str(value).zfill(4) if isinstance(value, int) else value
+
+
 def _normalize_naca(value: str) -> str:
     value = value.strip().upper().removeprefix("NACA").strip()
     if not NACA_PATTERN.match(value):
@@ -36,6 +41,7 @@ def _normalize_naca(value: str) -> str:
 
 NacaCode = Annotated[
     str,
+    BeforeValidator(_naca_from_number),
     AfterValidator(_normalize_naca),
     Field(description="NACA 4- or 5-digit designation, e.g. '2412' or '23012'"),
 ]

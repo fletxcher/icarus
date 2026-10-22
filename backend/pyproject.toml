@@ -12,6 +12,7 @@ dependencies = [
     "langchain-mistralai>=1.1.6",
     "langchain-openrouter>=0.2.9",
     "langgraph>=1.2.16",
+    "plotly>=7.1.0",
     "pydantic-settings>=2.16.1",
     "pymongo>=4.19.0",
     "python-multipart>=0.0.32",

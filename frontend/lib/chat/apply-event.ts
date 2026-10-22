@@ -33,7 +33,7 @@ export function applyStreamEvent(message: Message, event: StreamEvent): Message 
         ...message,
         parts: message.parts.map((part) =>
           part.type === "tool" && part.id === event.id
-            ? { ...part, status: event.status, result: event.content }
+            ? { ...part, status: event.status, result: event.content, artifact: event.artifact }
             : part,
         ),
       };

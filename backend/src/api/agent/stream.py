@@ -5,13 +5,16 @@ Events, in order:
 - `reasoning`    {"text"}                                streamed model thinking
 - `token`        {"text"}                                streamed answer text
 - `tool_call`    {"id", "name", "args"}                  the agent invoked a tool
-- `tool_result`  {"id", "name", "status", "content"}     that tool finished ("success"/"error")
-- `title`        {"title"}                               the chat was named (first turn only)
+- `tool_result`  {"id", "name", "status", "content",     that tool finished ("success"/"error");
+                  "artifact"}                            artifact: UI data such as a plot
 - `done`         {"message_id"}                          reply complete
+
+On a chat's first message, `title_first` adds a `title` {"title"} event ahead of these.
 - `error`        {"message"}                             the turn failed
 """
 
 import asyncio
+import contextlib
 import logging
 import time
 from collections.abc import AsyncIterator
@@ -22,6 +25,7 @@ from fastapi.sse import ServerSentEvent
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
+from openrouter.errors import OpenRouterError
 
 from api.agent.logging_callbacks import AgentLoggingHandler
 from api.chats.repository import ChatRepository
@@ -99,21 +103,33 @@ def split_message(message: AIMessage) -> tuple[str, str]:
     return "".join(reasoning), "".join(text)
 
 
-# What the user should know when the model provider rejects a request.
+# What the user should know when a model provider rejects a request.
 PROVIDER_ERRORS = {
-    401: "Mistral rejected the API key. Check MISTRAL_API_TOKEN.",
-    402: "Mistral requires a payment method on this account.",
-    429: "Mistral's rate limit was exceeded. Wait a moment, or check the plan's limits.",
+    401: "{provider} rejected the API key. Check it in your .env.",
+    402: "{provider} requires credits or a payment method on this account.",
+    429: "{provider}'s rate limit was exceeded. Wait a moment, or check the plan's limits.",
 }
+
+
+def _provider_failure(error: Exception) -> tuple[str, int, str | None] | None:
+    """(provider, HTTP status, the provider's own message) for an API error response."""
+    if isinstance(error, httpx.HTTPStatusError):  # Mistral's client
+        return "Mistral", error.response.status_code, None
+    if isinstance(error, OpenRouterError):
+        return "OpenRouter", error.status_code, error.message
+    return None
 
 
 def describe_error(error: Exception) -> str:
     """A user-facing explanation of why the turn failed."""
-    if isinstance(error, httpx.HTTPStatusError):
-        status = error.response.status_code
-        return PROVIDER_ERRORS.get(status, f"Mistral returned an error ({status}).")
+    if failure := _provider_failure(error):
+        provider, status, detail = failure
+        text = PROVIDER_ERRORS.get(status, "{provider} returned an error ({status}).")
+        text = text.format(provider=provider, status=status)
+        # OpenRouter's message says exactly what ran out (e.g. the daily free quota).
+        return f"{text} ({detail})" if detail and status in PROVIDER_ERRORS else text
     if isinstance(error, httpx.TransportError):
-        return "Couldn't reach Mistral. Check the server's network connection."
+        return "Couldn't reach the model provider. Check the server's network connection."
     return "The assistant failed to respond."
 
 
@@ -146,6 +162,8 @@ class ReplyBuilder:
         if part := self._tools.get(message.tool_call_id):
             part.result = message.text
             part.status = "error" if message.status == "error" else "success"
+            if isinstance(message.artifact, dict):
+                part.artifact = message.artifact
 
     @property
     def content(self) -> str:
@@ -167,7 +185,6 @@ async def stream_turn(
     *,
     thread_id: str,
     model: str,
-    title: asyncio.Task[str | None] | None = None,
 ) -> AsyncIterator[ServerSentEvent]:
     settings = get_settings()
     messages = await chats.list_messages(thread_id)
@@ -226,12 +243,11 @@ async def stream_turn(
                                 "name": message.name,
                                 "status": "error" if message.status == "error" else "success",
                                 "content": message.text,
+                                "artifact": message.artifact
+                                if isinstance(message.artifact, dict)
+                                else None,
                             },
                         )
-
-        # The title is generated alongside the reply; report it before finishing.
-        if title is not None and (generated := await title):
-            yield ServerSentEvent(event="title", data={"title": generated})
 
         status = "done"
         yield ServerSentEvent(event="done", data={"message_id": reply.id})
@@ -265,3 +281,57 @@ async def stream_turn(
                 error=error_message,
             )
         )
+
+
+async def title_first(
+    events: AsyncIterator[ServerSentEvent],
+    title: asyncio.Task[str | None],
+    *,
+    wait_s: float,
+) -> AsyncIterator[ServerSentEvent]:
+    """Sends the chat's new title (`title` event) before the reply.
+
+    The reply keeps generating meanwhile; its events are held for up to `wait_s` while
+    the title is pending. A slower title is sent as soon as it's ready instead, and
+    always before the reply's final event.
+    """
+    queue: asyncio.Queue[ServerSentEvent | None] = asyncio.Queue()
+
+    async def pump() -> None:
+        try:
+            async for event in events:
+                await queue.put(event)
+        finally:
+            await queue.put(None)
+
+    pump_task = asyncio.create_task(pump())
+    sent_title = False
+
+    async def title_event(wait: bool) -> AsyncIterator[ServerSentEvent]:
+        nonlocal sent_title
+        if sent_title or not (wait or title.done()):
+            return
+        sent_title = True
+        try:
+            generated = await title
+        except Exception:
+            # A title is optional; never let it break the reply.
+            logger.warning("title task failed", exc_info=True)
+            return
+        if generated:
+            yield ServerSentEvent(event="title", data={"title": generated})
+
+    try:
+        await asyncio.wait({title}, timeout=wait_s)
+        async for event in title_event(wait=False):
+            yield event
+        while (event := await queue.get()) is not None:
+            # The last event (done or error) never goes out ahead of the title.
+            async for title_update in title_event(wait=event.event in ("done", "error")):
+                yield title_update
+            yield event
+    finally:
+        # Stops generation if the client went away mid-reply (the reply is saved as stopped).
+        pump_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await pump_task

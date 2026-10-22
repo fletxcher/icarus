@@ -112,7 +112,7 @@ vm/run_case.sh          Placeholder CFD entrypoint, installed on the VM by setup
 | `token` | `{text}` |
 | `tool_call` | `{id, name, args}` |
 | `tool_result` | `{id, name, status, content}` (status `success` or `error`) |
-| `title` | `{title}` (first message of a chat only) |
+| `title` | `{title}` (first message of a chat only; sent before `start` when ready within 5 s) |
 | `done` | `{message_id}` |
 | `error` | `{message}` |
 
@@ -127,11 +127,49 @@ The agent is rebuilt from stored messages each turn, so edits and regenerations 
 naturally. Reasoning and tool calls from earlier turns aren't replayed; their outcomes
 live in the assistant's text.
 
+### Tools and what the model knows about them
+
+Tools are only given to the model when they can actually run, checked at startup:
+
+| Tool | Available when |
+|---|---|
+| `create_plot` | always |
+| `run_xfoil_polar`, `search_naca4_airfoils` | `XFOIL_RUNNER=local` with `xfoil` (and `xvfb-run` unless `XFOIL_DISPLAY=none`) installed, or `XFOIL_RUNNER=vm` with a VM |
+| `submit_cfd_simulation`, `get_simulation_status` | a VM is configured (`VM_HOST`) |
+
+The system prompt lists the available tools and names each missing capability with the
+reason, and tells the model to say plainly when something isn't available instead of
+attempting it or inventing tools. The startup log shows which tools are active and why
+others aren't. A call to a tool that doesn't exist comes back to the model as an error.
+
+### Plots
+
+`create_plot` takes a Plotly figure spec (JSON with `data` traces and a `layout`), not
+code, so the same spec always draws the same plot and nothing runs on the server.
+Plotly's own validator checks every spec; invalid properties go back to the model as
+errors naming what to fix and showing the right shape. Free models make a few
+predictable mistakes, so these are repaired instead of failing (each retry costs a
+request): arrays wrapped as `{"item": [...]}`, numbers written as strings (`"42"`; only
+whole arrays of numeric strings convert, so category labels stay), and a figure sent as
+a JSON string, a bare list of traces or a single trace. Limits: 20 traces, 50,000
+points, 2 MB.
+
+The model gets a one-line summary; the validated figure is stored on the reply's tool
+part as `artifact` and drawn inline by the frontend (Plotly loads only when a chat has a
+plot). The app applies its own theme from a colorblind-validated palette, with separate
+light and dark steps: categorical colors in a fixed order, a one-hue sequential scale
+and a blue/gray/red diverging scale for fields. Specs' own templates, backgrounds and
+fonts are dropped. Each plot has a hover layer, a PNG download and a "Show data" table.
+Plot text doesn't render LaTeX, so the model is told to use Unicode and `<sub>`/`<sup>`.
+
 ### Chat titles
 
 A new chat starts with its first message as a placeholder title. Alongside the first
-reply, the model is asked for a 2–6 word title; it's saved and streamed as a `title`
-event, so the sidebar updates live. Renaming a chat stops this from ever replacing your
+reply, the model is asked for a 2–6 word title as a `ChatTitle` tool call (free-text
+requests let `openrouter/free` route to safety classifiers that answer "safe"). It's
+saved and streamed as a `title` event ahead of the reply: the reply keeps generating
+but is held for up to 5 seconds so the title shows first, and a slower title follows
+as soon as it's ready. Renaming a chat stops this from ever replacing your
 title. It costs one extra model request per new chat; `AUTO_TITLE=false` turns it off.
 
 ### Attachments

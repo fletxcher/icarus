@@ -6,21 +6,26 @@ import re
 from collections.abc import Mapping
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel, Field
 
-from api.agent.stream import split_message
 from api.chats.repository import ChatRepository
 
 logger = logging.getLogger(__name__)
 
 TITLE_PROMPT = (
-    "You write short titles for chat conversations. Reply with only the title for the "
-    "conversation that starts with the user's message: 2 to 6 words, no quotes, no "
-    "trailing punctuation."
+    "You name chat conversations. Call ChatTitle with a short title for the conversation "
+    "that starts with the user's message: 2 to 6 words, no quotes, no trailing punctuation."
 )
 TITLE_MAX_LENGTH = 60
 MESSAGE_MAX_CHARS = 2000
 TIMEOUT_S = 30
+
+
+class ChatTitle(BaseModel):
+    """The title for a chat conversation."""
+
+    title: str = Field(description="2 to 6 words naming the conversation's topic")
 
 
 def clean_title(raw: str) -> str | None:
@@ -57,9 +62,13 @@ class TitleGenerator:
         model = self._models.get(model_id)
         if model is None:
             return None
+        # Asked for as a tool call rather than free text: the reply has a clear field to
+        # read, and routers like openrouter/free then pick a tool-capable chat model
+        # (as plain text, it once picked a safety classifier that answered "safe").
         try:
+            structured = model.with_structured_output(ChatTitle, method="function_calling")
             response = await asyncio.wait_for(
-                model.ainvoke(
+                structured.ainvoke(
                     [SystemMessage(TITLE_PROMPT), HumanMessage(message[:MESSAGE_MAX_CHARS])]
                 ),
                 TIMEOUT_S,
@@ -68,8 +77,7 @@ class TitleGenerator:
             logger.warning("title generation failed for thread %s", thread_id, exc_info=True)
             return None
 
-        _, text = split_message(response if isinstance(response, AIMessage) else AIMessage(""))
-        title = clean_title(text)
+        title = clean_title(response.title) if isinstance(response, ChatTitle) else None
         if title is None:
             logger.warning("title generation for thread %s returned no title", thread_id)
             return None

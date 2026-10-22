@@ -27,6 +27,8 @@ class ToolPart(BaseModel):
     args: dict[str, Any]
     status: Literal["running", "success", "error"] = "running"
     result: str | None = None
+    # Structured output for the UI (e.g. create_plot's Plotly figure); not sent to the model.
+    artifact: dict[str, Any] | None = None
 
 
 # A reply in the order it happened: reasoning, tool calls and text, possibly interleaved.
