@@ -6,6 +6,7 @@ from api.config import Settings
 THREADS = "threads"
 MESSAGES = "messages"
 SIMULATIONS = "simulations"
+FILES = "files"
 
 
 def create_client(settings: Settings) -> AsyncMongoClient:
@@ -17,3 +18,4 @@ async def ensure_indexes(db: AsyncDatabase) -> None:
     await db[THREADS].create_index([("updated_at", DESCENDING)])
     await db[MESSAGES].create_index([("thread_id", ASCENDING), ("seq", ASCENDING)], unique=True)
     await db[SIMULATIONS].create_index([("thread_id", ASCENDING), ("created_at", DESCENDING)])
+    await db[FILES].create_index([("thread_id", ASCENDING)])

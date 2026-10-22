@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     openrouter_api_key: SecretStr | None = None
     # Used when a message doesn't pick a model; falls back to the first available one.
     default_model: str = "mistral-medium-3-5"
+    # Name new chats from their first message (one extra model request per chat).
+    auto_title: bool = True
     # "high" streams the model's thinking before its answer; "none" skips it.
     reasoning_effort: Literal["high", "none"] = "high"
 
@@ -29,6 +31,11 @@ class Settings(BaseSettings):
 
     # HTTP
     cors_origins: list[str] = ["http://localhost:3000"]
+
+    # Attachments (text files only for now)
+    file_max_bytes: int = 1_000_000
+    # Each file's text is cut to this many characters in the model's context.
+    file_context_max_chars: int = 20_000
 
     # Logging
     log_level: str = "INFO"

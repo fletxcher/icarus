@@ -7,6 +7,7 @@ from pymongo.asynchronous.database import AsyncDatabase
 
 from api.chats.schemas import Message, MessagePart, MessageStatus, Role, Thread
 from api.db import MESSAGES, THREADS
+from api.files.schemas import Attachment
 
 
 def _now() -> datetime:
@@ -33,6 +34,7 @@ class ChatRepository:
         doc = {
             "_id": str(uuid4()),
             "title": title,
+            "auto_title": True,
             "created_at": now,
             "updated_at": now,
             "message_seq": 0,
@@ -45,7 +47,9 @@ class ChatRepository:
     ) -> Thread | None:
         changes: dict[str, Any] = {}
         if title is not None:
+            # A title the user chose is never replaced by a generated one.
             changes["title"] = title
+            changes["auto_title"] = False
         if pinned is not None:
             changes["pinned_at"] = _now() if pinned else None
         if not changes:
@@ -54,6 +58,14 @@ class ChatRepository:
             {"_id": thread_id}, {"$set": changes}, return_document=ReturnDocument.AFTER
         )
         return Thread.model_validate(doc) if doc else None
+
+    async def set_auto_title(self, thread_id: str, title: str) -> bool:
+        """Applies a generated title, unless the user has renamed the thread meanwhile."""
+        result = await self._threads.update_one(
+            {"_id": thread_id, "auto_title": True},
+            {"$set": {"title": title, "auto_title": False}},
+        )
+        return result.modified_count == 1
 
     async def delete_thread(self, thread_id: str) -> bool:
         result = await self._threads.delete_one({"_id": thread_id})
@@ -72,6 +84,7 @@ class ChatRepository:
         *,
         status: MessageStatus = "done",
         model: str | None = None,
+        attachments: list[Attachment] | None = None,
     ) -> Message:
         now = _now()
         # A per-thread counter orders messages; timestamps can collide within a millisecond.
@@ -91,6 +104,7 @@ class ChatRepository:
             "status": status,
             "model": model,
             "parts": [{"type": "text", "text": content}] if content else [],
+            "attachments": [attachment.model_dump() for attachment in attachments or []],
             "created_at": now,
         }
         await self._messages.insert_one(doc)

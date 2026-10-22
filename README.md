@@ -92,7 +92,9 @@ vm/run_case.sh          Placeholder CFD entrypoint, installed on the VM by setup
 | PATCH | `/api/threads/{id}` | Rename / pin `{title?, pinned?}` |
 | DELETE | `/api/threads/{id}` | Delete thread and messages |
 | DELETE | `/api/threads/{id}/messages/{message_id}` | Delete a message and all later ones |
-| POST | `/api/threads/{id}/messages` | Send `{content, model?}` and stream the reply (SSE) |
+| POST | `/api/threads/{id}/messages` | Send `{content, model?, attachments?}` and stream the reply (SSE) |
+| POST | `/api/files` | Upload a text file (multipart `file`) to attach; returns its id |
+| DELETE | `/api/files/{id}` | Remove a file that hasn't been sent yet |
 | GET | `/api/simulations/{job_id}` | CFD job status (refreshes from the VM) |
 | GET | `/api/models`, `/api/health` | |
 
@@ -110,6 +112,7 @@ vm/run_case.sh          Placeholder CFD entrypoint, installed on the VM by setup
 | `token` | `{text}` |
 | `tool_call` | `{id, name, args}` |
 | `tool_result` | `{id, name, status, content}` (status `success` or `error`) |
+| `title` | `{title}` (first message of a chat only) |
 | `done` | `{message_id}` |
 | `error` | `{message}` |
 
@@ -123,6 +126,22 @@ result so it can explain or retry.
 The agent is rebuilt from stored messages each turn, so edits and regenerations apply
 naturally. Reasoning and tool calls from earlier turns aren't replayed; their outcomes
 live in the assistant's text.
+
+### Chat titles
+
+A new chat starts with its first message as a placeholder title. Alongside the first
+reply, the model is asked for a 2–6 word title; it's saved and streamed as a `title`
+event, so the sidebar updates live. Renaming a chat stops this from ever replacing your
+title. It costs one extra model request per new chat; `AUTO_TITLE=false` turns it off.
+
+### Attachments
+
+The **+** button in the composer (or dropping files onto it) uploads files right away;
+they're sent with the next message. Only text files are accepted for now (airfoil
+`.dat` coordinates, `.csv`, `.txt`, `.json`, ...), up to `FILE_MAX_BYTES` (1 MB) each and
+10 per message. Their contents are added to the user's message in the model's context,
+cut at `FILE_CONTEXT_MAX_CHARS` (20,000) characters per file. Files are stored in the
+`files` collection and deleted with their chat.
 
 ### Models and reasoning
 

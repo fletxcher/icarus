@@ -42,6 +42,7 @@ export function applyStreamEvent(message: Message, event: StreamEvent): Message 
     case "error":
       return { ...message, status: "error", error: event.message };
     case "start":
+    case "title":
       return message;
   }
 }

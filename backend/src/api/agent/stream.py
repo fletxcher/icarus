@@ -6,6 +6,7 @@ Events, in order:
 - `token`        {"text"}                                streamed answer text
 - `tool_call`    {"id", "name", "args"}                  the agent invoked a tool
 - `tool_result`  {"id", "name", "status", "content"}     that tool finished ("success"/"error")
+- `title`        {"title"}                               the chat was named (first turn only)
 - `done`         {"message_id"}                          reply complete
 - `error`        {"message"}                             the turn failed
 """
@@ -33,21 +34,39 @@ from api.chats.schemas import (
     ToolPart,
 )
 from api.config import get_settings
+from api.files.repository import FileRepository
 
 logger = logging.getLogger(__name__)
 
 
-def to_langchain(messages: list[Message]) -> list[BaseMessage]:
+def with_attachments(message: Message, texts: dict[str, str], max_chars: int) -> str:
+    """The user's text followed by each attached file's contents."""
+    blocks = [message.content]
+    for attachment in message.attachments:
+        text = texts.get(attachment.id)
+        if text is None:
+            blocks.append(f"[Attached file {attachment.name} is no longer available.]")
+            continue
+        if len(text) > max_chars:
+            text = f"{text[:max_chars]}\n[... truncated, {len(text) - max_chars} more characters]"
+        blocks.append(f"<file name={attachment.name!r}>\n{text}\n</file>")
+    return "\n\n".join(blocks)
+
+
+def to_langchain(
+    messages: list[Message], file_texts: dict[str, str], *, file_max_chars: int
+) -> list[BaseMessage]:
     """Rebuilds the conversation from stored messages.
 
     Stored history is the source of truth so edits and regenerations (which
     truncate it) apply to the next turn. Reasoning and tool calls from earlier
     turns are not replayed; their outcomes live in the assistant's text.
+    Attached files are inlined into the user message they came with.
     """
     history: list[BaseMessage] = []
     for message in messages:
         if message.role == "user":
-            history.append(HumanMessage(message.content))
+            history.append(HumanMessage(with_attachments(message, file_texts, file_max_chars)))
         elif message.content:
             history.append(AIMessage(message.content))
     return history
@@ -144,11 +163,17 @@ class ReplyBuilder:
 async def stream_turn(
     agent: CompiledStateGraph,
     chats: ChatRepository,
+    files: FileRepository,
     *,
     thread_id: str,
     model: str,
+    title: asyncio.Task[str | None] | None = None,
 ) -> AsyncIterator[ServerSentEvent]:
-    history = to_langchain(await chats.list_messages(thread_id))
+    settings = get_settings()
+    messages = await chats.list_messages(thread_id)
+    file_ids = [attachment.id for message in messages for attachment in message.attachments]
+    file_texts = await files.texts(file_ids) if file_ids else {}
+    history = to_langchain(messages, file_texts, file_max_chars=settings.file_context_max_chars)
     reply = await chats.add_message(thread_id, "assistant", "", status="streaming", model=model)
     logger.info(
         "turn start: thread=%s reply=%s model=%s history=%d messages",
@@ -165,7 +190,7 @@ async def stream_turn(
     error_message: str | None = None
     config: RunnableConfig = {
         "configurable": {"thread_id": thread_id, "model": model},
-        "callbacks": [AgentLoggingHandler(payload_max_chars=get_settings().log_body_max_chars)],
+        "callbacks": [AgentLoggingHandler(payload_max_chars=settings.log_body_max_chars)],
     }
 
     try:
@@ -203,6 +228,10 @@ async def stream_turn(
                                 "content": message.text,
                             },
                         )
+
+        # The title is generated alongside the reply; report it before finishing.
+        if title is not None and (generated := await title):
+            yield ServerSentEvent(event="title", data={"title": generated})
 
         status = "done"
         yield ServerSentEvent(event="done", data={"message_id": reply.id})

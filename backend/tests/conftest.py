@@ -12,6 +12,7 @@ from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
 from api.agent.graph import build_agent
+from api.agent.titles import TitleGenerator
 from api.config import Settings, get_settings
 
 
@@ -62,6 +63,8 @@ def client(mongo_db_name: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     monkeypatch.setenv("MONGODB_DB", mongo_db_name)
     monkeypatch.setenv("MISTRAL_API_TOKEN", "test-token")
     monkeypatch.setenv("DEFAULT_MODEL", "mistral-medium-3-5")
+    # Off unless a test plugs in a scripted title model (see use_scripted_titles).
+    monkeypatch.setenv("AUTO_TITLE", "false")
     get_settings.cache_clear()
 
     from api.app import create_app
@@ -76,4 +79,11 @@ def use_scripted_agent(client: TestClient, replies: list[AIMessage]) -> Scripted
     client.app.state.services.agent = build_agent(
         {"mistral-medium-3-5": model}, [add], default_model="mistral-medium-3-5"
     )
+    return model
+
+
+def use_scripted_titles(client: TestClient, replies: list[AIMessage]) -> ScriptedModel:
+    services = client.app.state.services
+    model = ScriptedModel(replies=replies, seen=[])
+    services.titles = TitleGenerator(services.chats, {"mistral-medium-3-5": model})
     return model

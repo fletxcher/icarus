@@ -9,12 +9,14 @@ from pymongo.asynchronous.database import AsyncDatabase
 
 from api.agent.graph import build_agent
 from api.agent.models import ModelOption, available_models, create_chat_model
+from api.agent.titles import TitleGenerator
 from api.agent.tools import build_tools
 from api.chats.repository import ChatRepository
 from api.compute.runner import CommandResult, CommandRunner, LocalRunner, SSHRunner
 from api.compute.simulations import SimulationService
 from api.compute.xfoil import XfoilService
 from api.config import Settings
+from api.files.repository import FileRepository
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,7 @@ class UnconfiguredRunner:
 @dataclass
 class Services:
     chats: ChatRepository
+    files: FileRepository
     simulations: SimulationService
     vm: CommandRunner
     # Models whose provider has an API key; the only ones offered.
@@ -54,6 +57,8 @@ class Services:
     default_model: str
     # None until a provider key is set; chat storage still works without it.
     agent: CompiledStateGraph | None
+    # None when AUTO_TITLE is off or no provider is configured.
+    titles: TitleGenerator | None
 
     async def close(self) -> None:
         if isinstance(self.vm, SSHRunner):
@@ -74,7 +79,10 @@ def build_services(settings: Settings, db: AsyncDatabase) -> Services:
     )
 
     models = available_models(settings)
+    chats = ChatRepository(db)
+    files = FileRepository(db)
     agent = None
+    titles = None
     default_model = settings.default_model
     if not models:
         logger.warning(
@@ -90,17 +98,20 @@ def build_services(settings: Settings, db: AsyncDatabase) -> Services:
             )
             default_model = models[0].id
         logger.info("models available: %s", ", ".join(option.id for option in models))
+        chat_models = {option.id: create_chat_model(option, settings) for option in models}
         agent = build_agent(
-            {option.id: create_chat_model(option, settings) for option in models},
-            build_tools(xfoil, simulations),
-            default_model=default_model,
+            chat_models, build_tools(xfoil, simulations), default_model=default_model
         )
+        if settings.auto_title:
+            titles = TitleGenerator(chats, chat_models)
 
     return Services(
-        chats=ChatRepository(db),
+        chats=chats,
+        files=files,
         simulations=simulations,
         vm=vm,
         models=models,
         default_model=default_model,
         agent=agent,
+        titles=titles,
     )

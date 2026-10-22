@@ -14,6 +14,7 @@ dependencies = [
     "langgraph>=1.2.16",
     "pydantic-settings>=2.16.1",
     "pymongo>=4.19.0",
+    "python-multipart>=0.0.32",
     "uvicorn[standard]>=0.54.0",
 ]
 

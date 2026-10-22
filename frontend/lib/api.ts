@@ -1,4 +1,5 @@
 import type {
+  Attachment,
   Model,
   StreamEvent,
   Thread,
@@ -41,6 +42,17 @@ export const api = {
   updateThread: (id: string, changes: { title?: string; pinned?: boolean }) =>
     request<Thread>(`/threads/${id}`, { method: "PATCH", body: JSON.stringify(changes) }),
   deleteThread: (id: string) => request<void>(`/threads/${id}`, { method: "DELETE" }),
+  /** Stores a file to send with a message; only text files are accepted for now. */
+  uploadFile: async (file: File): Promise<Attachment> => {
+    const form = new FormData();
+    form.append("file", file);
+    // No JSON Content-Type here: the browser sets the multipart boundary itself.
+    const response = await fetch(`${API_URL}/api/files`, { method: "POST", body: form });
+    if (!response.ok) throw await toApiError(response);
+    return response.json();
+  },
+  /** Removes a file that hasn't been sent yet. */
+  deleteFile: (id: string) => request<void>(`/files/${id}`, { method: "DELETE" }),
   /** Deletes a message and every later one (before an edit or regenerate). */
   truncateFrom: (threadId: string, messageId: string) =>
     request<void>(`/threads/${threadId}/messages/${messageId}`, { method: "DELETE" }),
@@ -52,7 +64,7 @@ export const api = {
  */
 export async function* streamReply(
   threadId: string,
-  body: { content?: string; model?: string },
+  body: { content?: string; model?: string; attachments?: string[] },
   signal: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
   const response = await fetch(`${API_URL}/api/threads/${threadId}/messages`, {

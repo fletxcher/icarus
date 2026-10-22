@@ -59,6 +59,7 @@ dependencies = [
     { name = "langgraph" },
     { name = "pydantic-settings" },
     { name = "pymongo" },
+    { name = "python-multipart" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -78,6 +79,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=1.2.16" },
     { name = "pydantic-settings", specifier = ">=2.16.1" },
     { name = "pymongo", specifier = ">=4.19.0" },
+    { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
 ]
 

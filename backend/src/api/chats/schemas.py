@@ -1,18 +1,13 @@
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
+
+from api.files.schemas import Attachment
+from api.mongo import MongoModel
 
 Role = Literal["user", "assistant"]
 MessageStatus = Literal["streaming", "done", "stopped", "error"]
-
-
-class MongoModel(BaseModel):
-    """Reads Mongo's `_id` into `id`; responses still serialize it as `id`."""
-
-    model_config = ConfigDict(validate_by_name=True)
-
-    id: str = Field(validation_alias="_id")
 
 
 class TextPart(BaseModel):
@@ -45,6 +40,7 @@ class Message(MongoModel):
     status: MessageStatus
     model: str | None = None
     parts: list[MessagePart] = []
+    attachments: list[Attachment] = []
     # Why the reply failed, when status is "error".
     error: str | None = None
     created_at: datetime
@@ -52,6 +48,8 @@ class Message(MongoModel):
 
 class Thread(MongoModel):
     title: str
+    # True while the title is a placeholder that may be replaced by a generated one.
+    auto_title: bool = False
     created_at: datetime
     updated_at: datetime
     pinned_at: datetime | None = None
@@ -75,3 +73,5 @@ class MessageCreate(BaseModel):
 
     content: str | None = Field(default=None, min_length=1)
     model: str | None = None
+    # Ids from POST /api/files, sent along with `content`.
+    attachments: list[str] = Field(default=[], max_length=10)

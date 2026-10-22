@@ -1,8 +1,18 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import type { Message, Model, Thread } from "@/lib/chat/types";
+import type { Attachment, Message, Model, Thread } from "@/lib/chat/types";
 
 export type LoadStatus = "loading" | "ready" | "error";
+
+/** A file added to the composer; uploaded right away, sent with the next message. */
+export type PendingFile = {
+  localId: string;
+  name: string;
+  size: number;
+  status: "uploading" | "ready" | "error";
+  attachment?: Attachment;
+  error?: string;
+};
 
 type ChatState = {
   // Server data, loaded from the API.
@@ -15,6 +25,7 @@ type ChatState = {
   activeThreadId: string | null;
   model: string | null;
   draft: string;
+  pendingFiles: PendingFile[];
   /** Set while a reply is streaming. */
   controller: AbortController | null;
 };
@@ -30,6 +41,10 @@ type ChatActions = {
   setActiveThread: (id: string | null) => void;
   setModel: (model: string) => void;
   setDraft: (draft: string) => void;
+  addPendingFile: (file: PendingFile) => void;
+  updatePendingFile: (localId: string, changes: Partial<PendingFile>) => void;
+  removePendingFile: (localId: string) => void;
+  clearPendingFiles: () => void;
   setController: (controller: AbortController | null) => void;
 };
 
@@ -43,6 +58,7 @@ export const useChatStore = create<ChatState & ChatActions>()(
       activeThreadId: null,
       model: null,
       draft: "",
+      pendingFiles: [],
       controller: null,
 
       setThreads: (threads, threadsStatus = "ready") => set({ threads, threadsStatus }),
@@ -73,6 +89,18 @@ export const useChatStore = create<ChatState & ChatActions>()(
       setActiveThread: (activeThreadId) => set({ activeThreadId }),
       setModel: (model) => set({ model }),
       setDraft: (draft) => set({ draft }),
+      addPendingFile: (file) => set((state) => ({ pendingFiles: [...state.pendingFiles, file] })),
+      updatePendingFile: (localId, changes) =>
+        set((state) => ({
+          pendingFiles: state.pendingFiles.map((file) =>
+            file.localId === localId ? { ...file, ...changes } : file,
+          ),
+        })),
+      removePendingFile: (localId) =>
+        set((state) => ({
+          pendingFiles: state.pendingFiles.filter((file) => file.localId !== localId),
+        })),
+      clearPendingFiles: () => set({ pendingFiles: [] }),
       setController: (controller) => set({ controller }),
     }),
     {

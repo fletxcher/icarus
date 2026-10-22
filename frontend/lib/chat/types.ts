@@ -22,6 +22,14 @@ export type ToolPart = {
 /** A reply in the order it happened: reasoning, tool calls and text, possibly interleaved. */
 export type MessagePart = TextPart | ReasoningPart | ToolPart;
 
+/** A file sent with a message (text files only for now). */
+export type Attachment = {
+  id: string;
+  name: string;
+  size: number;
+  content_type: string;
+};
+
 export type Message = {
   id: string;
   thread_id: string;
@@ -30,6 +38,7 @@ export type Message = {
   status: MessageStatus;
   model: string | null;
   parts: MessagePart[];
+  attachments: Attachment[];
   /** Why the reply failed, when status is "error". */
   error: string | null;
   created_at: string;
@@ -38,6 +47,8 @@ export type Message = {
 export type Thread = {
   id: string;
   title: string;
+  /** True while the title is a placeholder the backend may replace with a generated one. */
+  auto_title: boolean;
   created_at: string;
   updated_at: string;
   pinned_at: string | null;
@@ -62,5 +73,6 @@ export type StreamEvent =
   | { type: "token"; text: string }
   | { type: "tool_call"; id: string; name: string; args: Record<string, unknown> }
   | { type: "tool_result"; id: string; name: string; status: "success" | "error"; content: string }
+  | { type: "title"; title: string }
   | { type: "done"; message_id: string }
   | { type: "error"; message: string };

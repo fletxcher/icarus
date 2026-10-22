@@ -11,6 +11,7 @@ from api.compute import router as simulations_router
 from api.config import get_settings
 from api.db import create_client, ensure_indexes
 from api.dependencies import ServicesDep
+from api.files import router as files_router
 from api.log_config import configure_logging
 from api.middleware import RequestLoggingMiddleware
 from api.services import build_services
@@ -49,6 +50,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 api = APIRouter(prefix="/api")
 api.include_router(chats_router.router)
 api.include_router(simulations_router.router)
+api.include_router(files_router.router)
 
 
 @api.get("/health", tags=["meta"])

@@ -20,10 +20,10 @@ from pydantic import BaseModel, Field
 from pymongo import ReturnDocument
 from pymongo.asynchronous.database import AsyncDatabase
 
-from api.chats.schemas import MongoModel
 from api.compute.runner import CommandRunner
 from api.compute.xfoil import NacaCode
 from api.db import SIMULATIONS
+from api.mongo import MongoModel
 
 logger = logging.getLogger(__name__)
 

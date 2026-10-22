@@ -1,7 +1,7 @@
 import { toast } from "sonner";
 import { ApiError, api, streamReply } from "@/lib/api";
 import { applyStreamEvent } from "@/lib/chat/apply-event";
-import type { Message } from "@/lib/chat/types";
+import type { Attachment, Message } from "@/lib/chat/types";
 import { useChatStore } from "./chat-store";
 
 const TITLE_MAX_LENGTH = 60;
@@ -79,8 +79,31 @@ export async function deleteThread(threadId: string) {
   }
 }
 
+/** Uploads files picked in the composer; each shows its own progress or error. */
+export async function addFiles(files: File[]) {
+  await Promise.all(
+    files.map(async (file) => {
+      const localId = crypto.randomUUID();
+      store().addPendingFile({ localId, name: file.name, size: file.size, status: "uploading" });
+      try {
+        const attachment = await api.uploadFile(file);
+        store().updatePendingFile(localId, { status: "ready", attachment });
+      } catch (error) {
+        store().updatePendingFile(localId, { status: "error", error: errorMessage(error) });
+      }
+    }),
+  );
+}
+
+/** Takes a file out of the composer, deleting it on the server if it was uploaded. */
+export async function removeFile(localId: string) {
+  const file = store().pendingFiles.find((pending) => pending.localId === localId);
+  store().removePendingFile(localId);
+  if (file?.attachment) await api.deleteFile(file.attachment.id).catch(() => undefined);
+}
+
 /** Streams one assistant reply into the thread, then syncs with what the server saved. */
-async function runTurn(threadId: string, content?: string) {
+async function runTurn(threadId: string, content?: string, attachments: Attachment[] = []) {
   const { model, setController, updateMessages } = store();
   const controller = new AbortController();
   setController(controller);
@@ -95,6 +118,7 @@ async function runTurn(threadId: string, content?: string) {
       status: "done",
       model: null,
       parts: [{ type: "text", text: content }],
+      attachments,
       error: null,
       created_at: new Date().toISOString(),
     };
@@ -108,7 +132,12 @@ async function runTurn(threadId: string, content?: string) {
     );
 
   try {
-    for await (const event of streamReply(threadId, { content, model: model ?? undefined }, controller.signal)) {
+    const body = {
+      content,
+      model: model ?? undefined,
+      attachments: attachments.map((attachment) => attachment.id),
+    };
+    for await (const event of streamReply(threadId, body, controller.signal)) {
       if (event.type === "start") {
         replyId = event.message_id;
         const reply: Message = {
@@ -119,10 +148,13 @@ async function runTurn(threadId: string, content?: string) {
           status: "streaming",
           model,
           parts: [],
+          attachments: [],
           error: null,
           created_at: new Date().toISOString(),
         };
         updateMessages(threadId, (messages) => [...messages, reply]);
+      } else if (event.type === "title") {
+        renameLocally(threadId, event.title);
       } else {
         updateReply((message) => applyStreamEvent(message, event));
       }
@@ -139,6 +171,11 @@ async function runTurn(threadId: string, content?: string) {
     setController(null);
     await syncThread(threadId, replyId, controller.signal.aborted);
   }
+}
+
+function renameLocally(threadId: string, title: string) {
+  const thread = store().threads.find((t) => t.id === threadId);
+  if (thread) store().upsertThread({ ...thread, title, auto_title: false });
 }
 
 /** Marks a reply stopped the way the backend saves it: unfinished tools become errors. */
@@ -174,7 +211,9 @@ async function syncThread(threadId: string, replyId: string | null, stopped: boo
 
 export async function sendMessage(text: string) {
   const content = text.trim();
-  if (!content || store().controller) return;
+  const { pendingFiles, controller } = store();
+  if (!content || controller || pendingFiles.some((file) => file.status === "uploading")) return;
+  const attachments = pendingFiles.flatMap((file) => (file.attachment ? [file.attachment] : []));
 
   let threadId = store().activeThreadId;
   if (!threadId) {
@@ -191,7 +230,8 @@ export async function sendMessage(text: string) {
   }
 
   store().setDraft("");
-  await runTurn(threadId, content);
+  store().clearPendingFiles();
+  await runTurn(threadId, content, attachments);
 }
 
 /** Drops a message and everything after it on both sides. */
@@ -210,10 +250,15 @@ async function truncateFrom(threadId: string, messageId: string): Promise<boolea
 }
 
 /** Replaces a user message (and everything after it) with an edited version. */
-export async function editMessage(threadId: string, messageId: string, text: string) {
+export async function editMessage(
+  threadId: string,
+  messageId: string,
+  text: string,
+  attachments: Attachment[],
+) {
   const content = text.trim();
   if (!content || store().controller) return;
-  if (await truncateFrom(threadId, messageId)) await runTurn(threadId, content);
+  if (await truncateFrom(threadId, messageId)) await runTurn(threadId, content, attachments);
 }
 
 /** Drops an assistant reply (and everything after it) and generates a new one. */
