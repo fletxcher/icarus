@@ -6,7 +6,12 @@ import type {
   ThreadWithMessages,
 } from "@/lib/chat/types";
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+// Deployed on Vercel, the backend service is routed under /api on the same domain, so
+// requests are same-origin (empty base). In local development the backend runs on its own
+// port. NEXT_PUBLIC_API_URL overrides either, e.g. to point at a backend elsewhere.
+export const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ??
+  (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "");
 
 export class ApiError extends Error {
   constructor(

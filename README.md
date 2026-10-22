@@ -241,10 +241,19 @@ crash, `XFOIL_DISPLAY=none` turns its graphics off instead.
 
 ### Deployment notes
 
-- Vercel can host FastAPI (`api.app:app`), but functions have a maximum duration.
-  Chat streaming and XFOIL calls fit within it; CFD is already asynchronous.
-- Set `CORS_ORIGINS` to the frontend's deployed URL, and `NEXT_PUBLIC_API_URL` on the
-  frontend to the API's.
+- **Vercel services.** The root `vercel.json` deploys `frontend/` (Next.js) and
+  `backend/` (FastAPI) as two services on one domain: `/api/*` goes to the backend,
+  everything else to the frontend. The backend receives the original path (it sees
+  `/api/threads`, not `/threads`), which matches its routes. No service calls another on
+  the server (the browser calls the API), so no bindings are declared.
+- In production the frontend calls the API on the same origin, so leave
+  `NEXT_PUBLIC_API_URL` and `CORS_ORIGINS` unset on Vercel. Locally the frontend defaults
+  to `http://localhost:8000` (`vercel dev` runs both services together instead).
+- Vercel functions have a maximum duration (300 s on Hobby). Chat streaming and XFOIL
+  calls fit within it; CFD is already asynchronous.
+- Set the backend's variables (`MONGODB_URI`, provider keys, `VM_*`, ...) in the Vercel
+  project. `MONGODB_URI` must be reachable from Vercel, e.g. MongoDB Atlas; a local
+  Docker container isn't. XFOIL can't be installed on Vercel, so use `XFOIL_RUNNER=vm`.
 - There's no authentication yet. Add it before exposing the API publicly.
 
 ### Development
