@@ -11,8 +11,8 @@ from langchain_core.tools import tool
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
-from backend.agent.graph import build_agent
-from backend.config import get_settings
+from api.agent.graph import build_agent
+from api.config import get_settings
 
 
 class ScriptedModel(BaseChatModel):
@@ -58,9 +58,11 @@ def mongo_db_name() -> Iterator[str]:
 def client(mongo_db_name: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     monkeypatch.setenv("MONGODB_DB", mongo_db_name)
     monkeypatch.setenv("MISTRAL_API_TOKEN", "test-token")
+    # Pin values the tests rely on, whatever the local .env says.
+    monkeypatch.setenv("DEFAULT_MODEL", "mistral-medium-3-5")
     get_settings.cache_clear()
 
-    from backend.app import create_app
+    from api.app import create_app
 
     with TestClient(create_app()) as test_client:
         yield test_client
@@ -70,6 +72,6 @@ def client(mongo_db_name: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
 def use_scripted_agent(client: TestClient, replies: list[AIMessage]) -> ScriptedModel:
     model = ScriptedModel(replies=replies, seen=[])
     client.app.state.services.agent = build_agent(
-        {"mistral-medium-latest": model}, [add], default_model="mistral-medium-latest"
+        {"mistral-medium-3-5": model}, [add], default_model="mistral-medium-3-5"
     )
     return model

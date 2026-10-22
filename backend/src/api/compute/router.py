@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, status
 
-from backend.compute.simulations import Simulation
-from backend.dependencies import ServicesDep
+from api.compute.simulations import Simulation
+from api.dependencies import ServicesDep
 
 router = APIRouter(prefix="/simulations", tags=["simulations"])
 

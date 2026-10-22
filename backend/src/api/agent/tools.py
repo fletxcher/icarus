@@ -4,8 +4,8 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, Field
 
-from backend.compute.simulations import CfdCase, Simulation, SimulationService
-from backend.compute.xfoil import Polar, PolarRequest, XfoilService
+from api.compute.simulations import CfdCase, Simulation, SimulationService
+from api.compute.xfoil import Polar, PolarRequest, XfoilService
 
 TOP_CANDIDATES = 5
 

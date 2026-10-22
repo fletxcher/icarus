@@ -1,9 +1,12 @@
 import json
 
+import httpx
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.tools import tool
 
-from tests.conftest import use_scripted_agent
+from api.agent.graph import build_agent
+from tests.conftest import ScriptedModel, use_scripted_agent
 
 
 def read_events(client: TestClient, thread_id: str, body: dict) -> list[tuple[str, dict]]:
@@ -53,14 +56,16 @@ def test_send_message_streams_tool_calls_and_persists_reply(client: TestClient):
 
     names = [name for name, _ in events]
     assert names == ["start", "tool_call", "tool_result", "token", "done"]
-    assert events[2][1] == {"id": "call-1", "name": "add", "content": "5"}
+    assert events[2][1] == {"id": "call-1", "name": "add", "status": "success", "content": "5"}
 
     messages = client.get(f"/api/threads/{thread_id}").json()["messages"]
     assert [(m["role"], m["content"], m["status"]) for m in messages] == [
         ("user", "What is 2 + 3?", "done"),
         ("assistant", "The sum is 5.", "done"),
     ]
-    assert messages[1]["tool_calls"][0]["result"] == "5"
+    assert [part["type"] for part in messages[1]["parts"]] == ["tool", "text"]
+    assert messages[1]["parts"][0]["status"] == "success"
+    assert messages[1]["parts"][0]["result"] == "5"
 
 
 def test_regenerate_replays_history_after_truncation(client: TestClient):
@@ -96,3 +101,70 @@ def test_send_message_without_mistral_token_is_503(client: TestClient):
     thread_id = create_thread(client)
     response = client.post(f"/api/threads/{thread_id}/messages", json={"content": "hi"})
     assert response.status_code == 503
+
+
+def test_provider_errors_are_explained_to_the_user(client: TestClient):
+    class RateLimitedModel(ScriptedModel):
+        async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
+            request = httpx.Request("POST", "https://api.mistral.ai/v1/chat/completions")
+            response = httpx.Response(429, request=request)
+            raise httpx.HTTPStatusError("rate limited", request=request, response=response)
+
+    model = RateLimitedModel(replies=[], seen=[])
+    client.app.state.services.agent = build_agent(
+        {"mistral-medium-3-5": model}, [], default_model="mistral-medium-3-5"
+    )
+    thread_id = create_thread(client)
+
+    events = read_events(client, thread_id, {"content": "hi"})
+
+    assert events[-1][0] == "error"
+    assert "rate limit" in events[-1][1]["message"]
+    reply = client.get(f"/api/threads/{thread_id}").json()["messages"][1]
+    assert reply["status"] == "error"
+    assert reply["error"] == events[-1][1]["message"]
+
+
+def test_failing_tool_is_reported_to_the_model_and_the_turn_completes(client: TestClient):
+    @tool
+    async def explode(x: int) -> str:
+        """Always fails."""
+        raise RuntimeError("solver diverged")
+
+    model = ScriptedModel(
+        replies=[
+            AIMessage("", tool_calls=[{"id": "call-1", "name": "explode", "args": {"x": 1}}]),
+            AIMessage("The solver failed."),
+        ],
+        seen=[],
+    )
+    client.app.state.services.agent = build_agent(
+        {"mistral-medium-3-5": model}, [explode], default_model="mistral-medium-3-5"
+    )
+    thread_id = create_thread(client)
+
+    events = read_events(client, thread_id, {"content": "Run it"})
+
+    assert [name for name, _ in events][-1] == "done"
+    result = next(data for name, data in events if name == "tool_result")
+    assert result["status"] == "error"
+    assert "solver diverged" in result["content"]
+    part = client.get(f"/api/threads/{thread_id}").json()["messages"][1]["parts"][0]
+    assert part["status"] == "error"
+
+
+def test_reasoning_blocks_are_streamed_and_stored(client: TestClient):
+    thinking = [{"type": "thinking", "thinking": [{"type": "text", "text": "Consider Re."}]}]
+    use_scripted_agent(client, [AIMessage([*thinking, {"type": "text", "text": "Use 2412."}])])
+    thread_id = create_thread(client)
+
+    events = read_events(client, thread_id, {"content": "Pick an airfoil"})
+
+    assert ("reasoning", {"text": "Consider Re."}) in events
+    assert ("token", {"text": "Use 2412."}) in events
+    message = client.get(f"/api/threads/{thread_id}").json()["messages"][1]
+    assert message["content"] == "Use 2412."
+    assert message["parts"] == [
+        {"type": "reasoning", "text": "Consider Re."},
+        {"type": "text", "text": "Use 2412."},
+    ]

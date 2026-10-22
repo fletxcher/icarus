@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
-from backend.services import Services
+from api.services import Services
 
 
 def get_services(request: Request) -> Services:

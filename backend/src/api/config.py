@@ -17,7 +17,9 @@ class Settings(BaseSettings):
 
     # Mistral
     mistral_api_token: SecretStr | None = None
-    default_model: str = "mistral-medium-latest"
+    default_model: str = "mistral-medium-3-5"
+    # "high" streams the model's thinking before its answer; "none" skips it.
+    reasoning_effort: Literal["high", "none"] = "high"
 
     # MongoDB
     mongodb_uri: str = "mongodb://localhost:27017"
@@ -25,6 +27,11 @@ class Settings(BaseSettings):
 
     # HTTP
     cors_origins: list[str] = ["http://localhost:3000"]
+
+    # Logging
+    log_level: str = "INFO"
+    # Request/response bodies and tool payloads longer than this are truncated in logs.
+    log_body_max_chars: int = 2000
 
     # Simulation VM (OCI), reached over SSH
     vm_host: str | None = None

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,11 +15,27 @@ class MongoModel(BaseModel):
     id: str = Field(validation_alias="_id")
 
 
-class ToolCall(BaseModel):
+class TextPart(BaseModel):
+    type: Literal["text"] = "text"
+    text: str
+
+
+class ReasoningPart(BaseModel):
+    type: Literal["reasoning"] = "reasoning"
+    text: str
+
+
+class ToolPart(BaseModel):
+    type: Literal["tool"] = "tool"
     id: str
     name: str
     args: dict[str, Any]
+    status: Literal["running", "success", "error"] = "running"
     result: str | None = None
+
+
+# A reply in the order it happened: reasoning, tool calls and text, possibly interleaved.
+MessagePart = Annotated[TextPart | ReasoningPart | ToolPart, Field(discriminator="type")]
 
 
 class Message(MongoModel):
@@ -28,7 +44,9 @@ class Message(MongoModel):
     content: str
     status: MessageStatus
     model: str | None = None
-    tool_calls: list[ToolCall] = []
+    parts: list[MessagePart] = []
+    # Why the reply failed, when status is "error".
+    error: str | None = None
     created_at: datetime
 
 

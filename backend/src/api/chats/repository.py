@@ -5,8 +5,8 @@ from uuid import uuid4
 from pymongo import ASCENDING, DESCENDING, ReturnDocument
 from pymongo.asynchronous.database import AsyncDatabase
 
-from backend.chats.schemas import Message, MessageStatus, Role, Thread, ToolCall
-from backend.db import MESSAGES, THREADS
+from api.chats.schemas import Message, MessagePart, MessageStatus, Role, Thread
+from api.db import MESSAGES, THREADS
 
 
 def _now() -> datetime:
@@ -90,7 +90,7 @@ class ChatRepository:
             "content": content,
             "status": status,
             "model": model,
-            "tool_calls": [],
+            "parts": [{"type": "text", "text": content}] if content else [],
             "created_at": now,
         }
         await self._messages.insert_one(doc)
@@ -102,7 +102,8 @@ class ChatRepository:
         *,
         content: str,
         status: MessageStatus,
-        tool_calls: list[ToolCall],
+        parts: list[MessagePart],
+        error: str | None = None,
     ) -> None:
         await self._messages.update_one(
             {"_id": message_id},
@@ -110,7 +111,8 @@ class ChatRepository:
                 "$set": {
                     "content": content,
                     "status": status,
-                    "tool_calls": [call.model_dump() for call in tool_calls],
+                    "parts": [part.model_dump() for part in parts],
+                    "error": error,
                 }
             },
         )

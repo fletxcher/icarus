@@ -1,8 +1,8 @@
 import pytest
 from pydantic import ValidationError
 
-from backend.compute.runner import CommandResult
-from backend.compute.xfoil import POLAR_FILE, PolarRequest, XfoilService, build_script, parse_polar
+from api.compute.runner import CommandResult
+from api.compute.xfoil import POLAR_FILE, PolarRequest, XfoilService, build_script, parse_polar
 
 SAMPLE_POLAR = """\
        XFOIL         Version 6.99

@@ -5,16 +5,23 @@ changing `XFOIL_RUNNER` without touching tool code.
 """
 
 import asyncio
+import logging
 import shlex
 import shutil
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 import asyncssh
 
-from backend.config import Settings
+from api.config import Settings
+from api.log_config import truncate
+
+logger = logging.getLogger(__name__)
+
+STDERR_LOG_CHARS = 2000
 
 
 @dataclass(frozen=True)
@@ -26,6 +33,21 @@ class CommandResult:
     @property
     def ok(self) -> bool:
         return self.exit_code == 0
+
+
+def _log_result(where: str, command: str, result: "CommandResult", started: float) -> None:
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    if result.ok:
+        logger.info("%s command ok in %.0fms: %s", where, elapsed_ms, command)
+    else:
+        logger.warning(
+            "%s command exited %d in %.0fms: %s\nstderr: %s",
+            where,
+            result.exit_code,
+            elapsed_ms,
+            command,
+            truncate(result.stderr.strip(), STDERR_LOG_CHARS) or "(empty)",
+        )
 
 
 def _expand(path: str) -> str:
@@ -54,6 +76,8 @@ class LocalRunner:
     async def run(
         self, command: str, *, cwd: str | None = None, timeout_s: float | None = None
     ) -> CommandResult:
+        logger.debug("local run (cwd=%s): %s", cwd, command)
+        started = time.perf_counter()
         process = await asyncio.create_subprocess_shell(
             command,
             cwd=cwd,
@@ -63,10 +87,13 @@ class LocalRunner:
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout_s)
         except TimeoutError:
+            logger.error("local command timed out after %ss: %s", timeout_s, command)
             process.kill()
             await process.wait()
             raise
-        return CommandResult(process.returncode or 0, stdout.decode(), stderr.decode())
+        result = CommandResult(process.returncode or 0, stdout.decode(), stderr.decode())
+        _log_result("local", command, result, started)
+        return result
 
     async def write_file(self, path: str, content: str) -> None:
         await asyncio.to_thread(Path(path).write_text, content)
@@ -95,6 +122,7 @@ class SSHRunner:
         async with self._lock:
             if self._connection is None or self._connection.is_closed():
                 s = self._settings
+                logger.info("connecting to VM %s@%s:%d", s.vm_user, s.vm_host, s.vm_port)
                 self._connection = await asyncssh.connect(
                     s.vm_host,
                     port=s.vm_port,
@@ -104,6 +132,7 @@ class SSHRunner:
                     client_keys=[_expand(s.vm_ssh_key_path)] if s.vm_ssh_key_path else (),
                     known_hosts=_expand(s.vm_known_hosts_path) if s.vm_known_hosts_path else (),
                 )
+                logger.info("connected to VM %s", s.vm_host)
             return self._connection
 
     async def run(
@@ -112,12 +141,20 @@ class SSHRunner:
         connection = await self._connect()
         if cwd:
             command = f"cd {shlex.quote(cwd)} && {command}"
-        result = await connection.run(command, check=False, timeout=timeout_s)
-        return CommandResult(
-            result.exit_status if result.exit_status is not None else -1,
-            str(result.stdout or ""),
-            str(result.stderr or ""),
+        logger.debug("vm run: %s", command)
+        started = time.perf_counter()
+        try:
+            completed = await connection.run(command, check=False, timeout=timeout_s)
+        except (asyncssh.Error, TimeoutError):
+            logger.exception("vm command failed (connection error or timeout): %s", command)
+            raise
+        result = CommandResult(
+            completed.exit_status if completed.exit_status is not None else -1,
+            str(completed.stdout or ""),
+            str(completed.stderr or ""),
         )
+        _log_result("vm", command, result, started)
+        return result
 
     async def write_file(self, path: str, content: str) -> None:
         connection = await self._connect()

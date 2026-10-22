@@ -10,6 +10,7 @@ CFD runs take minutes to hours, so jobs are fire-and-poll rather than awaited:
 """
 
 import json
+import logging
 import shlex
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -19,10 +20,12 @@ from pydantic import BaseModel, Field
 from pymongo import ReturnDocument
 from pymongo.asynchronous.database import AsyncDatabase
 
-from backend.chats.schemas import MongoModel
-from backend.compute.runner import CommandRunner
-from backend.compute.xfoil import NacaCode
-from backend.db import SIMULATIONS
+from api.chats.schemas import MongoModel
+from api.compute.runner import CommandRunner
+from api.compute.xfoil import NacaCode
+from api.db import SIMULATIONS
+
+logger = logging.getLogger(__name__)
 
 SimulationStatus = Literal["queued", "running", "completed", "failed"]
 TERMINAL_STATUSES: set[SimulationStatus] = {"completed", "failed"}
@@ -69,6 +72,7 @@ class SimulationService:
             "updated_at": now,
         }
         await self._collection.insert_one(doc)
+        logger.info("cfd job %s queued: %s", doc["_id"], case.model_dump())
 
         job_dir = self._job_dir(doc["_id"])
         try:
@@ -82,8 +86,10 @@ class SimulationService:
             if not launch.ok:
                 raise RuntimeError(launch.stderr.strip() or "launch failed")
         except Exception as error:
+            logger.exception("cfd job %s failed to launch", doc["_id"])
             return await self._update(doc["_id"], status="failed", error=f"submit failed: {error}")
 
+        logger.info("cfd job %s launched on VM in %s", doc["_id"], job_dir)
         return await self._update(doc["_id"], status="running")
 
     async def get(self, job_id: str) -> Simulation | None:
@@ -98,9 +104,19 @@ class SimulationService:
         try:
             raw = await self._runner.read_file(f"{self._job_dir(job_id)}/status.json")
             status = json.loads(raw)
-        except (OSError, ValueError):
-            return simulation  # Not written yet, or caught mid-write.
+        except (OSError, ValueError) as error:
+            # Not written yet, or caught mid-write.
+            logger.debug("cfd job %s: status.json not readable yet (%s)", job_id, error)
+            return simulation
 
+        if status.get("status") != simulation.status:
+            logger.info(
+                "cfd job %s: %s -> %s%s",
+                job_id,
+                simulation.status,
+                status.get("status"),
+                f" (error: {status['error']})" if status.get("error") else "",
+            )
         return await self._update(
             job_id,
             status=status.get("status", simulation.status),

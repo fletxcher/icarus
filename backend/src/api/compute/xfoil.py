@@ -2,14 +2,18 @@
 
 import asyncio
 import itertools
+import logging
 import re
 import shlex
+import time
 from dataclasses import dataclass
 from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, Field
 
-from backend.compute.runner import CommandRunner
+from api.compute.runner import CommandRunner
+
+logger = logging.getLogger(__name__)
 
 POLAR_FILE = "polar.txt"
 INPUT_FILE = "input.txt"
@@ -131,6 +135,7 @@ class XfoilService:
         self._semaphore = asyncio.Semaphore(max_concurrency)
 
     async def run_polar(self, request: PolarRequest) -> Polar:
+        started = time.perf_counter()
         async with self._semaphore:
             workdir = await self._runner.make_temp_dir()
             try:
@@ -145,7 +150,19 @@ class XfoilService:
                 text = await self._runner.read_file(f"{workdir}/{POLAR_FILE}")
             finally:
                 await self._runner.remove_dir(workdir)
-        return Polar(request=request, points=parse_polar(text))
+        polar = Polar(request=request, points=parse_polar(text))
+        expected = int((request.alpha_end - request.alpha_start) / request.alpha_step) + 1
+        log = logger.info if polar.points else logger.warning
+        log(
+            "xfoil NACA %s Re=%.3g M=%g: %d/%d angles converged in %.0fms",
+            request.naca,
+            request.reynolds,
+            request.mach,
+            len(polar.points),
+            expected,
+            (time.perf_counter() - started) * 1000,
+        )
+        return polar
 
     async def search_naca4(
         self,
@@ -165,8 +182,17 @@ class XfoilService:
             for m, p, t in itertools.product(cambers, camber_positions, thicknesses)
         }
         requests = [base.model_copy(update={"naca": code}) for code in sorted(designations)]
+        logger.info("naca4 search: %d candidates at Re=%.3g", len(requests), base.reynolds)
         results = await asyncio.gather(
             *(self.run_polar(request) for request in requests), return_exceptions=True
         )
+        for request, result in zip(requests, results, strict=True):
+            if isinstance(result, BaseException):
+                logger.error(
+                    "naca4 search: NACA %s failed",
+                    request.naca,
+                    exc_info=(type(result), result, result.__traceback__),
+                )
         polars = [result for result in results if isinstance(result, Polar) and result.points]
+        logger.info("naca4 search: %d/%d candidates converged", len(polars), len(requests))
         return sorted(polars, key=_best_lift_to_drag, reverse=True)

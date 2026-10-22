@@ -6,17 +6,16 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langgraph.graph.state import CompiledStateGraph
 
-from backend.agent.models import MODEL_IDS
-from backend.agent.stream import stream_turn
-from backend.chats.schemas import (
+from api.agent.models import MODEL_IDS
+from api.agent.stream import stream_turn
+from api.chats.schemas import (
     MessageCreate,
     Thread,
     ThreadCreate,
     ThreadUpdate,
     ThreadWithMessages,
 )
-from backend.config import get_settings
-from backend.dependencies import ServicesDep
+from api.dependencies import ServicesDep
 
 router = APIRouter(prefix="/threads", tags=["threads"])
 
@@ -82,7 +81,7 @@ async def start_turn(thread_id: str, body: MessageCreate, services: ServicesDep)
     if await services.chats.get_thread(thread_id) is None:
         raise _not_found()
 
-    model = body.model or get_settings().default_model
+    model = body.model or services.default_model
     if model not in MODEL_IDS:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Unknown model {model}")
 

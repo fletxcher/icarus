@@ -10,7 +10,7 @@ from langgraph.graph import START, MessagesState, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from backend.agent.prompts import SYSTEM_PROMPT
+from api.agent.prompts import SYSTEM_PROMPT
 
 
 def build_agent(
@@ -31,7 +31,9 @@ def build_agent(
 
     graph = StateGraph(MessagesState)
     graph.add_node("agent", call_model)
-    graph.add_node("tools", ToolNode(tools))
+    # Report every tool failure back to the model (the default re-raises anything but
+    # ToolException, which would abort the turn); tracebacks are logged by the callbacks.
+    graph.add_node("tools", ToolNode(tools, handle_tool_errors=True))
     graph.add_edge(START, "agent")
     graph.add_conditional_edges("agent", tools_condition)
     graph.add_edge("tools", "agent")
