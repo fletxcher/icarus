@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+# Prepares (or cleans up) the simulation VM the Icarus backend reaches over SSH.
+#
+# Run it on the VM as the user the backend connects as (VM_USER, default "ubuntu"):
+#   ./setup.sh --install      install XFOIL + a virtual display, and the CFD job layout
+#   ./setup.sh --uninstall    remove what --install added (asks before deleting job data)
+#
+# Layout under ICARUS_HOME (default ~/icarus), matching the backend's defaults:
+#   bin/run_case.sh   CFD entrypoint (VM_CFD_SCRIPT)
+#   jobs/             one directory per CFD job (VM_WORKDIR/jobs)
+#
+# Assumes a Debian/Ubuntu VM. No CFD solver is installed yet: run_case.sh is a placeholder.
+set -euo pipefail
+
+ICARUS_HOME="${ICARUS_HOME:-$HOME/icarus}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Packages installed by --install, so --uninstall removes only those.
+MANIFEST="$ICARUS_HOME/.setup-packages"
+PACKAGES=(xfoil xvfb xauth)
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") --install | --uninstall [--yes]
+
+  --install     Install XFOIL, xvfb and xauth, and create $ICARUS_HOME with the CFD runner.
+  --uninstall   Remove packages this script installed and delete $ICARUS_HOME.
+  --yes         Don't ask before deleting $ICARUS_HOME (job data included).
+
+Set ICARUS_HOME to use a different directory (then match VM_WORKDIR/VM_CFD_SCRIPT).
+EOF
+}
+
+log() { printf '==> %s\n' "$*"; }
+
+# apt needs root; use sudo unless already root.
+as_root() {
+  if [[ $EUID -eq 0 ]]; then "$@"; else sudo "$@"; fi
+}
+
+is_installed() {
+  dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "install ok installed"
+}
+
+check_xfoil() {
+  local tmp
+  tmp="$(mktemp -d)"
+  printf 'NACA 0012\nPANE\nOPER\nVISC 1e6\nPACC\npolar.txt\n\nALFA 2\nPACC\n\nQUIT\n' > "$tmp/input.txt"
+  if (cd "$tmp" && xvfb-run -a xfoil < input.txt > output.txt 2>&1) \
+    && grep -q '^ *2\.000' "$tmp/polar.txt"; then
+    log "XFOIL check passed (NACA 0012, alpha 2, Re 1e6)"
+  else
+    log "XFOIL check FAILED; output:"
+    cat "$tmp/output.txt" >&2
+    rm -rf "$tmp"
+    return 1
+  fi
+  rm -rf "$tmp"
+}
+
+do_install() {
+  if ! command -v apt-get > /dev/null; then
+    echo "This script supports Debian/Ubuntu (apt) only." >&2
+    exit 1
+  fi
+  if [[ $EUID -eq 0 ]]; then
+    log "Running as root: files go to $ICARUS_HOME; make sure VM_USER can read them."
+  fi
+
+  local missing=()
+  for package in "${PACKAGES[@]}"; do
+    is_installed "$package" || missing+=("$package")
+  done
+
+  mkdir -p "$ICARUS_HOME/bin" "$ICARUS_HOME/jobs"
+  if ((${#missing[@]})); then
+    log "Installing ${missing[*]}"
+    as_root apt-get update -qq
+    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}"
+    printf '%s\n' "${missing[@]}" >> "$MANIFEST"
+  else
+    log "Packages already installed: ${PACKAGES[*]}"
+  fi
+
+  install -m 755 "$SCRIPT_DIR/run_case.sh" "$ICARUS_HOME/bin/run_case.sh"
+  log "Installed CFD runner at $ICARUS_HOME/bin/run_case.sh"
+
+  check_xfoil
+
+  cat <<EOF
+
+Done. Backend settings for this VM (in the repo-root .env):
+  VM_HOST=<this VM's address>
+  VM_USER=$(id -un)
+  VM_WORKDIR=$ICARUS_HOME
+  VM_CFD_SCRIPT=$ICARUS_HOME/bin/run_case.sh
+  XFOIL_RUNNER=vm      # to run XFOIL here
+EOF
+}
+
+do_uninstall() {
+  local remove=()
+  if [[ -f "$MANIFEST" ]]; then
+    mapfile -t remove < <(sort -u "$MANIFEST")
+  fi
+
+  if [[ -d "$ICARUS_HOME" ]]; then
+    local jobs
+    jobs="$(find "$ICARUS_HOME/jobs" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
+    if [[ "${ASSUME_YES:-}" != 1 ]]; then
+      read -r -p "Delete $ICARUS_HOME, including $jobs job folder(s)? [y/N] " answer
+      [[ "$answer" =~ ^[Yy]$ ]] || { echo "Aborted; nothing changed."; exit 1; }
+    fi
+    rm -rf "$ICARUS_HOME"
+    log "Deleted $ICARUS_HOME"
+  else
+    log "$ICARUS_HOME not found; skipping"
+  fi
+
+  if ((${#remove[@]})); then
+    log "Removing packages installed by --install: ${remove[*]}"
+    as_root env DEBIAN_FRONTEND=noninteractive apt-get remove -y -qq "${remove[@]}"
+    as_root apt-get autoremove -y -qq
+  else
+    log "No packages to remove (none were installed by --install)"
+  fi
+  log "Uninstalled"
+}
+
+action=""
+for arg in "$@"; do
+  case "$arg" in
+    --install | --uninstall) action="$arg" ;;
+    --yes) ASSUME_YES=1 ;;
+    -h | --help) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+done
+
+case "$action" in
+  --install) do_install ;;
+  --uninstall) do_uninstall ;;
+  *) usage >&2; exit 2 ;;
+esac

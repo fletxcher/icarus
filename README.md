@@ -29,8 +29,8 @@ uv sync
 uv run api   # http://localhost:8000, docs at /docs
 ```
 
-Every setting is in `backend/src/api/config.py`. The API starts without
-`MISTRAL_API_TOKEN`; chat storage works and sending a message returns 503 until it's set.
+Every setting is in `backend/src/api/config.py`. The API starts without any model
+provider key; chat storage works and sending a message returns 503 until one is set.
 
 ### Local MongoDB
 
@@ -78,7 +78,8 @@ backend/src/api/
     xfoil.py          XFOIL script builder, polar parser, XfoilService
     simulations.py    CFD job submission and polling
     router.py         /api/simulations
-backend/vm/run_case.sh  Placeholder CFD entrypoint to install on the VM
+vm/setup.sh             Prepares (or cleans up) a fresh simulation VM
+vm/run_case.sh          Placeholder CFD entrypoint, installed on the VM by setup.sh
 ```
 
 ### API
@@ -125,11 +126,21 @@ live in the assistant's text.
 
 ### Models and reasoning
 
-The selectable models are `mistral-medium-3-5` (default) and `mistral-small-latest`,
-ids Mistral's reasoning docs list as supporting `reasoning_effort` (Mistral Large isn't
-available to the project's API key). `REASONING_EFFORT=high` (default) streams the model's thinking before
-its answer; `none` turns it off. An unsupported `DEFAULT_MODEL` falls back to the first
-model, with a warning in the logs.
+Models are offered per provider, and only when that provider's key is in `.env`;
+`/api/models` and the model picker list just those:
+
+| Key | Models |
+|---|---|
+| `MISTRAL_API_TOKEN` | `mistral-medium-3-5`, `mistral-small-latest` |
+| `OPENROUTER_API_KEY` | `openrouter/free` (routes to a free model; 50 requests a day, 1,000 after buying $10 of credits) |
+
+An agent turn makes several model requests (one per step plus the answer), so free
+quotas run out quickly. `DEFAULT_MODEL` picks the default; if it isn't available, the
+first available model is used, with a warning in the logs.
+
+`REASONING_EFFORT=high` (default) streams the model's thinking before its answer; `none`
+turns it off. Mistral sends thinking as content blocks and OpenRouter as
+`reasoning_content`; both stream as `reasoning` events.
 
 ### Simulation VM
 
@@ -144,14 +155,32 @@ host key must be in `~/.ssh/known_hosts` (or `VM_KNOWN_HOSTS_PATH`).
    `{"status": "running" | "completed" | "failed", "result": {...}, "error": "..."}`.
 4. `get_simulation_status` / `GET /api/simulations/{id}` read it back into Mongo.
 
-`backend/vm/run_case.sh` implements that contract with a placeholder solve step. Swap in
-the real mesh + solver pipeline.
+`vm/run_case.sh` implements that contract with a placeholder solve step. Swap in the
+real mesh + solver pipeline.
+
+**Setting up a VM.** Copy `vm/` to a fresh Debian/Ubuntu VM and run, as the user the
+backend connects as:
+
+```bash
+./setup.sh --install     # XFOIL, xvfb, xauth; ~/icarus/bin/run_case.sh; ~/icarus/jobs
+./setup.sh --uninstall   # removes what --install added (asks before deleting job data)
+```
+
+`--install` checks that XFOIL runs headless and prints the matching `.env` values.
+`--uninstall` only removes packages that `--install` itself installed, then runs
+`apt-get autoremove`. No CFD solver is installed yet.
 
 **XFOIL** runs wherever `XFOIL_RUNNER` points (`vm` or `local`), through the same
 `CommandRunner` interface. One polar takes about a second, so CPU isn't the deciding
 factor. Running it on the VM is the default because serverless hosts (like Vercel)
 can't install the Fortran XFOIL binary. Use `local` when the API runs on a normal
 server or container with `xfoil` installed.
+
+Without a display, XFOIL must not open its plot window. The Debian/Ubuntu `xfoil`
+package crashes (SIGFPE) when its graphics are turned off, so by default
+(`XFOIL_DISPLAY=xvfb`) it runs under a virtual display with `xvfb-run`; install it with
+`sudo apt install xvfb` on whichever machine runs XFOIL. For an XFOIL build without that
+crash, `XFOIL_DISPLAY=none` turns its graphics off instead.
 
 ### Deployment notes
 
