@@ -11,7 +11,7 @@ from uuid import uuid4
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from api.log_config import request_id_var, truncate
+from .log_config import request_id_var, truncate
 
 logger = logging.getLogger("api.http")
 

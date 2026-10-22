@@ -8,17 +8,17 @@ from typing import NoReturn
 from langgraph.graph.state import CompiledStateGraph
 from pymongo.asynchronous.database import AsyncDatabase
 
-from api.agent.graph import build_agent
-from api.agent.models import ModelOption, available_models, create_chat_model
-from api.agent.prompts import build_system_prompt
-from api.agent.titles import TitleGenerator
-from api.agent.tools import build_tools
-from api.chats.repository import ChatRepository
-from api.compute.runner import CommandResult, CommandRunner, LocalRunner, SSHRunner
-from api.compute.simulations import SimulationService
-from api.compute.xfoil import XfoilService
-from api.config import Settings
-from api.files.repository import FileRepository
+from .agent.graph import build_agent
+from .agent.models import ModelOption, available_models, create_chat_model
+from .agent.prompts import build_system_prompt
+from .agent.titles import TitleGenerator
+from .agent.tools import build_tools
+from .chats.repository import ChatRepository
+from .compute.runner import CommandResult, CommandRunner, LocalRunner, SSHRunner
+from .compute.simulations import SimulationService
+from .compute.xfoil import XfoilService
+from .config import Settings
+from .files.repository import FileRepository
 
 logger = logging.getLogger(__name__)
 

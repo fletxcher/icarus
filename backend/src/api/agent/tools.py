@@ -7,9 +7,9 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, BeforeValidator, Field
 
-from api.compute.plots import describe_figure, validate_figure
-from api.compute.simulations import CfdCase, Simulation, SimulationService
-from api.compute.xfoil import Polar, PolarRequest, XfoilService
+from ..compute.plots import describe_figure, validate_figure
+from ..compute.simulations import CfdCase, Simulation, SimulationService
+from ..compute.xfoil import Polar, PolarRequest, XfoilService
 
 TOP_CANDIDATES = 5
 

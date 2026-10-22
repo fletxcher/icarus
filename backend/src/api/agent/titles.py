@@ -9,7 +9,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from api.chats.repository import ChatRepository
+from ..chats.repository import ChatRepository
 
 logger = logging.getLogger(__name__)
 

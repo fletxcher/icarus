@@ -10,7 +10,7 @@ from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import LLMResult
 
-from api.log_config import truncate
+from ..log_config import truncate
 
 logger = logging.getLogger("api.agent")
 

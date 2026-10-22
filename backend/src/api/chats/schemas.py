@@ -3,8 +3,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
-from api.files.schemas import Attachment
-from api.mongo import MongoModel
+from ..files.schemas import Attachment
+from ..mongo import MongoModel
 
 Role = Literal["user", "assistant"]
 MessageStatus = Literal["streaming", "done", "stopped", "error"]

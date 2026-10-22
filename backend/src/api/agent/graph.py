@@ -10,7 +10,7 @@ from langgraph.graph import START, MessagesState, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from api.agent.prompts import build_system_prompt
+from .prompts import build_system_prompt
 
 
 def build_agent(

@@ -27,9 +27,8 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 from openrouter.errors import OpenRouterError
 
-from api.agent.logging_callbacks import AgentLoggingHandler
-from api.chats.repository import ChatRepository
-from api.chats.schemas import (
+from ..chats.repository import ChatRepository
+from ..chats.schemas import (
     Message,
     MessagePart,
     MessageStatus,
@@ -37,8 +36,9 @@ from api.chats.schemas import (
     TextPart,
     ToolPart,
 )
-from api.config import get_settings
-from api.files.repository import FileRepository
+from ..config import get_settings
+from ..files.repository import FileRepository
+from .logging_callbacks import AgentLoggingHandler
 
 logger = logging.getLogger(__name__)
 

@@ -3,8 +3,8 @@ from uuid import uuid4
 
 from pymongo.asynchronous.database import AsyncDatabase
 
-from api.db import FILES
-from api.files.schemas import StoredFile
+from ..db import FILES
+from .schemas import StoredFile
 
 # Only metadata by default; the text can be large.
 METADATA = {"text": False}

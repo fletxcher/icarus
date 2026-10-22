@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, BeforeValidator, Field
 
-from api.compute.runner import CommandResult, CommandRunner
+from .runner import CommandResult, CommandRunner
 
 logger = logging.getLogger(__name__)
 

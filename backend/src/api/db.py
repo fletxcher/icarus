@@ -1,7 +1,7 @@
 from pymongo import ASCENDING, DESCENDING, AsyncMongoClient
 from pymongo.asynchronous.database import AsyncDatabase
 
-from api.config import Settings
+from .config import Settings
 
 THREADS = "threads"
 MESSAGES = "messages"

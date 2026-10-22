@@ -7,7 +7,7 @@ from langchain_mistralai import ChatMistralAI
 from langchain_openrouter import ChatOpenRouter
 from pydantic import BaseModel
 
-from api.config import Settings
+from ..config import Settings
 
 Provider = Literal["mistral", "openrouter"]
 

@@ -246,6 +246,10 @@ crash, `XFOIL_DISPLAY=none` turns its graphics off instead.
   everything else to the frontend. The backend receives the original path (it sees
   `/api/threads`, not `/threads`), which matches its routes. No service calls another on
   the server (the browser calls the API), so no bindings are declared.
+- Vercel finds the backend through `[tool.vercel] entrypoint = "src.api.app:app"` in
+  `backend/pyproject.toml` (its default detection doesn't look in `src/api/`). The
+  backend uses relative imports, so the same code runs as `src.api` there and as `api`
+  locally (`uv run api`, tests) without the project having to be installed.
 - In production the frontend calls the API on the same origin, so leave
   `NEXT_PUBLIC_API_URL` and `CORS_ORIGINS` unset on Vercel. Locally the frontend defaults
   to `http://localhost:8000` (`vercel dev` runs both services together instead).

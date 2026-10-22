@@ -7,15 +7,15 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langgraph.graph.state import CompiledStateGraph
 
-from api.agent.stream import stream_turn, title_first
-from api.chats.schemas import (
+from ..agent.stream import stream_turn, title_first
+from ..dependencies import ServicesDep
+from .schemas import (
     MessageCreate,
     Thread,
     ThreadCreate,
     ThreadUpdate,
     ThreadWithMessages,
 )
-from api.dependencies import ServicesDep
 
 router = APIRouter(prefix="/threads", tags=["threads"])
 

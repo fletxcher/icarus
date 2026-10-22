@@ -16,8 +16,8 @@ from typing import Protocol
 
 import asyncssh
 
-from api.config import Settings
-from api.log_config import truncate
+from ..config import Settings
+from ..log_config import truncate
 
 logger = logging.getLogger(__name__)
 

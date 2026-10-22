@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from api.mongo import MongoModel
+from ..mongo import MongoModel
 
 
 class Attachment(BaseModel):

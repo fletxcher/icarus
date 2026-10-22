@@ -5,16 +5,16 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.agent.models import ModelOption
-from api.chats import router as chats_router
-from api.compute import router as simulations_router
-from api.config import get_settings
-from api.db import create_client, ensure_indexes
-from api.dependencies import ServicesDep
-from api.files import router as files_router
-from api.log_config import configure_logging
-from api.middleware import RequestLoggingMiddleware
-from api.services import build_services
+from .agent.models import ModelOption
+from .chats import router as chats_router
+from .compute import router as simulations_router
+from .config import get_settings
+from .db import create_client, ensure_indexes
+from .dependencies import ServicesDep
+from .files import router as files_router
+from .log_config import configure_logging
+from .middleware import RequestLoggingMiddleware
+from .services import build_services
 
 logger = logging.getLogger(__name__)
 

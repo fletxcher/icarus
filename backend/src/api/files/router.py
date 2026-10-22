@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException, UploadFile, status
 
-from api.config import get_settings
-from api.dependencies import ServicesDep
-from api.files.schemas import Attachment
+from ..config import get_settings
+from ..dependencies import ServicesDep
+from .schemas import Attachment
 
 router = APIRouter(prefix="/files", tags=["files"])
 

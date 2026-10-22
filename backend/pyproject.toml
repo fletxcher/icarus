@@ -43,3 +43,8 @@ select = ["E", "F", "I", "UP", "B", "ASYNC"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.vercel]
+# Where Vercel finds the FastAPI app. Its imports are relative, so it works loaded as
+# `src.api.app` here and as `api.app` locally (uvicorn, tests).
+entrypoint = "src.api.app:app"
