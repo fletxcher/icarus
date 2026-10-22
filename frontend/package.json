@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3000",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 3000",
     "lint": "eslint"
   },
   "dependencies": {
@@ -26,6 +26,7 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@next/env": "^16.4.2",
     "@tailwindcss/turbopack": "^4",
     "@tailwindcss/typography": "^0.5.20",
     "@types/node": "^20",

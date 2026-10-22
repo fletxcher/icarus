@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { ArrowUpIcon, GlobeIcon, SquareIcon } from "lucide-react";
+import { ArrowUpIcon, SquareIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
 import { sendMessage, stopGeneration } from "@/stores/chat-actions";
 import { useChatStore, useIsGenerating } from "@/stores/chat-store";
 import { ModelSelector } from "./model-selector";
@@ -57,10 +55,7 @@ export function Composer({ placeholder = "Ask anything" }: { placeholder?: strin
       />
 
       <div className="flex items-center justify-between gap-2 border-t border-dashed px-2 py-2">
-        <div className="flex items-center gap-1">
-          <ModelSelector />
-          <WebSearchToggle />
-        </div>
+        <ModelSelector />
 
         {isGenerating ? (
           <Button
@@ -86,34 +81,5 @@ export function Composer({ placeholder = "Ask anything" }: { placeholder?: strin
         )}
       </div>
     </form>
-  );
-}
-
-function WebSearchToggle() {
-  const webSearch = useChatStore((state) => state.webSearch);
-  const setWebSearch = useChatStore((state) => state.setWebSearch);
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size={webSearch ? "sm" : "icon-sm"}
-          aria-pressed={webSearch}
-          aria-label="Web search"
-          className={cn(
-            "text-muted-foreground",
-            webSearch &&
-              "bg-sky-500/10 text-sky-600 hover:bg-sky-500/15 hover:text-sky-600 dark:text-sky-400 dark:hover:text-sky-400",
-          )}
-          onClick={() => setWebSearch(!webSearch)}
-        >
-          <GlobeIcon />
-          {webSearch && "Search"}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>Web search</TooltipContent>
-    </Tooltip>
   );
 }

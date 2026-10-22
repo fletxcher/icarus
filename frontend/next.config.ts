@@ -1,4 +1,9 @@
+import { resolve } from "node:path";
+import { loadEnvConfig } from "@next/env";
 import type { NextConfig } from "next";
+
+// Config lives in the repo-root .env, shared with the backend.
+loadEnvConfig(resolve(process.cwd(), ".."));
 
 const nextConfig: NextConfig = {
   /* config options here */

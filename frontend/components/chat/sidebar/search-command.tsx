@@ -12,6 +12,7 @@ import {
   CommandList,
   CommandShortcut,
 } from "@/components/ui/command";
+import { newChat, selectThread } from "@/stores/chat-actions";
 import { useChatStore } from "@/stores/chat-store";
 
 export function SearchCommand({
@@ -22,11 +23,9 @@ export function SearchCommand({
   onOpenChange: (open: boolean) => void;
 }) {
   const threads = useChatStore((state) => state.threads);
-  const selectThread = useChatStore((state) => state.selectThread);
-  const newChat = useChatStore((state) => state.newChat);
 
   const recentThreads = useMemo(
-    () => Object.values(threads).sort((a, b) => b.updatedAt - a.updatedAt),
+    () => [...threads].sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
     [threads],
   );
 
@@ -70,7 +69,7 @@ export function SearchCommand({
                 <CommandItem
                   key={thread.id}
                   value={`${thread.title} ${thread.id}`}
-                  onSelect={() => run(() => selectThread(thread.id))}
+                  onSelect={() => run(() => void selectThread(thread.id))}
                 >
                   <MessageSquareIcon />
                   <span className="truncate">{thread.title}</span>

@@ -16,18 +16,20 @@ npm install
 npm run dev   # http://localhost:3000
 ```
 
-Chats are currently stored in the browser and replies are mocked
-(`frontend/lib/chat/mock-stream.ts`) until the frontend is wired to the backend.
+The frontend talks to the backend at `NEXT_PUBLIC_API_URL` (default
+`http://localhost:8000`), read from the root `.env` by `next.config.ts`. It renders each
+reply as it streams: the model's reasoning, every tool call with its arguments, status
+and result, then the answer.
 
 ## Backend
 
 ```bash
 cd backend
 uv sync
-uv run backend   # http://localhost:8000, docs at /docs
+uv run api   # http://localhost:8000, docs at /docs
 ```
 
-Every setting is in `backend/src/backend/config.py`. The API starts without
+Every setting is in `backend/src/api/config.py`. The API starts without
 `MISTRAL_API_TOKEN`; chat storage works and sending a message returns 503 until it's set.
 
 ### Local MongoDB
@@ -38,12 +40,29 @@ Either recreate it with `-p 27017:27017`, or point `MONGODB_URI` at the containe
 which can change when the container restarts. The container stores data in an anonymous
 volume, so mount that volume explicitly if you recreate it and want to keep the data.
 
+### Logging
+
+Every log line carries the id of the HTTP request that produced it (also returned as
+the `X-Request-ID` response header). Logged:
+
+- each request and response: method, path, status, duration and bodies (streamed
+  responses are summarized), plus the traceback of any unhandled error;
+- each agent turn, model call (duration, token usage, tools requested) and tool call
+  (arguments, result or traceback, duration);
+- commands run locally or on the VM (exit code, duration, stderr on failure) and CFD
+  job status changes.
+
+`LOG_LEVEL` (default `INFO`) and `LOG_BODY_MAX_CHARS` (default 2000, longer payloads are
+truncated) control it.
+
 ### Layout
 
 ```
-backend/src/backend/
+backend/src/api/
   app.py              FastAPI app, lifespan (Mongo + services), /api/health, /api/models
   config.py           Settings from env vars / the repo-root .env
+  log_config.py       Logging setup (request ids on every line)
+  middleware.py       Request/response logging
   db.py               Mongo client and indexes
   services.py         Builds the shared services and the agent at startup
   chats/              Threads + messages: schemas, repository, routes
@@ -51,6 +70,7 @@ backend/src/backend/
     graph.py          LangGraph graph: agent node <-> tool node loop
     tools.py          Agent tools (XFOIL polar, NACA search, CFD submit/status)
     stream.py         Runs one turn, streams SSE events, persists the reply
+    logging_callbacks.py  Logs model and tool calls
     prompts.py        System prompt
     models.py         Selectable Mistral models
   compute/
@@ -85,18 +105,31 @@ backend/vm/run_case.sh  Placeholder CFD entrypoint to install on the VM
 | Event | Data |
 |---|---|
 | `start` | `{message_id}` |
+| `reasoning` | `{text}` |
 | `token` | `{text}` |
 | `tool_call` | `{id, name, args}` |
-| `tool_result` | `{id, name, content}` |
+| `tool_result` | `{id, name, status, content}` (status `success` or `error`) |
 | `done` | `{message_id}` |
 | `error` | `{message}` |
 
 The assistant message is saved as `streaming`, then finalized as `done`, `stopped`
-(client disconnected) or `error`, including its tool calls and results.
+(client disconnected) or `error`. Its `parts` record the turn in order: `reasoning`,
+`tool` (args, status, result) and `text`; `content` holds the answer text alone.
+
+A failing tool doesn't end the turn: the error goes back to the model as the tool's
+result so it can explain or retry.
 
 The agent is rebuilt from stored messages each turn, so edits and regenerations apply
-naturally. Tool calls from earlier turns aren't replayed; their outcomes live in the
-assistant's text.
+naturally. Reasoning and tool calls from earlier turns aren't replayed; their outcomes
+live in the assistant's text.
+
+### Models and reasoning
+
+The selectable models are `mistral-medium-3-5` (default) and `mistral-small-latest`,
+ids Mistral's reasoning docs list as supporting `reasoning_effort` (Mistral Large isn't
+available to the project's API key). `REASONING_EFFORT=high` (default) streams the model's thinking before
+its answer; `none` turns it off. An unsupported `DEFAULT_MODEL` falls back to the first
+model, with a warning in the logs.
 
 ### Simulation VM
 
@@ -122,9 +155,10 @@ server or container with `xfoil` installed.
 
 ### Deployment notes
 
-- Vercel can host FastAPI (`backend.app:app`), but functions have a maximum duration.
+- Vercel can host FastAPI (`api.app:app`), but functions have a maximum duration.
   Chat streaming and XFOIL calls fit within it; CFD is already asynchronous.
-- Set `CORS_ORIGINS` to the frontend's deployed URL.
+- Set `CORS_ORIGINS` to the frontend's deployed URL, and `NEXT_PUBLIC_API_URL` on the
+  frontend to the API's.
 - There's no authentication yet. Add it before exposing the API publicly.
 
 ### Development

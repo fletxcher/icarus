@@ -18,13 +18,14 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 import { groupThreads } from "@/lib/chat/group-threads";
+import { newChat } from "@/stores/chat-actions";
 import { useChatStore } from "@/stores/chat-store";
 import { NavUser } from "./nav-user";
 import { SearchCommand } from "./search-command";
 import { ThreadItem } from "./thread-item";
 
-export function AppSidebar({ hydrated }: { hydrated: boolean }) {
-  const newChat = useChatStore((state) => state.newChat);
+export function AppSidebar() {
+  const status = useChatStore((state) => state.threadsStatus);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
 
   useEffect(() => {
@@ -36,7 +37,7 @@ export function AppSidebar({ hydrated }: { hydrated: boolean }) {
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [newChat]);
+  }, []);
 
   return (
     <Sidebar variant="inset" collapsible="icon">
@@ -74,7 +75,11 @@ export function AppSidebar({ hydrated }: { hydrated: boolean }) {
       </SidebarHeader>
 
       <SidebarContent className="group-data-[collapsible=icon]:invisible">
-        {hydrated ? <ThreadGroups /> : <ThreadGroupsSkeleton />}
+        {status === "loading" && <ThreadGroupsSkeleton />}
+        {status === "error" && (
+          <p className="px-4 py-2 text-xs text-destructive">Couldn&apos;t load conversations.</p>
+        )}
+        {status === "ready" && <ThreadGroups />}
       </SidebarContent>
 
       <SidebarFooter>
@@ -90,7 +95,7 @@ export function AppSidebar({ hydrated }: { hydrated: boolean }) {
 function ThreadGroups() {
   const threads = useChatStore((state) => state.threads);
   const activeThreadId = useChatStore((state) => state.activeThreadId);
-  const groups = useMemo(() => groupThreads(Object.values(threads)), [threads]);
+  const groups = useMemo(() => groupThreads(threads), [threads]);
 
   if (groups.length === 0) {
     return (

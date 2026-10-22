@@ -3,7 +3,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowDownIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { Thread } from "@/lib/chat/types";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { Message } from "@/lib/chat/types";
+import { useChatStore } from "@/stores/chat-store";
 import { AssistantMessage } from "./assistant-message";
 import { Composer } from "./composer";
 import { UserMessage } from "./user-message";
@@ -11,25 +13,26 @@ import { UserMessage } from "./user-message";
 const STICK_THRESHOLD_PX = 80;
 
 /** Scrollable message list that sticks to the bottom while new content arrives. */
-export function ThreadView({ thread }: { thread: Thread }) {
+export function ThreadView({ threadId }: { threadId: string }) {
+  const messages = useChatStore((state) => state.messages[threadId]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
-  const lastMessage = thread.messages.at(-1);
+  const lastMessage = messages?.at(-1);
 
   const scrollToBottom = (behavior: ScrollBehavior = "auto") => {
     const element = scrollRef.current;
     element?.scrollTo({ top: element.scrollHeight, behavior });
   };
 
-  // Follow streaming output only while the user hasn't scrolled away.
+  // Follow streaming output (text, reasoning, tool calls) while the user hasn't scrolled away.
   useLayoutEffect(() => {
     if (isAtBottom) scrollToBottom();
-  }, [lastMessage?.content, lastMessage?.status, isAtBottom]);
+  }, [lastMessage, isAtBottom]);
 
   // Always jump to the newest message when one is added.
   useEffect(() => {
     scrollToBottom("smooth");
-  }, [thread.messages.length]);
+  }, [messages?.length]);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -42,17 +45,10 @@ export function ThreadView({ thread }: { thread: Thread }) {
         }}
       >
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 pt-6 pb-10">
-          {thread.messages.map((message) =>
-            message.role === "user" ? (
-              <UserMessage key={message.id} threadId={thread.id} message={message} />
-            ) : (
-              <AssistantMessage
-                key={message.id}
-                threadId={thread.id}
-                message={message}
-                isLast={message === lastMessage}
-              />
-            ),
+          {messages ? (
+            <MessageList threadId={threadId} messages={messages} />
+          ) : (
+            <MessagesSkeleton />
           )}
         </div>
       </div>
@@ -74,6 +70,34 @@ export function ThreadView({ thread }: { thread: Thread }) {
         <p className="py-2 text-center text-xs text-muted-foreground">
           AI can make mistakes. Verify important information.
         </p>
+      </div>
+    </div>
+  );
+}
+
+function MessageList({ threadId, messages }: { threadId: string; messages: Message[] }) {
+  const lastMessage = messages.at(-1);
+  return messages.map((message) =>
+    message.role === "user" ? (
+      <UserMessage key={message.id} threadId={threadId} message={message} />
+    ) : (
+      <AssistantMessage
+        key={message.id}
+        threadId={threadId}
+        message={message}
+        isLast={message === lastMessage}
+      />
+    ),
+  );
+}
+
+function MessagesSkeleton() {
+  return (
+    <div className="flex flex-col gap-8" aria-label="Loading messages">
+      <Skeleton className="ml-auto h-10 w-1/2 rounded-2xl" />
+      <div className="flex flex-col gap-2.5">
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-[70%]" />
       </div>
     </div>
   );

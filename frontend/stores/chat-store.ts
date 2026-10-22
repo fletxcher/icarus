@@ -1,163 +1,93 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import { DEFAULT_MODEL_ID } from "@/lib/chat/models";
-import type { Message, Thread } from "@/lib/chat/types";
+import type { Message, Model, Thread } from "@/lib/chat/types";
+
+export type LoadStatus = "loading" | "ready" | "error";
 
 type ChatState = {
-  threads: Record<string, Thread>;
+  // Server data, loaded from the API.
+  threads: Thread[];
+  threadsStatus: LoadStatus;
+  /** Messages per thread, present once that thread has been opened. */
+  messages: Record<string, Message[]>;
+  models: Model[];
+  // UI state; the last three are remembered in this browser.
   activeThreadId: string | null;
-  model: string;
-  webSearch: boolean;
+  model: string | null;
   draft: string;
-  /** Set while a reply is streaming; not persisted. */
+  /** Set while a reply is streaming. */
   controller: AbortController | null;
 };
 
 type ChatActions = {
-  newChat: () => void;
-  selectThread: (id: string) => void;
-  createThread: (title: string) => string;
-  renameThread: (id: string, title: string) => void;
-  togglePin: (id: string) => void;
-  deleteThread: (id: string) => void;
-  addMessage: (threadId: string, message: Message) => void;
-  updateMessage: (threadId: string, messageId: string, patch: Partial<Message>) => void;
-  truncateFrom: (threadId: string, messageId: string) => void;
+  setThreads: (threads: Thread[], status?: LoadStatus) => void;
+  setThreadsStatus: (status: LoadStatus) => void;
+  upsertThread: (thread: Thread) => void;
+  removeThread: (id: string) => void;
+  setMessages: (threadId: string, messages: Message[]) => void;
+  updateMessages: (threadId: string, update: (messages: Message[]) => Message[]) => void;
+  setModels: (models: Model[]) => void;
+  setActiveThread: (id: string | null) => void;
   setModel: (model: string) => void;
-  setWebSearch: (enabled: boolean) => void;
   setDraft: (draft: string) => void;
   setController: (controller: AbortController | null) => void;
 };
 
-function updateThread(
-  threads: Record<string, Thread>,
-  id: string,
-  update: (thread: Thread) => Partial<Thread>,
-): Record<string, Thread> {
-  const thread = threads[id];
-  if (!thread) return threads;
-  return { ...threads, [id]: { ...thread, ...update(thread) } };
-}
-
 export const useChatStore = create<ChatState & ChatActions>()(
   persist(
     (set) => ({
-      threads: {},
+      threads: [],
+      threadsStatus: "loading",
+      messages: {},
+      models: [],
       activeThreadId: null,
-      model: DEFAULT_MODEL_ID,
-      webSearch: false,
+      model: null,
       draft: "",
       controller: null,
 
-      newChat: () => set({ activeThreadId: null }),
-
-      selectThread: (id) => set({ activeThreadId: id }),
-
-      createThread: (title) => {
-        const now = Date.now();
-        const thread: Thread = {
-          id: crypto.randomUUID(),
-          title,
-          createdAt: now,
-          updatedAt: now,
-          pinnedAt: null,
-          messages: [],
-        };
+      setThreads: (threads, threadsStatus = "ready") => set({ threads, threadsStatus }),
+      setThreadsStatus: (threadsStatus) => set({ threadsStatus }),
+      upsertThread: (thread) =>
         set((state) => ({
-          threads: { ...state.threads, [thread.id]: thread },
-          activeThreadId: thread.id,
-        }));
-        return thread.id;
-      },
-
-      renameThread: (id, title) =>
-        set((state) => ({ threads: updateThread(state.threads, id, () => ({ title })) })),
-
-      togglePin: (id) =>
-        set((state) => ({
-          threads: updateThread(state.threads, id, (thread) => ({
-            pinnedAt: thread.pinnedAt === null ? Date.now() : null,
-          })),
+          threads: state.threads.some((t) => t.id === thread.id)
+            ? state.threads.map((t) => (t.id === thread.id ? thread : t))
+            : [thread, ...state.threads],
         })),
-
-      deleteThread: (id) =>
+      removeThread: (id) =>
         set((state) => {
-          const threads = { ...state.threads };
-          delete threads[id];
+          const messages = { ...state.messages };
+          delete messages[id];
           return {
-            threads,
+            threads: state.threads.filter((thread) => thread.id !== id),
+            messages,
             activeThreadId: state.activeThreadId === id ? null : state.activeThreadId,
           };
         }),
-
-      addMessage: (threadId, message) =>
+      setMessages: (threadId, messages) =>
+        set((state) => ({ messages: { ...state.messages, [threadId]: messages } })),
+      updateMessages: (threadId, update) =>
         set((state) => ({
-          threads: updateThread(state.threads, threadId, (thread) => ({
-            messages: [...thread.messages, message],
-            updatedAt: message.createdAt,
-          })),
+          messages: { ...state.messages, [threadId]: update(state.messages[threadId] ?? []) },
         })),
-
-      updateMessage: (threadId, messageId, patch) =>
-        set((state) => ({
-          threads: updateThread(state.threads, threadId, (thread) => ({
-            messages: thread.messages.map((message) =>
-              message.id === messageId ? { ...message, ...patch } : message,
-            ),
-          })),
-        })),
-
-      truncateFrom: (threadId, messageId) =>
-        set((state) => ({
-          threads: updateThread(state.threads, threadId, (thread) => {
-            const index = thread.messages.findIndex((message) => message.id === messageId);
-            return index === -1 ? {} : { messages: thread.messages.slice(0, index) };
-          }),
-        })),
-
+      setModels: (models) => set({ models }),
+      setActiveThread: (activeThreadId) => set({ activeThreadId }),
       setModel: (model) => set({ model }),
-      setWebSearch: (webSearch) => set({ webSearch }),
       setDraft: (draft) => set({ draft }),
       setController: (controller) => set({ controller }),
     }),
     {
-      name: "icarus-chat",
+      name: "icarus-ui",
       storage: createJSONStorage(() => localStorage),
       // Rehydrated manually on mount so server and first client render match.
       skipHydration: true,
-      partialize: ({ threads, activeThreadId, model, webSearch, draft }) => ({
-        threads,
-        activeThreadId,
-        model,
-        webSearch,
-        draft,
-      }),
-      // A reply that was streaming when the page closed can never finish.
-      merge: (persisted, current) => {
-        // `persisted` is undefined on first visit, before anything has been saved.
-        const state = (persisted ?? {}) as Partial<ChatState>;
-        const threads = Object.fromEntries(
-          Object.entries(state.threads ?? {}).map(([id, thread]) => [
-            id,
-            {
-              ...thread,
-              messages: thread.messages.map((message) =>
-                message.status === "pending" || message.status === "streaming"
-                  ? { ...message, status: "stopped" as const }
-                  : message,
-              ),
-            },
-          ]),
-        );
-        return { ...current, ...state, threads };
-      },
+      partialize: ({ activeThreadId, model, draft }) => ({ activeThreadId, model, draft }),
     },
   ),
 );
 
 export function useActiveThread(): Thread | null {
-  return useChatStore((state) =>
-    state.activeThreadId ? (state.threads[state.activeThreadId] ?? null) : null,
+  return useChatStore(
+    (state) => state.threads.find((thread) => thread.id === state.activeThreadId) ?? null,
   );
 }
 

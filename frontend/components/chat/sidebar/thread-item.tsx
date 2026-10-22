@@ -27,14 +27,10 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import type { Thread } from "@/lib/chat/types";
-import { useChatStore } from "@/stores/chat-store";
+import { deleteThread, renameThread, selectThread, togglePin } from "@/stores/chat-actions";
 
 export function ThreadItem({ thread, isActive }: { thread: Thread; isActive: boolean }) {
   const { isMobile, setOpenMobile } = useSidebar();
-  const selectThread = useChatStore((state) => state.selectThread);
-  const renameThread = useChatStore((state) => state.renameThread);
-  const togglePin = useChatStore((state) => state.togglePin);
-  const deleteThread = useChatStore((state) => state.deleteThread);
   const [isEditing, setIsEditing] = useState(false);
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -42,11 +38,11 @@ export function ThreadItem({ thread, isActive }: { thread: Thread; isActive: boo
   const commitRename = (value: string) => {
     setIsEditing(false);
     const title = value.trim();
-    if (title && title !== thread.title) renameThread(thread.id, title);
+    if (title && title !== thread.title) void renameThread(thread.id, title);
   };
 
   const handleSelect = () => {
-    selectThread(thread.id);
+    void selectThread(thread.id);
     if (isMobile) setOpenMobile(false);
   };
 
@@ -92,9 +88,9 @@ export function ThreadItem({ thread, isActive }: { thread: Thread; isActive: boo
             <PencilIcon />
             Rename
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => togglePin(thread.id)}>
-            {thread.pinnedAt === null ? <PinIcon /> : <PinOffIcon />}
-            {thread.pinnedAt === null ? "Pin" : "Unpin"}
+          <DropdownMenuItem onSelect={() => void togglePin(thread.id)}>
+            {thread.pinned_at === null ? <PinIcon /> : <PinOffIcon />}
+            {thread.pinned_at === null ? "Pin" : "Unpin"}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem variant="destructive" onSelect={() => setIsConfirmingDelete(true)}>
@@ -114,7 +110,7 @@ export function ThreadItem({ thread, isActive }: { thread: Thread; isActive: boo
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={() => deleteThread(thread.id)}>
+            <AlertDialogAction variant="destructive" onClick={() => void deleteThread(thread.id)}>
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>

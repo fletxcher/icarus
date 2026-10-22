@@ -11,6 +11,8 @@ function startOfDay(date: Date): number {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 }
 
+const time = (iso: string) => new Date(iso).getTime();
+
 /** Splits threads into pinned + recency buckets, newest first, omitting empty groups. */
 export function groupThreads(threads: Thread[], now = new Date()): ThreadGroup[] {
   const today = startOfDay(now);
@@ -23,19 +25,19 @@ export function groupThreads(threads: Thread[], now = new Date()): ThreadGroup[]
     { label: "Older", threads: [] },
   ];
 
-  const sorted = [...threads].sort((a, b) => b.updatedAt - a.updatedAt);
+  const sorted = [...threads].sort((a, b) => time(b.updated_at) - time(a.updated_at));
 
   for (const thread of sorted) {
-    if (thread.pinnedAt !== null) {
+    if (thread.pinned_at !== null) {
       buckets[0].threads.push(thread);
       continue;
     }
-    const age = today - startOfDay(new Date(thread.updatedAt));
+    const age = today - startOfDay(new Date(thread.updated_at));
     const index = age <= 0 ? 1 : age <= DAY_MS ? 2 : age <= 7 * DAY_MS ? 3 : age <= 30 * DAY_MS ? 4 : 5;
     buckets[index].threads.push(thread);
   }
 
-  buckets[0].threads.sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0));
+  buckets[0].threads.sort((a, b) => time(b.pinned_at ?? "") - time(a.pinned_at ?? ""));
 
   return buckets.filter((group) => group.threads.length > 0);
 }
