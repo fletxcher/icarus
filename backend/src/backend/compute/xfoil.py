@@ -1,0 +1,172 @@
+"""XFOIL batch runs: build the keystroke script, run it, parse the saved polar."""
+
+import asyncio
+import itertools
+import re
+import shlex
+from dataclasses import dataclass
+from typing import Annotated
+
+from pydantic import AfterValidator, BaseModel, Field
+
+from backend.compute.runner import CommandRunner
+
+POLAR_FILE = "polar.txt"
+INPUT_FILE = "input.txt"
+NACA_PATTERN = re.compile(r"^\d{4,5}$")
+
+
+def _normalize_naca(value: str) -> str:
+    value = value.strip().upper().removeprefix("NACA").strip()
+    if not NACA_PATTERN.match(value):
+        raise ValueError("expected a 4- or 5-digit NACA designation")
+    return value
+
+
+NacaCode = Annotated[
+    str,
+    AfterValidator(_normalize_naca),
+    Field(description="NACA 4- or 5-digit designation, e.g. '2412' or '23012'"),
+]
+
+
+class PolarRequest(BaseModel):
+    naca: NacaCode
+    reynolds: float = Field(gt=0, description="Chord Reynolds number, e.g. 1e6")
+    mach: float = Field(default=0.0, ge=0, lt=1)
+    alpha_start: float = Field(default=-4.0, ge=-30, le=30, description="Degrees")
+    alpha_end: float = Field(default=12.0, ge=-30, le=30, description="Degrees")
+    alpha_step: float = Field(default=1.0, gt=0, le=5, description="Degrees")
+    ncrit: float = Field(default=9.0, gt=0, description="e^N transition criterion")
+    max_iter: int = Field(default=100, ge=10, le=500)
+
+
+@dataclass(frozen=True)
+class PolarPoint:
+    alpha: float
+    cl: float
+    cd: float
+    cdp: float
+    cm: float
+    xtr_top: float
+    xtr_bottom: float
+
+    @property
+    def lift_to_drag(self) -> float:
+        return self.cl / self.cd if self.cd > 0 else 0.0
+
+
+@dataclass(frozen=True)
+class Polar:
+    request: PolarRequest
+    points: list[PolarPoint]
+
+    @property
+    def best_lift_to_drag(self) -> PolarPoint | None:
+        return max(self.points, key=lambda point: point.lift_to_drag, default=None)
+
+    @property
+    def max_lift(self) -> PolarPoint | None:
+        return max(self.points, key=lambda point: point.cl, default=None)
+
+
+def _best_lift_to_drag(polar: Polar) -> float:
+    best = polar.best_lift_to_drag
+    return best.lift_to_drag if best else 0.0
+
+
+def build_script(request: PolarRequest) -> str:
+    """Keystrokes for one viscous alpha sweep, saving the polar to POLAR_FILE."""
+    lines = [
+        "PLOP",
+        "G F",  # no graphics window
+        "",
+        f"NACA {request.naca}",
+        "PANE",
+        "OPER",
+        f"VISC {request.reynolds:g}",
+        f"MACH {request.mach:g}",
+        "VPAR",
+        f"N {request.ncrit:g}",
+        "",
+        f"ITER {request.max_iter}",
+        "PACC",
+        POLAR_FILE,
+        "",  # no dump file
+        f"ASEQ {request.alpha_start:g} {request.alpha_end:g} {request.alpha_step:g}",
+        "PACC",
+        "",
+        "QUIT",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def parse_polar(text: str) -> list[PolarPoint]:
+    """Reads the data rows that follow the dashed separator in an XFOIL polar file."""
+    lines = text.splitlines()
+    try:
+        start = next(i for i, line in enumerate(lines) if line.strip().startswith("---")) + 1
+    except StopIteration:
+        return []
+
+    points = []
+    for line in lines[start:]:
+        fields = line.split()
+        if len(fields) < 7:
+            continue
+        try:
+            points.append(PolarPoint(*(float(field) for field in fields[:7])))
+        except ValueError:
+            continue
+    return points
+
+
+class XfoilService:
+    def __init__(
+        self, runner: CommandRunner, *, xfoil_path: str, timeout_s: float, max_concurrency: int
+    ) -> None:
+        self._runner = runner
+        self._xfoil_path = xfoil_path
+        self._timeout_s = timeout_s
+        self._semaphore = asyncio.Semaphore(max_concurrency)
+
+    async def run_polar(self, request: PolarRequest) -> Polar:
+        async with self._semaphore:
+            workdir = await self._runner.make_temp_dir()
+            try:
+                await self._runner.write_file(f"{workdir}/{INPUT_FILE}", build_script(request))
+                result = await self._runner.run(
+                    f"{shlex.quote(self._xfoil_path)} < {INPUT_FILE}",
+                    cwd=workdir,
+                    timeout_s=self._timeout_s,
+                )
+                if not result.ok:
+                    raise RuntimeError(f"xfoil exited with {result.exit_code}: {result.stderr}")
+                text = await self._runner.read_file(f"{workdir}/{POLAR_FILE}")
+            finally:
+                await self._runner.remove_dir(workdir)
+        return Polar(request=request, points=parse_polar(text))
+
+    async def search_naca4(
+        self,
+        base: PolarRequest,
+        *,
+        cambers: list[int],
+        camber_positions: list[int],
+        thicknesses: list[int],
+    ) -> list[Polar]:
+        """Runs every NACA 4-digit combination and ranks them by best L/D.
+
+        A coarse grid search: a starting point for real shape optimization
+        (e.g. CST parameters with a gradient-free optimizer).
+        """
+        designations = {
+            f"{m}{p if m else 0}{t:02d}"
+            for m, p, t in itertools.product(cambers, camber_positions, thicknesses)
+        }
+        requests = [base.model_copy(update={"naca": code}) for code in sorted(designations)]
+        results = await asyncio.gather(
+            *(self.run_polar(request) for request in requests), return_exceptions=True
+        )
+        polars = [result for result in results if isinstance(result, Polar) and result.points]
+        return sorted(polars, key=_best_lift_to_drag, reverse=True)
