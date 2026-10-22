@@ -45,10 +45,14 @@ export type Thread = {
 
 export type ThreadWithMessages = Thread & { messages: Message[] };
 
+export type Provider = "mistral" | "openrouter";
+
+/** A model the backend can use; only providers with an API key are listed. */
 export type Model = {
   id: string;
   label: string;
   description: string;
+  provider: Provider;
 };
 
 /** Server-sent events from `POST /api/threads/{id}/messages`. */

@@ -1,15 +1,31 @@
 "use client";
 
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
+import { Fragment } from "react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import type { Model, Provider } from "@/lib/chat/types";
 import { useChatStore } from "@/stores/chat-store";
+
+const PROVIDER_LABELS: Record<Provider, string> = {
+  mistral: "Mistral",
+  openrouter: "OpenRouter",
+};
+
+function groupByProvider(models: Model[]): [Provider, Model[]][] {
+  const groups = new Map<Provider, Model[]>();
+  for (const model of models) {
+    groups.set(model.provider, [...(groups.get(model.provider) ?? []), model]);
+  }
+  return [...groups];
+}
 
 export function ModelSelector() {
   const models = useChatStore((state) => state.models);
@@ -26,15 +42,22 @@ export function ModelSelector() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-72">
-        <DropdownMenuLabel className="text-xs text-muted-foreground">Models</DropdownMenuLabel>
-        {models.map((model) => (
-          <DropdownMenuItem key={model.id} onSelect={() => setModel(model.id)}>
-            <div className="flex flex-1 flex-col">
-              <span className="font-medium">{model.label}</span>
-              <span className="text-xs text-muted-foreground">{model.description}</span>
-            </div>
-            {model.id === modelId && <CheckIcon />}
-          </DropdownMenuItem>
+        {groupByProvider(models).map(([provider, group], index) => (
+          <Fragment key={provider}>
+            {index > 0 && <DropdownMenuSeparator />}
+            <DropdownMenuLabel className="text-xs text-muted-foreground">
+              {PROVIDER_LABELS[provider]}
+            </DropdownMenuLabel>
+            {group.map((model) => (
+              <DropdownMenuItem key={model.id} onSelect={() => setModel(model.id)}>
+                <div className="flex flex-1 flex-col">
+                  <span className="font-medium">{model.label}</span>
+                  <span className="text-xs text-muted-foreground">{model.description}</span>
+                </div>
+                {model.id === modelId && <CheckIcon />}
+              </DropdownMenuItem>
+            ))}
+          </Fragment>
         ))}
       </DropdownMenuContent>
     </DropdownMenu>

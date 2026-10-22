@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from pydantic import ValidationError
 
@@ -49,8 +51,8 @@ class FakeRunner:
         self.removed.append(path)
 
 
-def make_service(runner: FakeRunner) -> XfoilService:
-    return XfoilService(runner, xfoil_path="xfoil", timeout_s=5, max_concurrency=2)
+def make_service(runner: FakeRunner, display: str = "xvfb") -> XfoilService:
+    return XfoilService(runner, xfoil_path="xfoil", display=display, timeout_s=5, max_concurrency=2)
 
 
 def test_naca_designation_is_normalized():
@@ -60,8 +62,9 @@ def test_naca_designation_is_normalized():
 
 
 def test_build_script_sets_flow_conditions():
-    script = build_script(PolarRequest(naca="0012", reynolds=5e5, mach=0.1, ncrit=7))
-    lines = script.splitlines()
+    request = PolarRequest(naca="0012", reynolds=5e5, mach=0.1, ncrit=7)
+    lines = build_script(request, disable_graphics=False).splitlines()
+    assert lines[0] == "NACA 0012"
     assert "NACA 0012" in lines
     assert "VISC 500000" in lines
     assert "MACH 0.1" in lines
@@ -81,15 +84,59 @@ def test_parse_polar_without_data_is_empty():
     assert parse_polar("no polar here") == []
 
 
-async def test_run_polar_writes_script_runs_xfoil_and_cleans_up():
+def test_build_script_can_turn_graphics_off():
+    request = PolarRequest(naca="0012", reynolds=5e5)
+    assert build_script(request, disable_graphics=True).splitlines()[:3] == ["PLOP", "G F", ""]
+
+
+async def test_run_polar_writes_script_runs_xfoil_under_xvfb_and_cleans_up():
     runner = FakeRunner()
     polar = await make_service(runner).run_polar(PolarRequest(naca="2412", reynolds=1e6))
 
-    assert "NACA 2412" in runner.files["/tmp/job/input.txt"]
-    assert runner.commands == [("xfoil < input.txt", "/tmp/job")]
+    script = runner.files["/tmp/job/input.txt"]
+    assert "NACA 2412" in script
+    assert "PLOP" not in script
+    assert runner.commands == [("xvfb-run --server-num=100 xfoil < input.txt", "/tmp/job")]
     assert runner.removed == ["/tmp/job"]
     assert polar.best_lift_to_drag is not None
     assert polar.best_lift_to_drag.alpha == 4.0
+
+
+async def test_run_polar_without_display_turns_graphics_off():
+    runner = FakeRunner()
+    await make_service(runner, display="none").run_polar(PolarRequest(naca="2412", reynolds=1e6))
+
+    assert runner.files["/tmp/job/input.txt"].startswith("PLOP\nG F\n")
+    assert runner.commands == [("xfoil < input.txt", "/tmp/job")]
+
+
+async def test_each_run_gets_a_fresh_virtual_display():
+    runner = FakeRunner()
+    service = make_service(runner)
+    requests = [PolarRequest(naca=code, reynolds=1e6) for code in ("0012", "2412", "4412")]
+
+    await asyncio.gather(*(service.run_polar(request) for request in requests))
+
+    displays = [command.split()[1] for command, _ in runner.commands]
+    assert displays == ["--server-num=100", "--server-num=101", "--server-num=102"]
+
+
+async def test_xvfb_start_failure_is_retried_on_another_display():
+    class FlakyXvfbRunner(FakeRunner):
+        async def run(self, command, *, cwd=None, timeout_s=None):
+            await super().run(command, cwd=cwd, timeout_s=timeout_s)
+            if len(self.commands) == 1:
+                return CommandResult(1, "", "xvfb-run: error: Xvfb failed to start")
+            return CommandResult(0, "", "")
+
+    runner = FlakyXvfbRunner()
+    polar = await make_service(runner).run_polar(PolarRequest(naca="2412", reynolds=1e6))
+
+    assert [command.split()[1] for command, _ in runner.commands] == [
+        "--server-num=100",
+        "--server-num=101",
+    ]
+    assert polar.points
 
 
 async def test_search_naca4_ranks_candidates_and_skips_symmetric_duplicates():

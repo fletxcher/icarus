@@ -7,13 +7,20 @@ import re
 import shlex
 import time
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, Field
 
-from api.compute.runner import CommandRunner
+from api.compute.runner import CommandResult, CommandRunner
 
 logger = logging.getLogger(__name__)
+
+XfoilDisplay = Literal["xvfb", "none"]
+
+# Virtual display numbers cycle through this range, clear of real displays like :0.
+FIRST_DISPLAY = 100
+DISPLAY_COUNT = 900
+XVFB_FAILED = "Xvfb failed to start"
 
 POLAR_FILE = "polar.txt"
 INPUT_FILE = "input.txt"
@@ -79,12 +86,13 @@ def _best_lift_to_drag(polar: Polar) -> float:
     return best.lift_to_drag if best else 0.0
 
 
-def build_script(request: PolarRequest) -> str:
+def build_script(request: PolarRequest, *, disable_graphics: bool) -> str:
     """Keystrokes for one viscous alpha sweep, saving the polar to POLAR_FILE."""
+    # Without a display XFOIL must not open its plot window. Debian/Ubuntu's build
+    # crashes (SIGFPE) when graphics are turned off, so it runs under xvfb instead.
+    graphics_off = ["PLOP", "G F", ""] if disable_graphics else []
     lines = [
-        "PLOP",
-        "G F",  # no graphics window
-        "",
+        *graphics_off,
         f"NACA {request.naca}",
         "PANE",
         "OPER",
@@ -127,24 +135,45 @@ def parse_polar(text: str) -> list[PolarPoint]:
 
 class XfoilService:
     def __init__(
-        self, runner: CommandRunner, *, xfoil_path: str, timeout_s: float, max_concurrency: int
+        self,
+        runner: CommandRunner,
+        *,
+        xfoil_path: str,
+        display: XfoilDisplay,
+        timeout_s: float,
+        max_concurrency: int,
     ) -> None:
         self._runner = runner
         self._xfoil_path = xfoil_path
+        self._display = display
         self._timeout_s = timeout_s
         self._semaphore = asyncio.Semaphore(max_concurrency)
+        # Each run gets the next display number. `xvfb-run -a` races when several start
+        # at once, and reusing a number right away fails while the last Xvfb shuts down.
+        self._displays = itertools.cycle(range(FIRST_DISPLAY, FIRST_DISPLAY + DISPLAY_COUNT))
+
+    async def _run_xfoil(self, workdir: str) -> CommandResult:
+        xfoil = f"{shlex.quote(self._xfoil_path)} < {INPUT_FILE}"
+        if self._display == "none":
+            return await self._runner.run(xfoil, cwd=workdir, timeout_s=self._timeout_s)
+
+        # Retry once on a fresh number in case another process holds this display.
+        for attempt in range(2):
+            command = f"xvfb-run --server-num={next(self._displays)} {xfoil}"
+            result = await self._runner.run(command, cwd=workdir, timeout_s=self._timeout_s)
+            if result.ok or XVFB_FAILED not in result.stderr:
+                break
+            logger.warning("xvfb failed to start (attempt %d); retrying", attempt + 1)
+        return result
 
     async def run_polar(self, request: PolarRequest) -> Polar:
         started = time.perf_counter()
+        script = build_script(request, disable_graphics=self._display == "none")
         async with self._semaphore:
             workdir = await self._runner.make_temp_dir()
             try:
-                await self._runner.write_file(f"{workdir}/{INPUT_FILE}", build_script(request))
-                result = await self._runner.run(
-                    f"{shlex.quote(self._xfoil_path)} < {INPUT_FILE}",
-                    cwd=workdir,
-                    timeout_s=self._timeout_s,
-                )
+                await self._runner.write_file(f"{workdir}/{INPUT_FILE}", script)
+                result = await self._run_xfoil(workdir)
                 if not result.ok:
                     raise RuntimeError(f"xfoil exited with {result.exit_code}: {result.stderr}")
                 text = await self._runner.read_file(f"{workdir}/{POLAR_FILE}")

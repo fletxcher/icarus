@@ -15,8 +15,10 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=ENV_FILE, env_ignore_empty=True, extra="ignore")
 
-    # Mistral
+    # Model providers: each one's models are offered only when its key is set.
     mistral_api_token: SecretStr | None = None
+    openrouter_api_key: SecretStr | None = None
+    # Used when a message doesn't pick a model; falls back to the first available one.
     default_model: str = "mistral-medium-3-5"
     # "high" streams the model's thinking before its answer; "none" skips it.
     reasoning_effort: Literal["high", "none"] = "high"
@@ -45,6 +47,10 @@ class Settings(BaseSettings):
     # XFOIL: run on this server ("local") or on the simulation VM ("vm")
     xfoil_runner: Literal["local", "vm"] = "vm"
     xfoil_path: str = "xfoil"
+    # "xvfb": run under a virtual display (needs the xvfb package); required by the
+    # Debian/Ubuntu xfoil package, which crashes when its graphics are turned off.
+    # "none": turn XFOIL's graphics off instead, for builds without that crash.
+    xfoil_display: Literal["xvfb", "none"] = "xvfb"
     xfoil_timeout_s: float = 60.0
     xfoil_max_concurrency: int = 4
 

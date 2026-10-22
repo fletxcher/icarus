@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.agent.models import MODELS, ModelOption
+from api.agent.models import ModelOption
 from api.chats import router as chats_router
 from api.compute import router as simulations_router
 from api.config import get_settings
@@ -58,8 +58,9 @@ async def health(request: Request, services: ServicesDep) -> dict[str, bool]:
 
 
 @api.get("/models", tags=["meta"])
-async def list_models() -> list[ModelOption]:
-    return MODELS
+async def list_models(services: ServicesDep) -> list[ModelOption]:
+    """Models usable with the configured provider keys."""
+    return services.models
 
 
 def create_app() -> FastAPI:

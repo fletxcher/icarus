@@ -12,7 +12,7 @@ from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
 from api.agent.graph import build_agent
-from api.config import get_settings
+from api.config import Settings, get_settings
 
 
 class ScriptedModel(BaseChatModel):
@@ -56,9 +56,11 @@ def mongo_db_name() -> Iterator[str]:
 
 @pytest.fixture
 def client(mongo_db_name: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    # Ignore the developer's .env so local keys and settings can't leak into tests.
+    monkeypatch.setitem(Settings.model_config, "env_file", None)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.setenv("MONGODB_DB", mongo_db_name)
     monkeypatch.setenv("MISTRAL_API_TOKEN", "test-token")
-    # Pin values the tests rely on, whatever the local .env says.
     monkeypatch.setenv("DEFAULT_MODEL", "mistral-medium-3-5")
     get_settings.cache_clear()
 

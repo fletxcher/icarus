@@ -96,7 +96,20 @@ def test_send_message_to_missing_thread_is_404(client: TestClient):
     assert response.status_code == 404
 
 
-def test_send_message_without_mistral_token_is_503(client: TestClient):
+def test_models_endpoint_lists_only_configured_providers(client: TestClient):
+    ids = [model["id"] for model in client.get("/api/models").json()]
+    assert ids == ["mistral-medium-3-5", "mistral-small-latest"]
+
+
+def test_send_message_with_unconfigured_provider_model_is_422(client: TestClient):
+    use_scripted_agent(client, [])
+    thread_id = create_thread(client)
+    body = {"content": "hi", "model": "openrouter/free"}
+    response = client.post(f"/api/threads/{thread_id}/messages", json=body)
+    assert response.status_code == 422
+
+
+def test_send_message_without_any_provider_is_503(client: TestClient):
     client.app.state.services.agent = None
     thread_id = create_thread(client)
     response = client.post(f"/api/threads/{thread_id}/messages", json={"content": "hi"})

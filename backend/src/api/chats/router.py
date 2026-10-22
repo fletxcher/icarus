@@ -6,7 +6,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langgraph.graph.state import CompiledStateGraph
 
-from api.agent.models import MODEL_IDS
 from api.agent.stream import stream_turn
 from api.chats.schemas import (
     MessageCreate,
@@ -77,12 +76,15 @@ async def start_turn(thread_id: str, body: MessageCreate, services: ServicesDep)
     longer change its status code.
     """
     if services.agent is None:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "MISTRAL_API_TOKEN is not set")
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "No model provider is configured (set MISTRAL_API_TOKEN or OPENROUTER_API_KEY)",
+        )
     if await services.chats.get_thread(thread_id) is None:
         raise _not_found()
 
     model = body.model or services.default_model
-    if model not in MODEL_IDS:
+    if model not in {option.id for option in services.models}:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Unknown model {model}")
 
     if body.content is not None:

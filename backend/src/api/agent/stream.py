@@ -53,15 +53,19 @@ def to_langchain(messages: list[Message]) -> list[BaseMessage]:
     return history
 
 
-def split_content(content: str | list[Any]) -> tuple[str, str]:
-    """Splits a (streamed) message's content into (reasoning, answer text).
+def split_message(message: AIMessage) -> tuple[str, str]:
+    """Splits a (streamed) model message into (reasoning, answer text).
 
-    Mistral sends thinking as `{"type": "thinking", "thinking": [{"type": "text", ...}]}`
-    blocks, which LangChain's `.text` drops.
+    Providers report reasoning differently, and LangChain's `.text` drops it:
+    - Mistral: `{"type": "thinking", "thinking": [{"type": "text", ...}]}` content blocks.
+    - OpenRouter: a `reasoning_content` string in `additional_kwargs`.
     """
-    if isinstance(content, str):
-        return "", content
     reasoning, text = [], []
+    if isinstance(extra := message.additional_kwargs.get("reasoning_content"), str):
+        reasoning.append(extra)
+    content: str | list[Any] = message.content
+    if isinstance(content, str):
+        return "".join(reasoning), content
     for block in content:
         if isinstance(block, str):
             text.append(block)
@@ -170,7 +174,7 @@ async def stream_turn(
             if mode == "messages":
                 chunk, metadata = data
                 if metadata.get("langgraph_node") == "agent" and isinstance(chunk, AIMessage):
-                    reasoning, text = split_content(chunk.content)
+                    reasoning, text = split_message(chunk)
                     if reasoning:
                         builder.add_reasoning(reasoning)
                         yield ServerSentEvent(event="reasoning", data={"text": reasoning})
