@@ -127,6 +127,49 @@ The agent is rebuilt from stored messages each turn, so edits and regenerations 
 naturally. Reasoning and tool calls from earlier turns aren't replayed; their outcomes
 live in the assistant's text.
 
+### Database
+
+MongoDB, database `MONGODB_DB`. IDs are UUID strings and dates are timezone-aware UTC.
+
+Each collection's schema and indexes are written out in `database/<collection>.json`
+(`threads`, `messages`, `files`, `simulations`, `users`, `sessions`): a `$jsonSchema`
+validator, the indexes, and whether it's `enforced`. Those files are generated from the
+Python definitions (`backend/src/api/catalog.py`), which the backend reads, not the
+files. After changing a definition, run `uv run export-schemas` in `backend/`; a test
+fails if the files are out of date (`--check` does the same).
+
+At startup the backend builds every index and, for the enforced collections (`users`,
+`sessions`), creates them with their validator or re-applies it, so a schema change
+reaches the database on the next start. The other four hold data from earlier versions of
+the app, so their schemas document what is written today and are checked by tests (every
+kind of document the app produces is inserted into a collection that enforces them), not
+by MongoDB.
+
+| Collection | Holds |
+|---|---|
+| `threads`, `messages` | Chats and their messages (a reply's `parts`: reasoning, tool calls, text) |
+| `files` | Uploaded text files attached to messages |
+| `simulations` | CFD jobs submitted to the VM |
+| `users` | Accounts (validated) |
+| `sessions` | Signed-in browsers (validated) |
+
+**`users`**: `email` (lowercase, unique), `email_verified_at`, `name`, `avatar_url`,
+`password_hash` (Argon2id; null for OAuth-only users), `identities` (`provider` +
+`subject`, unique across users), `role` (`user` / `admin`), `status` (`active` /
+`disabled`), `preferences` (`default_model`, `theme`), `created_at`, `updated_at`,
+`last_login_at`. The API returns `UserPublic`, which leaves out the hash and identities.
+
+**`sessions`**: `user_id`, `token_hash`, `created_at`, `last_seen_at`, `expires_at`,
+`revoked_at`, `user_agent`, `ip`. The browser cookie holds a random token; only its
+SHA-256 hash is stored (unique), so a database leak doesn't expose live sessions.
+MongoDB deletes a session after `expires_at` (TTL index), and `(user_id, created_at)` is
+indexed for listing or revoking a user's sessions.
+
+The models are in `backend/src/api/auth/schemas.py` (what the app reads and writes) and
+mirrored as validators in `definitions.py`, so the database itself rejects bad roles,
+uppercase emails, unknown fields and so on. Tests insert documents from the models into
+a validated collection to keep the two in step.
+
 ### Tools and what the model knows about them
 
 Tools are only given to the model when they can actually run, checked at startup:
@@ -267,6 +310,11 @@ cd backend
 uv run ruff check . && uv run ruff format .
 MONGODB_URI=mongodb://<host>:27017 uv run pytest
 ```
+
+Tests share one throwaway database per run, emptied between tests. (A database per test
+creates enough files to exhaust MongoDB's open-file limit, which is 1024 in a default
+Docker container, and crash it. Start the container with
+`--ulimit nofile=65536:65536` if you see "Too many open files".)
 
 API tests use a throwaway database and a scripted chat model in place of Mistral; they
 skip when MongoDB isn't reachable.

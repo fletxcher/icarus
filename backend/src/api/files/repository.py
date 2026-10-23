@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from pymongo.asynchronous.database import AsyncDatabase
 
-from ..db import FILES
+from ..catalog import FILES
 from .schemas import StoredFile
 
 # Only metadata by default; the text can be large.

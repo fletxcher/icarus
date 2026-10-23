@@ -1,12 +1,23 @@
-from pymongo import ASCENDING, DESCENDING, AsyncMongoClient
+import logging
+
+from pymongo import AsyncMongoClient
 from pymongo.asynchronous.database import AsyncDatabase
 
+from .catalog import COLLECTIONS, FILES, MESSAGES, SESSIONS, SIMULATIONS, THREADS, USERS
 from .config import Settings
 
-THREADS = "threads"
-MESSAGES = "messages"
-SIMULATIONS = "simulations"
-FILES = "files"
+__all__ = [
+    "FILES",
+    "MESSAGES",
+    "SESSIONS",
+    "SIMULATIONS",
+    "THREADS",
+    "USERS",
+    "create_client",
+    "ensure_schema",
+]
+
+logger = logging.getLogger(__name__)
 
 
 def create_client(settings: Settings) -> AsyncMongoClient:
@@ -14,8 +25,23 @@ def create_client(settings: Settings) -> AsyncMongoClient:
     return AsyncMongoClient(settings.mongodb_uri, tz_aware=True)
 
 
-async def ensure_indexes(db: AsyncDatabase) -> None:
-    await db[THREADS].create_index([("updated_at", DESCENDING)])
-    await db[MESSAGES].create_index([("thread_id", ASCENDING), ("seq", ASCENDING)], unique=True)
-    await db[SIMULATIONS].create_index([("thread_id", ASCENDING), ("created_at", DESCENDING)])
-    await db[FILES].create_index([("thread_id", ASCENDING)])
+async def ensure_schema(db: AsyncDatabase) -> None:
+    """Applies the catalog: validators for enforced collections, then every index.
+
+    Safe to run on every startup: validators are re-applied (`collMod`), indexes that
+    already exist are left alone.
+    """
+    existing = set(await db.list_collection_names())
+    for spec in COLLECTIONS:
+        if spec.enforced:
+            options = {
+                "validator": spec.validator,
+                "validationLevel": "strict",
+                "validationAction": "error",
+            }
+            if spec.name in existing:
+                await db.command("collMod", spec.name, **options)
+            else:
+                await db.create_collection(spec.name, **options)
+                logger.info("created collection %s with a schema validator", spec.name)
+        await db[spec.name].create_indexes(spec.indexes)

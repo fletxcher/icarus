@@ -9,7 +9,7 @@ from .agent.models import ModelOption
 from .chats import router as chats_router
 from .compute import router as simulations_router
 from .config import get_settings
-from .db import create_client, ensure_indexes
+from .db import create_client, ensure_schema
 from .dependencies import ServicesDep
 from .files import router as files_router
 from .log_config import configure_logging
@@ -31,7 +31,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     client = create_client(settings)
     db = client[settings.mongodb_db]
-    await ensure_indexes(db)
+    await ensure_schema(db)
 
     services = build_services(settings, db)
     if services.agent is None:

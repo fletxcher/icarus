@@ -1,0 +1,83 @@
+{
+  "collection": "sessions",
+  "description": "Signed-in browsers. Stores a hash of the cookie token; expired sessions are deleted automatically.",
+  "enforced": true,
+  "validator": {
+    "$jsonSchema": {
+      "bsonType": "object",
+      "additionalProperties": false,
+      "required": [
+        "_id",
+        "user_id",
+        "token_hash",
+        "created_at",
+        "last_seen_at",
+        "expires_at"
+      ],
+      "properties": {
+        "_id": {
+          "bsonType": "string"
+        },
+        "user_id": {
+          "bsonType": "string"
+        },
+        "token_hash": {
+          "bsonType": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "created_at": {
+          "bsonType": "date"
+        },
+        "last_seen_at": {
+          "bsonType": "date"
+        },
+        "expires_at": {
+          "bsonType": "date"
+        },
+        "revoked_at": {
+          "bsonType": [
+            "date",
+            "null"
+          ]
+        },
+        "user_agent": {
+          "bsonType": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        },
+        "ip": {
+          "bsonType": [
+            "string",
+            "null"
+          ],
+          "maxLength": 45
+        }
+      }
+    }
+  },
+  "indexes": [
+    {
+      "name": "token_hash_unique",
+      "unique": true,
+      "key": {
+        "token_hash": 1
+      }
+    },
+    {
+      "name": "expires_at_ttl",
+      "expireAfterSeconds": 0,
+      "key": {
+        "expires_at": 1
+      }
+    },
+    {
+      "name": "user_sessions",
+      "key": {
+        "user_id": 1,
+        "created_at": -1
+      }
+    }
+  ]
+}

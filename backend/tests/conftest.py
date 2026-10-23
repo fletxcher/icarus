@@ -40,19 +40,37 @@ async def add(a: int, b: int) -> str:
     return str(a + b)
 
 
-@pytest.fixture
-def mongo_db_name() -> Iterator[str]:
-    """A throwaway database; skips the test when MongoDB isn't reachable."""
-    uri = os.environ.get("MONGODB_URI", "mongodb://localhost:27017")
-    client = MongoClient(uri, serverSelectionTimeoutMS=1000)
+MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017")
+
+
+@pytest.fixture(scope="session")
+def _test_database() -> Iterator[str]:
+    """One throwaway database for the whole run; skips when MongoDB isn't reachable.
+
+    It's shared (and emptied between tests) rather than created per test: every database
+    adds files for its collections and indexes, and enough of them exhaust MongoDB's
+    open-file limit and crash it.
+    """
+    client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=1000)
     try:
         client.admin.command("ping")
     except PyMongoError:
-        pytest.skip(f"MongoDB not reachable at {uri}")
+        pytest.skip(f"MongoDB not reachable at {MONGODB_URI}")
     name = f"icarus_test_{uuid4().hex[:8]}"
     yield name
     client.drop_database(name)
     client.close()
+
+
+@pytest.fixture
+def mongo_db_name(_test_database: str) -> str:
+    """The shared test database, with every collection emptied (schemas and indexes stay)."""
+    client = MongoClient(MONGODB_URI)
+    database = client[_test_database]
+    for name in database.list_collection_names():
+        database[name].delete_many({})
+    client.close()
+    return _test_database
 
 
 @pytest.fixture

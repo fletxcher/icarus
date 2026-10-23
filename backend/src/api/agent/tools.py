@@ -8,7 +8,8 @@ from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, BeforeValidator, Field
 
 from ..compute.plots import describe_figure, validate_figure
-from ..compute.simulations import CfdCase, Simulation, SimulationService
+from ..compute.schemas import CfdCase, Simulation
+from ..compute.simulations import SimulationService
 from ..compute.xfoil import Polar, PolarRequest, XfoilService
 
 TOP_CANDIDATES = 5

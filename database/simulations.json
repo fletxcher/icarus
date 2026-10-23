@@ -1,0 +1,107 @@
+{
+  "collection": "simulations",
+  "description": "CFD jobs submitted to the simulation VM, with their status and results.",
+  "enforced": false,
+  "validator": {
+    "$jsonSchema": {
+      "bsonType": "object",
+      "additionalProperties": false,
+      "required": [
+        "_id",
+        "thread_id",
+        "case",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "_id": {
+          "bsonType": "string"
+        },
+        "thread_id": {
+          "bsonType": [
+            "string",
+            "null"
+          ]
+        },
+        "case": {
+          "bsonType": "object",
+          "additionalProperties": false,
+          "required": [
+            "naca",
+            "alpha",
+            "reynolds",
+            "mach",
+            "mesh"
+          ],
+          "properties": {
+            "naca": {
+              "bsonType": "string",
+              "pattern": "^\\d{4,5}$"
+            },
+            "alpha": {
+              "bsonType": "number",
+              "minimum": -30,
+              "maximum": 30
+            },
+            "reynolds": {
+              "bsonType": "number",
+              "minimum": 0,
+              "exclusiveMinimum": true
+            },
+            "mach": {
+              "bsonType": "number",
+              "minimum": 0,
+              "maximum": 5,
+              "exclusiveMaximum": true
+            },
+            "mesh": {
+              "bsonType": "string",
+              "enum": [
+                "coarse",
+                "medium",
+                "fine"
+              ]
+            }
+          }
+        },
+        "status": {
+          "bsonType": "string",
+          "enum": [
+            "queued",
+            "running",
+            "completed",
+            "failed"
+          ]
+        },
+        "result": {
+          "bsonType": [
+            "object",
+            "null"
+          ]
+        },
+        "error": {
+          "bsonType": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at": {
+          "bsonType": "date"
+        },
+        "updated_at": {
+          "bsonType": "date"
+        }
+      }
+    }
+  },
+  "indexes": [
+    {
+      "name": "thread_id_1_created_at_-1",
+      "key": {
+        "thread_id": 1,
+        "created_at": -1
+      }
+    }
+  ]
+}

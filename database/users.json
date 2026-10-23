@@ -1,0 +1,159 @@
+{
+  "collection": "users",
+  "description": "Accounts: email, credentials (password hash and/or OAuth identities), role and preferences.",
+  "enforced": true,
+  "validator": {
+    "$jsonSchema": {
+      "bsonType": "object",
+      "additionalProperties": false,
+      "required": [
+        "_id",
+        "email",
+        "identities",
+        "role",
+        "status",
+        "preferences",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "_id": {
+          "bsonType": "string"
+        },
+        "email": {
+          "bsonType": "string",
+          "maxLength": 254,
+          "pattern": "^[^\\sA-Z@]+@[^\\sA-Z@]+$"
+        },
+        "email_verified_at": {
+          "bsonType": [
+            "date",
+            "null"
+          ]
+        },
+        "name": {
+          "bsonType": [
+            "string",
+            "null"
+          ],
+          "maxLength": 100
+        },
+        "avatar_url": {
+          "bsonType": [
+            "string",
+            "null"
+          ],
+          "maxLength": 2048
+        },
+        "password_hash": {
+          "bsonType": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        },
+        "identities": {
+          "bsonType": "array",
+          "maxItems": 10,
+          "items": {
+            "bsonType": "object",
+            "additionalProperties": false,
+            "required": [
+              "provider",
+              "subject",
+              "linked_at"
+            ],
+            "properties": {
+              "provider": {
+                "bsonType": "string",
+                "enum": [
+                  "github",
+                  "google"
+                ]
+              },
+              "subject": {
+                "bsonType": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "linked_at": {
+                "bsonType": "date"
+              }
+            }
+          }
+        },
+        "role": {
+          "bsonType": "string",
+          "enum": [
+            "user",
+            "admin"
+          ]
+        },
+        "status": {
+          "bsonType": "string",
+          "enum": [
+            "active",
+            "disabled"
+          ]
+        },
+        "preferences": {
+          "bsonType": "object",
+          "additionalProperties": false,
+          "required": [
+            "theme"
+          ],
+          "properties": {
+            "default_model": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "theme": {
+              "bsonType": "string",
+              "enum": [
+                "light",
+                "dark",
+                "system"
+              ]
+            }
+          }
+        },
+        "created_at": {
+          "bsonType": "date"
+        },
+        "updated_at": {
+          "bsonType": "date"
+        },
+        "last_login_at": {
+          "bsonType": [
+            "date",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  "indexes": [
+    {
+      "name": "email_unique",
+      "unique": true,
+      "key": {
+        "email": 1
+      }
+    },
+    {
+      "name": "identity_unique",
+      "unique": true,
+      "partialFilterExpression": {
+        "identities.0": {
+          "$exists": true
+        }
+      },
+      "key": {
+        "identities.provider": 1,
+        "identities.subject": 1
+      }
+    }
+  ]
+}

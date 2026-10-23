@@ -1,0 +1,207 @@
+{
+  "collection": "messages",
+  "description": "Messages in a chat: the user's, and the assistant's replies with their reasoning, tool calls and text in order.",
+  "enforced": false,
+  "validator": {
+    "$jsonSchema": {
+      "bsonType": "object",
+      "additionalProperties": false,
+      "required": [
+        "_id",
+        "thread_id",
+        "seq",
+        "role",
+        "content",
+        "status",
+        "model",
+        "parts",
+        "attachments",
+        "created_at"
+      ],
+      "properties": {
+        "_id": {
+          "bsonType": "string"
+        },
+        "thread_id": {
+          "bsonType": "string"
+        },
+        "seq": {
+          "bsonType": [
+            "int",
+            "long"
+          ],
+          "minimum": 1
+        },
+        "role": {
+          "bsonType": "string",
+          "enum": [
+            "user",
+            "assistant"
+          ]
+        },
+        "content": {
+          "bsonType": "string"
+        },
+        "status": {
+          "bsonType": "string",
+          "enum": [
+            "streaming",
+            "done",
+            "stopped",
+            "error"
+          ]
+        },
+        "model": {
+          "bsonType": [
+            "string",
+            "null"
+          ]
+        },
+        "parts": {
+          "bsonType": "array",
+          "items": {
+            "oneOf": [
+              {
+                "bsonType": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "text"
+                ],
+                "properties": {
+                  "type": {
+                    "bsonType": "string",
+                    "enum": [
+                      "text"
+                    ]
+                  },
+                  "text": {
+                    "bsonType": "string"
+                  }
+                }
+              },
+              {
+                "bsonType": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "text"
+                ],
+                "properties": {
+                  "type": {
+                    "bsonType": "string",
+                    "enum": [
+                      "reasoning"
+                    ]
+                  },
+                  "text": {
+                    "bsonType": "string"
+                  }
+                }
+              },
+              {
+                "bsonType": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "id",
+                  "name",
+                  "args",
+                  "status"
+                ],
+                "properties": {
+                  "type": {
+                    "bsonType": "string",
+                    "enum": [
+                      "tool"
+                    ]
+                  },
+                  "id": {
+                    "bsonType": "string"
+                  },
+                  "name": {
+                    "bsonType": "string"
+                  },
+                  "args": {
+                    "bsonType": "object"
+                  },
+                  "status": {
+                    "bsonType": "string",
+                    "enum": [
+                      "running",
+                      "success",
+                      "error"
+                    ]
+                  },
+                  "result": {
+                    "bsonType": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "artifact": {
+                    "bsonType": [
+                      "object",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "attachments": {
+          "bsonType": "array",
+          "maxItems": 10,
+          "items": {
+            "bsonType": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "size",
+              "content_type"
+            ],
+            "properties": {
+              "id": {
+                "bsonType": "string"
+              },
+              "name": {
+                "bsonType": "string"
+              },
+              "size": {
+                "bsonType": [
+                  "int",
+                  "long"
+                ],
+                "minimum": 0
+              },
+              "content_type": {
+                "bsonType": "string"
+              }
+            }
+          }
+        },
+        "error": {
+          "bsonType": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at": {
+          "bsonType": "date"
+        }
+      }
+    }
+  },
+  "indexes": [
+    {
+      "name": "thread_id_1_seq_1",
+      "unique": true,
+      "key": {
+        "thread_id": 1,
+        "seq": 1
+      }
+    }
+  ]
+}

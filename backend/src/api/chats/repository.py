@@ -5,7 +5,7 @@ from uuid import uuid4
 from pymongo import ASCENDING, DESCENDING, ReturnDocument
 from pymongo.asynchronous.database import AsyncDatabase
 
-from ..db import MESSAGES, THREADS
+from ..catalog import MESSAGES, THREADS
 from ..files.schemas import Attachment
 from .schemas import Message, MessagePart, MessageStatus, Role, Thread
 

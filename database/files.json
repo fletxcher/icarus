@@ -1,0 +1,58 @@
+{
+  "collection": "files",
+  "description": "Text files uploaded to be sent with a message.",
+  "enforced": false,
+  "validator": {
+    "$jsonSchema": {
+      "bsonType": "object",
+      "additionalProperties": false,
+      "required": [
+        "_id",
+        "name",
+        "size",
+        "content_type",
+        "text",
+        "thread_id",
+        "created_at"
+      ],
+      "properties": {
+        "_id": {
+          "bsonType": "string"
+        },
+        "name": {
+          "bsonType": "string"
+        },
+        "size": {
+          "bsonType": [
+            "int",
+            "long"
+          ],
+          "minimum": 0
+        },
+        "content_type": {
+          "bsonType": "string"
+        },
+        "text": {
+          "bsonType": "string"
+        },
+        "thread_id": {
+          "bsonType": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at": {
+          "bsonType": "date"
+        }
+      }
+    }
+  },
+  "indexes": [
+    {
+      "name": "thread_id_1",
+      "key": {
+        "thread_id": 1
+      }
+    }
+  ]
+}

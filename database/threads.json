@@ -1,0 +1,59 @@
+{
+  "collection": "threads",
+  "description": "Chat sessions. One document per conversation; its messages are in `messages`.",
+  "enforced": false,
+  "validator": {
+    "$jsonSchema": {
+      "bsonType": "object",
+      "additionalProperties": false,
+      "required": [
+        "_id",
+        "title",
+        "auto_title",
+        "created_at",
+        "updated_at",
+        "message_seq"
+      ],
+      "properties": {
+        "_id": {
+          "bsonType": "string"
+        },
+        "title": {
+          "bsonType": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "auto_title": {
+          "bsonType": "bool"
+        },
+        "created_at": {
+          "bsonType": "date"
+        },
+        "updated_at": {
+          "bsonType": "date"
+        },
+        "pinned_at": {
+          "bsonType": [
+            "date",
+            "null"
+          ]
+        },
+        "message_seq": {
+          "bsonType": [
+            "int",
+            "long"
+          ],
+          "minimum": 0
+        }
+      }
+    }
+  },
+  "indexes": [
+    {
+      "name": "updated_at_-1",
+      "key": {
+        "updated_at": -1
+      }
+    }
+  ]
+}
