@@ -10,40 +10,45 @@ const SUGGESTIONS = [
     label: "How to",
     icon: CircleHelpIcon,
     prompts: [
-      "How do I set up a personal budget that actually works?",
-      "How do I prepare for my first marathon?",
+      "How do I choose between k-epsilon and k-omega SST for an external aerodynamics case?",
+      "How do I set up a mesh independence study for a CFD simulation?",
+      "How do I estimate the first cell height to hit a target y+ of 1?",
     ],
   },
   {
     label: "Explain",
     icon: LightbulbIcon,
     prompts: [
-      "Explain how public-key cryptography works in simple terms.",
-      "What is quantum computing and how does it differ from classical computing?",
+      "Explain the difference between RANS, LES and DNS.",
+      "What is the CFL condition and why does it matter for stability?",
+      "Explain how the SIMPLE algorithm couples pressure and velocity.",
     ],
   },
   {
     label: "Write",
     icon: PencilIcon,
     prompts: [
-      "Write a short story about a chance encounter that changes someone's life.",
-      "Draft a friendly follow-up email after a job interview.",
+      "Write a Python script that plots a velocity profile and a pressure contour from CFD output.",
+      "Draft the methodology section of a report on a turbulent pipe flow simulation.",
+      "Write a short summary of boundary layer theory for a new CFD team member.",
     ],
   },
   {
     label: "Advice",
     icon: BookOpenIcon,
     prompts: [
-      "What's the best approach to negotiating a salary increase?",
-      "How can I keep a healthy work-life balance while working remotely?",
+      "My CFD simulation keeps diverging. What should I check first?",
+      "What's the best way to decide between a structured and an unstructured mesh?",
+      "How can I speed up a transient CFD simulation without losing accuracy?",
     ],
   },
   {
     label: "Analyze",
     icon: ChartColumnIcon,
     prompts: [
-      "Compare the pros and cons of the major renewable energy sources.",
-      "Analyze how remote work has changed city economies.",
+      "Compare finite volume, finite element and finite difference methods for CFD.",
+      "Analyze the trade-offs between wall functions and resolving the viscous sublayer.",
+      "Analyze why the drag coefficient on a cylinder changes with Reynolds number.",
     ],
   },
 ];
