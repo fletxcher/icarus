@@ -292,12 +292,17 @@ and time left, or "No simulations running", plus the most recent finished ones. 
 one goes to its own page, `/simulations/<id>`, which has the full monitor: stages,
 progress, Courant number and live force-coefficient plots (Overview), residuals, setup
 (case, solver, mesh quality, the OpenFOAM dictionaries), the log tail and the results with
-the flow video. The trash button on that page deletes the job after a confirmation: a
-running job is stopped, then its record and its files on the work station are removed
-(`DELETE /api/simulations/{id}`). A CFD tool card in the chat links to its job's page too. The backend
-serves it from `GET /api/simulations` (the list), `/api/simulations/{id}/info`,
-`/progress?log_offset=&coeff_offset=` (only what is new since the offsets the last call
-returned) and `/files/flow.mp4|flow.png`; these read the work station's logs over SSH
+the flow images and video. The trash button on that page asks for a confirmation and then
+takes the job off the list; nothing is deleted. The job keeps running if it was running,
+its results and files stay, and the page stays reachable (the button turns into *Show in
+list*). The simulation's card in the chat always links to its page, listed or not.
+`PATCH /api/simulations/{id}` with `{"hidden": true|false}` does it, and there is no
+endpoint that deletes a single job. A simulation is only really deleted with the chat it
+was started in: deleting the thread stops the job if it is running and removes its record and
+its files on the work station. The backend serves the rest from `GET /api/simulations` (the
+list), `/api/simulations/{id}/info`, `/progress?log_offset=&coeff_offset=` (only what is
+new since the offsets the last call returned) and
+`/files/velocity.png|pressure.png|flow.mp4`; these read the work station's logs over SSH
 through `ws/cfd_case.py`.
 
 **Images and flow video.** With `video` on (the default), every run gets a
