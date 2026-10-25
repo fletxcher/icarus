@@ -119,10 +119,12 @@ def main(job_dir: Path) -> None:
     view.Background = BACKGROUND
     view.OrientationAxesVisibility = 0
     view.CameraParallelProjection = 1
-    view.CameraPosition = [focal[0], focal[1], 10.0 * length]
-    view.CameraFocalPoint = [focal[0], focal[1], 0.0]
-    view.CameraViewUp = [0.0, 1.0, 0.0]
-    view.CameraParallelScale = half_height
+
+    def frame_camera() -> None:
+        view.CameraPosition = [focal[0], focal[1], 10.0 * length]
+        view.CameraFocalPoint = [focal[0], focal[1], 0.0]
+        view.CameraViewUp = [0.0, 1.0, 0.0]
+        view.CameraParallelScale = half_height
 
     display = pv.Show(field, view)
     pv.Hide(reader, view)
@@ -130,6 +132,10 @@ def main(job_dir: Path) -> None:
     label_display = pv.Show(label, view)
     label_display.WindowLocation = "Upper Left Corner"
     label_display.FontSize = 18
+    # ParaView fits the camera to the data when it first draws, which would undo the framing,
+    # so draw once and then frame the view.
+    pv.Render(view)
+    frame_camera()
 
     shown_bar = None
 
