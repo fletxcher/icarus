@@ -28,16 +28,43 @@
           "bsonType": "object",
           "additionalProperties": false,
           "required": [
-            "naca",
-            "alpha",
             "reynolds",
             "mach",
             "mesh"
           ],
           "properties": {
-            "naca": {
+            "shape": {
               "bsonType": "string",
+              "enum": [
+                "airfoil",
+                "cylinder",
+                "ellipse",
+                "wedge",
+                "rectangle"
+              ]
+            },
+            "naca": {
+              "bsonType": [
+                "string",
+                "null"
+              ],
               "pattern": "^\\d{4,5}$"
+            },
+            "aspect_ratio": {
+              "bsonType": [
+                "number",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 20
+            },
+            "half_angle": {
+              "bsonType": [
+                "number",
+                "null"
+              ],
+              "minimum": 5,
+              "maximum": 60
             },
             "alpha": {
               "bsonType": "number",
@@ -61,6 +88,39 @@
                 "coarse",
                 "medium",
                 "fine"
+              ]
+            },
+            "wall_type": {
+              "bsonType": "string",
+              "enum": [
+                "no_slip",
+                "slip",
+                "moving",
+                "rotating"
+              ]
+            },
+            "wall_velocity_x": {
+              "bsonType": "number"
+            },
+            "wall_velocity_y": {
+              "bsonType": "number"
+            },
+            "spin_ratio": {
+              "bsonType": "number",
+              "minimum": -10,
+              "maximum": 10
+            },
+            "roughness_height": {
+              "bsonType": "number",
+              "minimum": 0,
+              "maximum": 0.05
+            },
+            "regime": {
+              "bsonType": "string",
+              "enum": [
+                "auto",
+                "steady",
+                "transient"
               ]
             }
           }

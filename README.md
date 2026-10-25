@@ -263,20 +263,47 @@ host key must be in `~/.ssh/known_hosts` (or `WS_KNOWN_HOSTS_PATH`).
    `{"status": "running" | "completed" | "failed", "result": {...}, "error": "..."}`.
 4. `get_simulation_status` / `GET /api/simulations/{id}` read it back into Mongo.
 
-`ws/run_case.sh` implements that contract with a placeholder solve step. Swap in the
-real mesh + solver pipeline.
+`ws/run_case.sh` implements that contract: gmsh meshes the case (one cell thick,
+boundary layer resolved to y+ ~ 1), `gmshToFoam` converts it, and OpenFOAM solves it on
+up to 4 cores with the k-omega SST model (laminar below Re 1000). `ws/cfd_case.py` writes
+the mesh script and the OpenFOAM dictionaries from `case.json` and reads the results
+back; each step logs to `{job_dir}/log.<step>`, and a failure puts the end of that log in
+the job's `error`. The flow is incompressible, so `mach` is ignored (and flagged above
+Mach 0.3).
+
+| `shape` | Needs | Reference length | Default regime |
+|---|---|---|---|
+| `airfoil` | `naca` (4-digit, or 5-digit without reflex) | chord | steady (`simpleFoam`) |
+| `cylinder` | | diameter | transient (`pimpleFoam`) |
+| `ellipse` | `aspect_ratio` (length / height) | frontal height | transient |
+| `wedge` | `half_angle` (apex faces the flow) | base height | transient |
+| `rectangle` | `aspect_ratio` (length / height) | frontal height | transient |
+
+`regime` overrides the default. Steady runs stop when the residuals converge (or after
+2500 / 3500 / 5000 iterations for coarse / medium / fine meshes) and report the average of
+the last iterations; transient runs go to 80 convective times, average over the second
+half and report the Strouhal number when the lift oscillates. Results carry `cl`, `cd`,
+`cm` (per unit span, on the reference length), `history` for plotting, final residuals,
+the airfoil's y+, the cell count and `warnings`.
+
+Wall conditions on the body (`wall_type`): `no_slip`, `slip`, `moving` (surface velocity
+`wall_velocity_x` / `wall_velocity_y` in freestream speeds) and `rotating` (a cylinder with
+`spin_ratio` = surface speed / freestream speed). `roughness_height` (fraction of the
+reference length) adds a rough-wall function and sizes the first cell for y+ ~ 30. The
+flow direction is rotated by `alpha`, so the farfield and mesh stay the same.
 
 **Setting up a work station.** Copy `ws/` to a fresh Debian/Ubuntu work station and run, as the user the
 backend connects as:
 
 ```bash
-./setup.sh --install     # XFOIL, xvfb, xauth; ~/icarus/bin/run_case.sh; ~/icarus/jobs
+./setup.sh --install     # XFOIL, gmsh, OpenFOAM; ~/icarus/bin/run_case.sh; ~/icarus/jobs
 ./setup.sh --uninstall   # removes what --install added (asks before deleting job data)
 ```
 
-`--install` checks that XFOIL runs headless and prints the matching `.env` values.
-`--uninstall` only removes packages that `--install` itself installed, then runs
-`apt-get autoremove`. No CFD solver is installed yet.
+`--install` adds the OpenFOAM apt repository if it's missing (it needs `sudo`), installs
+`OPENFOAM_PACKAGE` (default `openfoam2512`, about 1 GB), checks that XFOIL and OpenFOAM
+work and prints the matching `.env` values. `--uninstall` only removes packages that
+`--install` itself installed, then runs `apt-get autoremove`.
 
 **XFOIL** runs wherever `XFOIL_RUNNER` points (`ws` or `local`), through the same
 `CommandRunner` interface. One polar takes about a second, so CPU isn't the deciding

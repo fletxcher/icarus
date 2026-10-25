@@ -51,10 +51,24 @@ def _format_polar(polar: Polar) -> str:
     return "\n".join([header, summary, "", *rows])
 
 
+HISTORY_POINTS_FOR_MODEL = 40
+
+
+def _result_for_model(result: dict[str, Any]) -> dict[str, Any]:
+    """The coefficient history is long; give the model a thinned copy it can still plot."""
+    history = result.get("history")
+    if not isinstance(history, dict):
+        return result
+    count = max((len(values) for values in history.values()), default=0)
+    step = max(1, -(-count // HISTORY_POINTS_FOR_MODEL))
+    return {**result, "history": {name: values[::step] for name, values in history.items()}}
+
+
 def _format_simulation(simulation: Simulation) -> str:
-    lines = [f"Job {simulation.id}: {simulation.status}", f"Case: {simulation.case.model_dump()}"]
+    case = simulation.case.model_dump(exclude_none=True)
+    lines = [f"Job {simulation.id}: {simulation.status}", f"Case: {case}"]
     if simulation.result:
-        lines.append(f"Result: {simulation.result}")
+        lines.append(f"Result: {_result_for_model(simulation.result)}")
     if simulation.error:
         lines.append(f"Error: {simulation.error}")
     return "\n".join(lines)
@@ -129,8 +143,14 @@ def simulation_tools(simulations: SimulationService) -> list[BaseTool]:
             coroutine=submit_cfd_simulation,
             name="submit_cfd_simulation",
             description=(
-                "Start a CFD simulation of a NACA airfoil on the simulation work station. Runs for "
-                "minutes to hours; returns a job id to check with get_simulation_status."
+                "Start a 2D CFD simulation (OpenFOAM, incompressible) of a body in a uniform flow "
+                "on the simulation work station: an airfoil, cylinder, ellipse, wedge or "
+                "rectangle, with a choice of wall condition (no-slip, slip, moving, rotating, "
+                "rough). Airfoils run steady RANS; "
+                " the other shapes run time-accurate and report vortex shedding "
+                "(Strouhal number). Runs for minutes to an hour or more; returns a job id to check "
+                "with get_simulation_status. Results: Cl, Cd, Cm, the coefficient history for "
+                "plotting, and warnings (e.g. not converged) that should be passed on to the user."
             ),
             args_schema=CfdCase,
         ),

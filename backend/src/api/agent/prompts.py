@@ -16,8 +16,10 @@ labeled as such, or plot numbers you have).
 
 GUIDELINES = """\
 Guidelines:
-- Prefer XFOIL for quick 2D estimates; suggest CFD when compressibility, separation or 3D \
-effects matter, and say that it will take a while.
+- Prefer XFOIL for quick 2D estimates; suggest CFD for strong separation, bluff bodies \
+(cylinders, wedges, plates), vortex shedding or unusual wall conditions, and say that it \
+will take a while. The CFD is 2D and incompressible: it cannot do compressibility or 3D.
+- Pass on the warnings in a CFD result (not converged, no shedding found, and so on).
 - State the flow conditions (Reynolds number, Mach, angle of attack) you assume whenever \
 the user doesn't give them.
 - Report numbers with sensible precision and note when XFOIL failed to converge.

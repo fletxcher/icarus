@@ -2,27 +2,31 @@
 # Prepares (or cleans up) the simulation work station the Icarus backend reaches over SSH.
 #
 # Run it on the work station as the user the backend connects as (WS_USER, default "ubuntu"):
-#   ./setup.sh --install      install XFOIL + a virtual display, and the CFD job layout
+#   ./setup.sh --install      install XFOIL, gmsh and OpenFOAM, and the CFD job layout
 #   ./setup.sh --uninstall    remove what --install added (asks before deleting job data)
 #
 # Layout under ICARUS_HOME (default ~/icarus), matching the backend's defaults:
 #   bin/run_case.sh   CFD entrypoint (WS_CFD_SCRIPT)
 #   jobs/             one directory per CFD job (WS_WORKDIR/jobs)
 #
-# Assumes a Debian/Ubuntu work station. No CFD solver is installed yet: run_case.sh is a placeholder.
+# CFD runs OpenFOAM (ESI release, OPENFOAM_PACKAGE) with gmsh meshes. If the work station
+# doesn't have the OpenFOAM apt repository yet, --install adds the official one.
+# Assumes a Debian/Ubuntu work station.
 set -euo pipefail
 
 ICARUS_HOME="${ICARUS_HOME:-$HOME/icarus}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Packages installed by --install, so --uninstall removes only those.
 MANIFEST="$ICARUS_HOME/.setup-packages"
-PACKAGES=(xfoil xvfb xauth)
+OPENFOAM_PACKAGE="${OPENFOAM_PACKAGE:-openfoam2512}"
+PACKAGES=(xfoil xvfb xauth gmsh "$OPENFOAM_PACKAGE")
 
 usage() {
   cat <<EOF
 Usage: $(basename "$0") --install | --uninstall [--yes]
 
-  --install     Install XFOIL, xvfb and xauth, and create $ICARUS_HOME with the CFD runner.
+  --install     Install XFOIL, xvfb, xauth, gmsh and OpenFOAM ($OPENFOAM_PACKAGE), and
+                create $ICARUS_HOME with the CFD runner.
   --uninstall   Remove packages this script installed and delete $ICARUS_HOME.
   --yes         Don't ask before deleting $ICARUS_HOME (job data included).
 
@@ -57,6 +61,38 @@ check_xfoil() {
   rm -rf "$tmp"
 }
 
+# Makes sure apt can see the OpenFOAM package, adding the official repository if not.
+ensure_openfoam_repo() {
+  if apt-cache policy "$OPENFOAM_PACKAGE" 2> /dev/null | grep -q 'Candidate: [^(]'; then
+    return
+  fi
+  log "Adding the OpenFOAM apt repository (dl.openfoam.com)"
+  as_root apt-get install -y -qq curl ca-certificates
+  curl -fsSL https://dl.openfoam.com/add-debian-repo.sh | as_root bash
+  as_root apt-get update -qq
+}
+
+check_openfoam() {
+  local bashrc
+  bashrc="$(ls /usr/lib/openfoam/openfoam*/etc/bashrc /opt/openfoam*/etc/bashrc 2> /dev/null | tail -n 1)"
+  if [[ -z "$bashrc" ]]; then
+    log "OpenFOAM check FAILED: no etc/bashrc found"
+    return 1
+  fi
+  # OpenFOAM's bashrc isn't safe under `set -u`.
+  set +u
+  # shellcheck disable=SC1090
+  source "$bashrc"
+  set -u
+  for tool in simpleFoam pimpleFoam gmshToFoam checkMesh decomposePar; do
+    if ! command -v "$tool" > /dev/null; then
+      log "OpenFOAM check FAILED: $tool not found (sourced $bashrc)"
+      return 1
+    fi
+  done
+  log "OpenFOAM check passed ($(basename "$(dirname "$(dirname "$bashrc")")"), $bashrc)"
+}
+
 do_install() {
   if ! command -v apt-get > /dev/null; then
     echo "This script supports Debian/Ubuntu (apt) only." >&2
@@ -73,6 +109,7 @@ do_install() {
 
   mkdir -p "$ICARUS_HOME/bin" "$ICARUS_HOME/jobs"
   if ((${#missing[@]})); then
+    ensure_openfoam_repo
     log "Installing ${missing[*]}"
     as_root apt-get update -qq
     as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}"
@@ -82,9 +119,11 @@ do_install() {
   fi
 
   install -m 755 "$SCRIPT_DIR/run_case.sh" "$ICARUS_HOME/bin/run_case.sh"
-  log "Installed CFD runner at $ICARUS_HOME/bin/run_case.sh"
+  install -m 755 "$SCRIPT_DIR/cfd_case.py" "$ICARUS_HOME/bin/cfd_case.py"
+  log "Installed CFD runner at $ICARUS_HOME/bin/run_case.sh (and cfd_case.py)"
 
   check_xfoil
+  check_openfoam
 
   cat <<EOF
 
