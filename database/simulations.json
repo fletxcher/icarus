@@ -1,6 +1,6 @@
 {
   "collection": "simulations",
-  "description": "CFD jobs submitted to the simulation VM, with their status and results.",
+  "description": "CFD jobs submitted to the simulation work station, with their status and results.",
   "enforced": false,
   "validator": {
     "$jsonSchema": {

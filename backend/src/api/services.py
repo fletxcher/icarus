@@ -23,29 +23,29 @@ from .files.repository import FileRepository
 logger = logging.getLogger(__name__)
 
 
-def _vm_not_configured() -> NoReturn:
-    raise RuntimeError("the simulation VM is not configured (set VM_HOST)")
+def _ws_not_configured() -> NoReturn:
+    raise RuntimeError("the simulation work station is not configured (set WS_HOST)")
 
 
 class UnconfiguredRunner:
-    """Stands in for the VM until VM_HOST is set, failing with a clear message."""
+    """Stands in for the work station until WS_HOST is set, failing with a clear message."""
 
     async def run(
         self, command: str, *, cwd: str | None = None, timeout_s: float | None = None
     ) -> CommandResult:
-        _vm_not_configured()
+        _ws_not_configured()
 
     async def write_file(self, path: str, content: str) -> None:
-        _vm_not_configured()
+        _ws_not_configured()
 
     async def read_file(self, path: str) -> str:
-        _vm_not_configured()
+        _ws_not_configured()
 
     async def make_temp_dir(self) -> str:
-        _vm_not_configured()
+        _ws_not_configured()
 
     async def remove_dir(self, path: str) -> None:
-        _vm_not_configured()
+        _ws_not_configured()
 
 
 @dataclass
@@ -53,7 +53,7 @@ class Services:
     chats: ChatRepository
     files: FileRepository
     simulations: SimulationService
-    vm: CommandRunner
+    ws: CommandRunner
     # Models whose provider has an API key; the only ones offered.
     models: list[ModelOption]
     default_model: str
@@ -63,8 +63,8 @@ class Services:
     titles: TitleGenerator | None
 
     async def close(self) -> None:
-        if isinstance(self.vm, SSHRunner):
-            await self.vm.close()
+        if isinstance(self.ws, SSHRunner):
+            await self.ws.close()
 
 
 XFOIL_CAPABILITY = "XFOIL airfoil analysis and airfoil search"
@@ -73,8 +73,8 @@ CFD_CAPABILITY = "CFD simulations"
 
 def xfoil_unavailable(settings: Settings) -> str | None:
     """Why XFOIL can't run with this setup, or None if it can."""
-    if settings.xfoil_runner == "vm":
-        return None if settings.vm_host else "the simulation VM isn't configured"
+    if settings.xfoil_runner == "ws":
+        return None if settings.ws_host else "the simulation work station isn't configured"
     if shutil.which(settings.xfoil_path) is None:
         return "XFOIL isn't installed on the server"
     if settings.xfoil_display == "xvfb" and shutil.which("xvfb-run") is None:
@@ -86,22 +86,22 @@ def unavailable_capabilities(settings: Settings) -> dict[str, str]:
     unavailable = {}
     if reason := xfoil_unavailable(settings):
         unavailable[XFOIL_CAPABILITY] = reason
-    if not settings.vm_host:
-        unavailable[CFD_CAPABILITY] = "the simulation VM isn't configured"
+    if not settings.ws_host:
+        unavailable[CFD_CAPABILITY] = "the simulation work station isn't configured"
     return unavailable
 
 
 def build_services(settings: Settings, db: AsyncDatabase) -> Services:
-    vm: CommandRunner = SSHRunner(settings) if settings.vm_host else UnconfiguredRunner()
+    ws: CommandRunner = SSHRunner(settings) if settings.ws_host else UnconfiguredRunner()
     xfoil = XfoilService(
-        LocalRunner() if settings.xfoil_runner == "local" else vm,
+        LocalRunner() if settings.xfoil_runner == "local" else ws,
         xfoil_path=settings.xfoil_path,
         display=settings.xfoil_display,
         timeout_s=settings.xfoil_timeout_s,
         max_concurrency=settings.xfoil_max_concurrency,
     )
     simulations = SimulationService(
-        db, vm, workdir=settings.vm_workdir, script=settings.vm_cfd_script
+        db, ws, workdir=settings.ws_workdir, script=settings.ws_cfd_script
     )
 
     # Only tools that can run are given to the model; the prompt names the rest as missing.
@@ -148,7 +148,7 @@ def build_services(settings: Settings, db: AsyncDatabase) -> Services:
         chats=chats,
         files=files,
         simulations=simulations,
-        vm=vm,
+        ws=ws,
         models=models,
         default_model=default_model,
         agent=agent,

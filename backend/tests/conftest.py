@@ -40,7 +40,7 @@ async def add(a: int, b: int) -> str:
     return str(a + b)
 
 
-MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017")
+MONGODB_URI = os.environ.get("MONGODB_LOCAL_URI", "mongodb://localhost:27017")
 
 
 @pytest.fixture(scope="session")
@@ -78,7 +78,10 @@ def client(mongo_db_name: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     # Ignore the developer's .env so local keys and settings can't leak into tests.
     monkeypatch.setitem(Settings.model_config, "env_file", None)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    monkeypatch.setenv("MONGODB_DB", mongo_db_name)
+    # Always the local server, whatever the developer's environment says.
+    monkeypatch.setenv("MONGODB_TARGET", "local")
+    monkeypatch.setenv("MONGODB_LOCAL_URI", MONGODB_URI)
+    monkeypatch.setenv("MONGODB_LOCAL_NAME", mongo_db_name)
     monkeypatch.setenv("MISTRAL_API_TOKEN", "test-token")
     monkeypatch.setenv("DEFAULT_MODEL", "mistral-medium-3-5")
     # Off unless a test plugs in a scripted title model (see use_scripted_titles).

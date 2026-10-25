@@ -69,7 +69,7 @@ COLLECTIONS = [
     ),
     CollectionSpec(
         SIMULATIONS,
-        "CFD jobs submitted to the simulation VM, with their status and results.",
+        "CFD jobs submitted to the simulation work station, with their status and results.",
         SIMULATIONS_VALIDATOR,
         SIMULATIONS_INDEXES,
         enforced=False,

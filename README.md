@@ -4,7 +4,7 @@ An LLM chat app for airfoil analysis and design.
 
 - `frontend/`: Next.js + shadcn/ui chat interface
 - `backend/`: FastAPI service that stores chats in MongoDB and runs a LangGraph agent
-  (Mistral) with tools for XFOIL analyses and CFD simulations on the OCI simulation VM
+  (Mistral) with tools for XFOIL analyses and CFD simulations on the simulation work station
 
 Configuration for both lives in the `.env` at the repo root.
 
@@ -32,10 +32,18 @@ uv run api   # http://localhost:8000, docs at /docs
 Every setting is in `backend/src/api/config.py`. The API starts without any model
 provider key; chat storage works and sending a message returns 503 until one is set.
 
-### Local MongoDB
+### MongoDB: local or remote
+
+`MONGODB_TARGET` is `local` (default) or `remote` and picks which connection is used:
+`MONGODB_LOCAL_URI` / `MONGODB_LOCAL_NAME`, or `MONGODB_REMOTE_URI` /
+`MONGODB_REMOTE_NAME` (e.g. MongoDB Atlas; the URI carries the credentials, and
+`remote` without it refuses to start). The startup log shows which one is in use. Tests
+always use the local one.
+
+#### Local MongoDB
 
 The `icarus-db` container doesn't publish its port, so `localhost:27017` won't reach it.
-Either recreate it with `-p 27017:27017`, or point `MONGODB_URI` at the container's IP
+Either recreate it with `-p 27017:27017`, or point `MONGODB_LOCAL_URI` at the container's IP
 (`docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' icarus-db`),
 which can change when the container restarts. The container stores data in an anonymous
 volume, so mount that volume explicitly if you recreate it and want to keep the data.
@@ -49,7 +57,7 @@ the `X-Request-ID` response header). Logged:
   responses are summarized), plus the traceback of any unhandled error;
 - each agent turn, model call (duration, token usage, tools requested) and tool call
   (arguments, result or traceback, duration);
-- commands run locally or on the VM (exit code, duration, stderr on failure) and CFD
+- commands run locally or on the work station (exit code, duration, stderr on failure) and CFD
   job status changes.
 
 `LOG_LEVEL` (default `INFO`) and `LOG_BODY_MAX_CHARS` (default 2000, longer payloads are
@@ -74,12 +82,12 @@ backend/src/api/
     prompts.py        System prompt
     models.py         Selectable Mistral models
   compute/
-    runner.py         CommandRunner: LocalRunner (this server) / SSHRunner (VM)
+    runner.py         CommandRunner: LocalRunner (this server) / SSHRunner (work station)
     xfoil.py          XFOIL script builder, polar parser, XfoilService
     simulations.py    CFD job submission and polling
     router.py         /api/simulations
-vm/setup.sh             Prepares (or cleans up) a fresh simulation VM
-vm/run_case.sh          Placeholder CFD entrypoint, installed on the VM by setup.sh
+ws/setup.sh             Prepares (or cleans up) a fresh simulation work station
+ws/run_case.sh          Placeholder CFD entrypoint, installed on the work station by setup.sh
 ```
 
 ### API
@@ -95,7 +103,7 @@ vm/run_case.sh          Placeholder CFD entrypoint, installed on the VM by setup
 | POST | `/api/threads/{id}/messages` | Send `{content, model?, attachments?}` and stream the reply (SSE) |
 | POST | `/api/files` | Upload a text file (multipart `file`) to attach; returns its id |
 | DELETE | `/api/files/{id}` | Remove a file that hasn't been sent yet |
-| GET | `/api/simulations/{job_id}` | CFD job status (refreshes from the VM) |
+| GET | `/api/simulations/{job_id}` | CFD job status (refreshes from the work station) |
 | GET | `/api/models`, `/api/health` | |
 
 **Edit** a message: delete from it, then POST the new content.
@@ -129,7 +137,7 @@ live in the assistant's text.
 
 ### Database
 
-MongoDB, database `MONGODB_DB`. IDs are UUID strings and dates are timezone-aware UTC.
+MongoDB, database `MONGODB_LOCAL_NAME` or `MONGODB_REMOTE_NAME`. IDs are UUID strings and dates are timezone-aware UTC.
 
 Each collection's schema and indexes are written out in `database/<collection>.json`
 (`threads`, `messages`, `files`, `simulations`, `users`, `sessions`): a `$jsonSchema`
@@ -149,7 +157,7 @@ by MongoDB.
 |---|---|
 | `threads`, `messages` | Chats and their messages (a reply's `parts`: reasoning, tool calls, text) |
 | `files` | Uploaded text files attached to messages |
-| `simulations` | CFD jobs submitted to the VM |
+| `simulations` | CFD jobs submitted to the work station |
 | `users` | Accounts (validated) |
 | `sessions` | Signed-in browsers (validated) |
 
@@ -177,8 +185,8 @@ Tools are only given to the model when they can actually run, checked at startup
 | Tool | Available when |
 |---|---|
 | `create_plot` | always |
-| `run_xfoil_polar`, `search_naca4_airfoils` | `XFOIL_RUNNER=local` with `xfoil` (and `xvfb-run` unless `XFOIL_DISPLAY=none`) installed, or `XFOIL_RUNNER=vm` with a VM |
-| `submit_cfd_simulation`, `get_simulation_status` | a VM is configured (`VM_HOST`) |
+| `run_xfoil_polar`, `search_naca4_airfoils` | `XFOIL_RUNNER=local` with `xfoil` (and `xvfb-run` unless `XFOIL_DISPLAY=none`) installed, or `XFOIL_RUNNER=ws` with a work station |
+| `submit_cfd_simulation`, `get_simulation_status` | a work station is configured (`WS_HOST`) |
 
 The system prompt lists the available tools and names each missing capability with the
 reason, and tells the model to say plainly when something isn't available instead of
@@ -242,23 +250,23 @@ first available model is used, with a warning in the logs.
 turns it off. Mistral sends thinking as content blocks and OpenRouter as
 `reasoning_content`; both stream as `reasoning` events.
 
-### Simulation VM
+### Simulation work station
 
-The backend reaches the VM over SSH (`VM_HOST`, `VM_USER`, `VM_SSH_KEY_PATH`). The VM's
-host key must be in `~/.ssh/known_hosts` (or `VM_KNOWN_HOSTS_PATH`).
+The backend reaches the work station over SSH (`WS_HOST`, `WS_USER`, `WS_SSH_KEY_PATH`). The work station's
+host key must be in `~/.ssh/known_hosts` (or `WS_KNOWN_HOSTS_PATH`).
 
 **CFD** jobs are submit-and-poll, since they outlast any HTTP request:
 
-1. The backend writes `{VM_WORKDIR}/jobs/{job_id}/case.json`.
-2. It launches `{VM_CFD_SCRIPT} {job_dir}` detached.
+1. The backend writes `{WS_WORKDIR}/jobs/{job_id}/case.json`.
+2. It launches `{WS_CFD_SCRIPT} {job_dir}` detached.
 3. The script keeps `{job_dir}/status.json` updated with
    `{"status": "running" | "completed" | "failed", "result": {...}, "error": "..."}`.
 4. `get_simulation_status` / `GET /api/simulations/{id}` read it back into Mongo.
 
-`vm/run_case.sh` implements that contract with a placeholder solve step. Swap in the
+`ws/run_case.sh` implements that contract with a placeholder solve step. Swap in the
 real mesh + solver pipeline.
 
-**Setting up a VM.** Copy `vm/` to a fresh Debian/Ubuntu VM and run, as the user the
+**Setting up a work station.** Copy `ws/` to a fresh Debian/Ubuntu work station and run, as the user the
 backend connects as:
 
 ```bash
@@ -270,9 +278,9 @@ backend connects as:
 `--uninstall` only removes packages that `--install` itself installed, then runs
 `apt-get autoremove`. No CFD solver is installed yet.
 
-**XFOIL** runs wherever `XFOIL_RUNNER` points (`vm` or `local`), through the same
+**XFOIL** runs wherever `XFOIL_RUNNER` points (`ws` or `local`), through the same
 `CommandRunner` interface. One polar takes about a second, so CPU isn't the deciding
-factor. Running it on the VM is the default because serverless hosts (like Vercel)
+factor. Running it on the work station is the default because serverless hosts (like Vercel)
 can't install the Fortran XFOIL binary. Use `local` when the API runs on a normal
 server or container with `xfoil` installed.
 
@@ -298,9 +306,9 @@ crash, `XFOIL_DISPLAY=none` turns its graphics off instead.
   to `http://localhost:8000` (`vercel dev` runs both services together instead).
 - Vercel functions have a maximum duration (300 s on Hobby). Chat streaming and XFOIL
   calls fit within it; CFD is already asynchronous.
-- Set the backend's variables (`MONGODB_URI`, provider keys, `VM_*`, ...) in the Vercel
-  project. `MONGODB_URI` must be reachable from Vercel, e.g. MongoDB Atlas; a local
-  Docker container isn't. XFOIL can't be installed on Vercel, so use `XFOIL_RUNNER=vm`.
+- Set the backend's variables (`MONGODB_TARGET=remote`, `MONGODB_REMOTE_*`, provider keys, `WS_*`, ...) in the Vercel
+  project. `MONGODB_REMOTE_URI` must be reachable from Vercel, e.g. MongoDB Atlas; a local
+  Docker container isn't. XFOIL can't be installed on Vercel, so use `XFOIL_RUNNER=ws`.
 - There's no authentication yet. Add it before exposing the API publicly.
 
 ### Development
@@ -308,7 +316,7 @@ crash, `XFOIL_DISPLAY=none` turns its graphics off instead.
 ```bash
 cd backend
 uv run ruff check . && uv run ruff format .
-MONGODB_URI=mongodb://<host>:27017 uv run pytest
+MONGODB_LOCAL_URI=mongodb://<host>:27017 uv run pytest
 ```
 
 Tests share one throwaway database per run, emptied between tests. (A database per test

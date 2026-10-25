@@ -11,7 +11,7 @@ TERMINAL_STATUSES: set[SimulationStatus] = {"completed", "failed"}
 
 
 class CfdCase(BaseModel):
-    """Inputs for an external-flow airfoil case. Extend as the VM solver grows."""
+    """Inputs for an external-flow airfoil case. Extend as the work station solver grows."""
 
     naca: NacaCode
     alpha: float = Field(ge=-30, le=30, description="Angle of attack in degrees")

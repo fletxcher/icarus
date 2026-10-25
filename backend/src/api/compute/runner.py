@@ -1,4 +1,4 @@
-"""Where shell commands run: this server, or the simulation VM over SSH.
+"""Where shell commands run: this server, or the simulation work station over SSH.
 
 Tools depend on the `CommandRunner` protocol, so XFOIL can move between machines by
 changing `XFOIL_RUNNER` without touching tool code.
@@ -109,11 +109,11 @@ class LocalRunner:
 
 
 class SSHRunner:
-    """Runs commands on the simulation VM, reusing one SSH connection."""
+    """Runs commands on the simulation work station, reusing one SSH connection."""
 
     def __init__(self, settings: Settings) -> None:
-        if not settings.vm_host:
-            raise ValueError("VM_HOST must be set to run commands on the simulation VM")
+        if not settings.ws_host:
+            raise ValueError("WS_HOST must be set to run commands on the simulation work station")
         self._settings = settings
         self._connection: asyncssh.SSHClientConnection | None = None
         self._lock = asyncio.Lock()
@@ -122,17 +122,17 @@ class SSHRunner:
         async with self._lock:
             if self._connection is None or self._connection.is_closed():
                 s = self._settings
-                logger.info("connecting to VM %s@%s:%d", s.vm_user, s.vm_host, s.vm_port)
+                logger.info("connecting to work station %s@%s:%d", s.ws_user, s.ws_host, s.ws_port)
                 self._connection = await asyncssh.connect(
-                    s.vm_host,
-                    port=s.vm_port,
-                    username=s.vm_user,
+                    s.ws_host,
+                    port=s.ws_port,
+                    username=s.ws_user,
                     # For both options () means the ~/.ssh defaults, while None would
                     # disable key auth / host key checking, so never pass None.
-                    client_keys=[_expand(s.vm_ssh_key_path)] if s.vm_ssh_key_path else (),
-                    known_hosts=_expand(s.vm_known_hosts_path) if s.vm_known_hosts_path else (),
+                    client_keys=[_expand(s.ws_ssh_key_path)] if s.ws_ssh_key_path else (),
+                    known_hosts=_expand(s.ws_known_hosts_path) if s.ws_known_hosts_path else (),
                 )
-                logger.info("connected to VM %s", s.vm_host)
+                logger.info("connected to work station %s", s.ws_host)
             return self._connection
 
     async def run(
@@ -141,19 +141,19 @@ class SSHRunner:
         connection = await self._connect()
         if cwd:
             command = f"cd {shlex.quote(cwd)} && {command}"
-        logger.debug("vm run: %s", command)
+        logger.debug("ws run: %s", command)
         started = time.perf_counter()
         try:
             completed = await connection.run(command, check=False, timeout=timeout_s)
         except (asyncssh.Error, TimeoutError):
-            logger.exception("vm command failed (connection error or timeout): %s", command)
+            logger.exception("ws command failed (connection error or timeout): %s", command)
             raise
         result = CommandResult(
             completed.exit_status if completed.exit_status is not None else -1,
             str(completed.stdout or ""),
             str(completed.stderr or ""),
         )
-        _log_result("vm", command, result, started)
+        _log_result("ws", command, result, started)
         return result
 
     async def write_file(self, path: str, content: str) -> None:
@@ -172,7 +172,9 @@ class SSHRunner:
     async def make_temp_dir(self) -> str:
         result = await self.run("mktemp -d -t icarus-XXXXXX")
         if not result.ok:
-            raise RuntimeError(f"could not create temp dir on VM: {result.stderr.strip()}")
+            raise RuntimeError(
+                f"could not create temp dir on work station: {result.stderr.strip()}"
+            )
         return result.stdout.strip()
 
     async def remove_dir(self, path: str) -> None:

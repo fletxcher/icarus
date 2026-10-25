@@ -1,9 +1,9 @@
-"""CFD jobs on the simulation VM.
+"""CFD jobs on the simulation work station.
 
 CFD runs take minutes to hours, so jobs are fire-and-poll rather than awaited:
 
-1. The backend creates `{VM_WORKDIR}/jobs/{job_id}/case.json` on the VM.
-2. It launches `{VM_CFD_SCRIPT} {job_dir}` detached (see `vm/run_case.sh`).
+1. The backend creates `{WS_WORKDIR}/jobs/{job_id}/case.json` on the work station.
+2. It launches `{WS_CFD_SCRIPT} {job_dir}` detached (see `ws/run_case.sh`).
 3. That script keeps `{job_dir}/status.json` up to date:
    `{"status": "running" | "completed" | "failed", "result": {...}, "error": "..."}`.
 4. Status checks read `status.json` and mirror it into the `simulations` collection.
@@ -64,11 +64,11 @@ class SimulationService:
             logger.exception("cfd job %s failed to launch", doc["_id"])
             return await self._update(doc["_id"], status="failed", error=f"submit failed: {error}")
 
-        logger.info("cfd job %s launched on VM in %s", doc["_id"], job_dir)
+        logger.info("cfd job %s launched on work station in %s", doc["_id"], job_dir)
         return await self._update(doc["_id"], status="running")
 
     async def get(self, job_id: str) -> Simulation | None:
-        """Returns the job, refreshing it from the VM while it's still in flight."""
+        """Returns the job, refreshing it from the work station while it's still in flight."""
         doc = await self._collection.find_one({"_id": job_id})
         if doc is None:
             return None

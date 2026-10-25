@@ -129,7 +129,7 @@ def simulation_tools(simulations: SimulationService) -> list[BaseTool]:
             coroutine=submit_cfd_simulation,
             name="submit_cfd_simulation",
             description=(
-                "Start a CFD simulation of a NACA airfoil on the simulation VM. Runs for "
+                "Start a CFD simulation of a NACA airfoil on the simulation work station. Runs for "
                 "minutes to hours; returns a job id to check with get_simulation_status."
             ),
             args_schema=CfdCase,

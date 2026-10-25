@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Prepares (or cleans up) the simulation VM the Icarus backend reaches over SSH.
+# Prepares (or cleans up) the simulation work station the Icarus backend reaches over SSH.
 #
-# Run it on the VM as the user the backend connects as (VM_USER, default "ubuntu"):
+# Run it on the work station as the user the backend connects as (WS_USER, default "ubuntu"):
 #   ./setup.sh --install      install XFOIL + a virtual display, and the CFD job layout
 #   ./setup.sh --uninstall    remove what --install added (asks before deleting job data)
 #
 # Layout under ICARUS_HOME (default ~/icarus), matching the backend's defaults:
-#   bin/run_case.sh   CFD entrypoint (VM_CFD_SCRIPT)
-#   jobs/             one directory per CFD job (VM_WORKDIR/jobs)
+#   bin/run_case.sh   CFD entrypoint (WS_CFD_SCRIPT)
+#   jobs/             one directory per CFD job (WS_WORKDIR/jobs)
 #
-# Assumes a Debian/Ubuntu VM. No CFD solver is installed yet: run_case.sh is a placeholder.
+# Assumes a Debian/Ubuntu work station. No CFD solver is installed yet: run_case.sh is a placeholder.
 set -euo pipefail
 
 ICARUS_HOME="${ICARUS_HOME:-$HOME/icarus}"
@@ -26,7 +26,7 @@ Usage: $(basename "$0") --install | --uninstall [--yes]
   --uninstall   Remove packages this script installed and delete $ICARUS_HOME.
   --yes         Don't ask before deleting $ICARUS_HOME (job data included).
 
-Set ICARUS_HOME to use a different directory (then match VM_WORKDIR/VM_CFD_SCRIPT).
+Set ICARUS_HOME to use a different directory (then match WS_WORKDIR/WS_CFD_SCRIPT).
 EOF
 }
 
@@ -63,7 +63,7 @@ do_install() {
     exit 1
   fi
   if [[ $EUID -eq 0 ]]; then
-    log "Running as root: files go to $ICARUS_HOME; make sure VM_USER can read them."
+    log "Running as root: files go to $ICARUS_HOME; make sure WS_USER can read them."
   fi
 
   local missing=()
@@ -88,12 +88,12 @@ do_install() {
 
   cat <<EOF
 
-Done. Backend settings for this VM (in the repo-root .env):
-  VM_HOST=<this VM's address>
-  VM_USER=$(id -un)
-  VM_WORKDIR=$ICARUS_HOME
-  VM_CFD_SCRIPT=$ICARUS_HOME/bin/run_case.sh
-  XFOIL_RUNNER=vm      # to run XFOIL here
+Done. Backend settings for this work station (in the repo-root .env):
+  WS_HOST=<this work station's address>
+  WS_USER=$(id -un)
+  WS_WORKDIR=$ICARUS_HOME
+  WS_CFD_SCRIPT=$ICARUS_HOME/bin/run_case.sh
+  XFOIL_RUNNER=ws      # to run XFOIL here
 EOF
 }
 

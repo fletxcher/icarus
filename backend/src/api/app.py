@@ -23,11 +23,12 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     logger.info(
-        "starting: mongo db=%s, default model=%s, xfoil runner=%s, vm host=%s",
+        "starting: mongo %s db=%s, default model=%s, xfoil runner=%s, ws host=%s",
+        settings.mongodb_target,
         settings.mongodb_db,
         settings.default_model,
         settings.xfoil_runner,
-        settings.vm_host or "not configured",
+        settings.ws_host or "not configured",
     )
     client = create_client(settings)
     db = client[settings.mongodb_db]

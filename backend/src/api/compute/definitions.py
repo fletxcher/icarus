@@ -17,7 +17,7 @@ SIMULATIONS_VALIDATOR: dict[str, Any] = {
             "_id": {"bsonType": "string"},
             # The chat that started the job, if any.
             "thread_id": {"bsonType": NULLABLE_STRING},
-            # Inputs, as given to the VM in case.json (see CfdCase).
+            # Inputs, as given to the work station in case.json (see CfdCase).
             "case": {
                 "bsonType": "object",
                 "additionalProperties": False,
@@ -39,7 +39,7 @@ SIMULATIONS_VALIDATOR: dict[str, Any] = {
                 },
             },
             "status": {"bsonType": "string", "enum": list(get_args(SimulationStatus))},
-            # Written by the VM's run_case.sh (status.json), e.g. {"cl": 0.9, "cd": 0.01}.
+            # Written by the work station's run_case.sh (status.json), e.g. {"cl": 0.9, "cd": 0.01}.
             "result": {"bsonType": ["object", "null"]},
             "error": {"bsonType": NULLABLE_STRING},
             "created_at": {"bsonType": "date"},

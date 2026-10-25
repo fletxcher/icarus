@@ -19,14 +19,14 @@ def test_capabilities_follow_the_setup(monkeypatch: pytest.MonkeyPatch):
     installed = {"xfoil", "xvfb-run"}
     monkeypatch.setattr("shutil.which", lambda name: name if name in installed else None)
 
-    # Local XFOIL with xvfb, no VM: only CFD is missing.
+    # Local XFOIL with xvfb, no work station: only CFD is missing.
     assert unavailable_capabilities(settings(xfoil_runner="local")) == {
-        CFD_CAPABILITY: "the simulation VM isn't configured"
+        CFD_CAPABILITY: "the simulation work station isn't configured"
     }
-    # A VM makes both available.
-    assert unavailable_capabilities(settings(xfoil_runner="vm", vm_host="10.0.0.5")) == {}
-    # XFOIL on the VM without a VM: neither.
-    assert set(unavailable_capabilities(settings(xfoil_runner="vm"))) == {
+    # A work station makes both available.
+    assert unavailable_capabilities(settings(xfoil_runner="ws", ws_host="10.0.0.5")) == {}
+    # XFOIL on the work station without a work station: neither.
+    assert set(unavailable_capabilities(settings(xfoil_runner="ws"))) == {
         XFOIL_CAPABILITY,
         CFD_CAPABILITY,
     }
@@ -40,11 +40,13 @@ def test_capabilities_follow_the_setup(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_prompt_lists_available_tools_and_missing_capabilities():
-    prompt = build_system_prompt(plot_tools(), {CFD_CAPABILITY: "the VM isn't configured"})
+    prompt = build_system_prompt(
+        plot_tools(), {CFD_CAPABILITY: "the work station isn't configured"}
+    )
 
     assert "- create_plot: Draw a plot in the chat" in prompt
     assert "Not available right now" in prompt
-    assert f"- {CFD_CAPABILITY}: the VM isn't configured" in prompt
+    assert f"- {CFD_CAPABILITY}: the work station isn't configured" in prompt
     assert "Never invent tool names" in prompt
 
 
@@ -53,7 +55,7 @@ def test_prompt_without_missing_capabilities_has_no_unavailable_section():
 
 
 def test_unconfigured_tools_are_not_given_to_the_model(client: TestClient):
-    # The test client has no VM and no xfoil binary configured for the app.
+    # The test client has no work station and no xfoil binary configured for the app.
     services = client.app.state.services
     graph = services.agent.get_graph()
     tool_names = set(graph.nodes["tools"].data.tools_by_name)
