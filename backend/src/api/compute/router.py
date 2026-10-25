@@ -1,6 +1,7 @@
 from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
+from pydantic import BaseModel
 
 from ..dependencies import ServicesDep
 from .schemas import TERMINAL_STATUSES, Simulation, SimulationSummary
@@ -23,13 +24,19 @@ async def get_simulation(job_id: str, services: ServicesDep) -> Simulation:
     return simulation
 
 
-@router.delete("/{job_id}")
-async def delete_simulation(job_id: str, services: ServicesDep) -> dict[str, bool]:
-    """Stops the job if it is running, then deletes its record and its files."""
-    files_removed = await services.simulations.delete(job_id)
-    if files_removed is None:
+class SimulationUpdate(BaseModel):
+    hidden: bool
+
+
+@router.patch("/{job_id}")
+async def update_simulation(
+    job_id: str, update: SimulationUpdate, services: ServicesDep
+) -> Simulation:
+    """Takes a job off the simulations list, or puts it back. Nothing is deleted."""
+    simulation = await services.simulations.set_hidden(job_id, update.hidden)
+    if simulation is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Simulation not found")
-    return {"files_removed": files_removed}
+    return simulation
 
 
 @router.get("/{job_id}/info")

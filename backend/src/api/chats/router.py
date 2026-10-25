@@ -59,6 +59,8 @@ async def delete_thread(thread_id: str, services: ServicesDep) -> None:
     if not await services.chats.delete_thread(thread_id):
         raise _not_found()
     await services.files.delete_for_thread(thread_id)
+    # The one way a simulation is really deleted: with the chat it was started in.
+    await services.simulations.delete_for_thread(thread_id)
 
 
 @router.delete("/{thread_id}/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT)

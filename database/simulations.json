@@ -24,6 +24,9 @@
             "null"
           ]
         },
+        "hidden": {
+          "bsonType": "bool"
+        },
         "case": {
           "bsonType": "object",
           "additionalProperties": false,

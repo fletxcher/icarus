@@ -22,6 +22,8 @@ SIMULATIONS_VALIDATOR: dict[str, Any] = {
             "_id": {"bsonType": "string"},
             # The chat that started the job, if any.
             "thread_id": {"bsonType": NULLABLE_STRING},
+            # True once taken off the simulations list; the job itself is kept.
+            "hidden": {"bsonType": "bool"},
             # Inputs, as given to the work station in case.json (see CfdCase).
             "case": {
                 "bsonType": "object",

@@ -135,6 +135,8 @@ class SimulationSummary(BaseModel):
 
 class Simulation(MongoModel):
     thread_id: str | None = None
+    # Taken off the simulations list; the job and its results are kept and still reachable.
+    hidden: bool = False
     case: CfdCase
     status: SimulationStatus
     result: dict[str, Any] | None = None

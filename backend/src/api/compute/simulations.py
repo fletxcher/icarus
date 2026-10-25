@@ -39,6 +39,7 @@ JOB_FILES = {
 }
 
 
+# Job ids become part of a path that is removed recursively, so they must be plain tokens.
 SAFE_JOB_ID = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
@@ -121,7 +122,9 @@ class SimulationService:
     async def list_summaries(self, finished: int = RECENT_FINISHED) -> list[SimulationSummary]:
         """Running jobs with their progress, then the most recently finished ones."""
         active_docs = (
-            await self._collection.find({"status": {"$in": ["queued", "running"]}})
+            await self._collection.find(
+                {"status": {"$in": ["queued", "running"]}, "hidden": {"$ne": True}}
+            )
             .sort("created_at", -1)
             .to_list(MAX_LISTED)
         )
@@ -139,7 +142,9 @@ class SimulationService:
                 await self.get(doc["_id"])
                 doc.update(await self._collection.find_one({"_id": doc["_id"]}) or {})
         finished_docs = (
-            await self._collection.find({"status": {"$in": sorted(TERMINAL_STATUSES)}})
+            await self._collection.find(
+                {"status": {"$in": sorted(TERMINAL_STATUSES)}, "hidden": {"$ne": True}}
+            )
             .sort("created_at", -1)
             .to_list(finished)
         )
@@ -166,33 +171,48 @@ class SimulationService:
             summaries, key=lambda s: (s.status in TERMINAL_STATUSES, -s.created_at.timestamp())
         )
 
-    async def delete(self, job_id: str) -> bool | None:
-        """Stops the job if it is running and deletes its record and its files.
+    async def delete_for_thread(self, thread_id: str) -> int:
+        """Deletes a chat's simulations for real: each running job is stopped, its files on the
+        work station are removed and its record is deleted. This is the only way a simulation
+        is ever deleted; the work station being unreachable doesn't stop the records going.
 
-        Returns None if there is no such job, else whether its files on the work station were
-        removed (False if the work station couldn't be reached: the record is deleted anyway).
+        Returns how many simulations were deleted.
         """
-        deleted = await self._collection.find_one_and_delete({"_id": job_id})
-        if deleted is None:
-            return None
-        removed = False
-        if SAFE_JOB_ID.match(job_id):  # it becomes part of a path that is removed recursively
-            job_dir = shlex.quote(self._job_dir(job_id))
-            # run_case.sh leads its own process group (setsid at launch), so one signal to
-            # the group stops the solver and everything else the job started. The [r] keeps
-            # pgrep from matching this very command.
-            stop = (
-                f"pid=$(pgrep -f '[r]un_case.sh .*{job_id}' | head -n 1); "
-                'if [ -n "$pid" ]; then kill -TERM -- "-$pid"; sleep 2; fi; '
-                f"rm -rf -- {job_dir}"
-            )
-            try:
-                result = await self._runner.run(stop, timeout_s=MONITOR_TIMEOUT_S)
-                removed = result.ok
-            except Exception:
-                logger.exception("could not remove the files of cfd job %s", job_id)
-        logger.info("cfd job %s deleted (files removed: %s)", job_id, removed)
-        return removed
+        ids = [doc["_id"] async for doc in self._collection.find({"thread_id": thread_id})]
+        for job_id in ids:
+            await self._remove_files(job_id)
+        if ids:
+            await self._collection.delete_many({"_id": {"$in": ids}})
+            logger.info("deleted %d cfd job(s) of thread %s", len(ids), thread_id)
+        return len(ids)
+
+    async def _remove_files(self, job_id: str) -> None:
+        """Stops the job if it is running and removes its directory on the work station."""
+        if not SAFE_JOB_ID.match(job_id):
+            logger.warning("not removing the files of cfd job %r: unusual id", job_id)
+            return
+        # run_case.sh leads its own process group (setsid at launch), so one signal to the
+        # group stops the solver and everything else the job started. The [r] keeps pgrep
+        # from matching this very command.
+        command = (
+            f"pid=$(pgrep -f '[r]un_case.sh .*{job_id}' | head -n 1); "
+            'if [ -n "$pid" ]; then kill -TERM -- "-$pid"; sleep 2; fi; '
+            f"rm -rf -- {shlex.quote(self._job_dir(job_id))}"
+        )
+        try:
+            await self._runner.run(command, timeout_s=MONITOR_TIMEOUT_S)
+        except Exception:
+            logger.exception("could not remove the files of cfd job %s", job_id)
+
+    async def set_hidden(self, job_id: str, hidden: bool) -> Simulation | None:
+        """Takes a job off the simulations list (or puts it back). Nothing is deleted: the job
+        keeps running or keeps its results, and its page and files stay available."""
+        doc = await self._collection.find_one_and_update(
+            {"_id": job_id},
+            {"$set": {"hidden": hidden}},
+            return_document=ReturnDocument.AFTER,
+        )
+        return Simulation.model_validate(doc) if doc else None
 
     async def job_file(self, job_id: str, name: str) -> bytes:
         """A file the job produced (see JOB_FILES); FileNotFoundError if it isn't there."""

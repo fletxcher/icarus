@@ -1,5 +1,4 @@
 import json
-from datetime import UTC, datetime
 from functools import partial
 
 from api.compute.runner import CommandResult
@@ -196,57 +195,114 @@ def test_an_empty_list_is_an_empty_array(client):
     assert client.get("/api/simulations").json() == []
 
 
-def test_deleting_a_job_removes_its_record_and_its_files(client):
+def test_hiding_a_job_takes_it_off_the_list_but_keeps_everything(client):
     station = FakeWorkStation()
     job_id = submit_job(client, station)
+    other = submit_job(client, station)
+    commands = len(station.commands)
 
-    response = client.delete(f"/api/simulations/{job_id}")
+    response = client.patch(f"/api/simulations/{job_id}", json={"hidden": True})
 
     assert response.status_code == 200
-    assert response.json() == {"files_removed": True}
-    assert client.get(f"/api/simulations/{job_id}").status_code == 404
-    command = station.commands[-1]
-    assert f"rm -rf -- /w/jobs/{job_id}" in command
-    assert "kill -TERM" in command  # a running job is stopped first
-    assert f"[r]un_case.sh .*{job_id}" in command
+    assert response.json()["hidden"] is True
+    assert [job["id"] for job in client.get("/api/simulations").json()] == [other]
+    # The job is still there: its page works, and nothing ran on the work station.
+    assert client.get(f"/api/simulations/{job_id}").json()["status"] == "running"
+    assert client.get(f"/api/simulations/{job_id}/info").status_code == 200
+    assert not any(
+        "rm -rf" in command or "kill" in command for command in station.commands[commands:]
+    )
 
 
-def test_deleting_a_job_still_works_when_the_work_station_is_unreachable(client):
+def test_a_hidden_job_can_be_put_back(client):
     station = FakeWorkStation()
     job_id = submit_job(client, station)
+    client.patch(f"/api/simulations/{job_id}", json={"hidden": True})
+
+    client.patch(f"/api/simulations/{job_id}", json={"hidden": False})
+
+    assert [job["id"] for job in client.get("/api/simulations").json()] == [job_id]
+
+
+def test_finished_jobs_can_be_hidden_too(client):
+    station = FakeWorkStation()
+    job_id = submit_job(client, station)
+    client.portal.call(
+        partial(client.app.state.services.simulations._update, job_id, status="completed")  # noqa: SLF001
+    )
+
+    client.patch(f"/api/simulations/{job_id}", json={"hidden": True})
+
+    assert client.get("/api/simulations").json() == []
+    assert client.get(f"/api/simulations/{job_id}").json()["status"] == "completed"
+
+
+def test_hiding_an_unknown_job_is_404(client):
+    assert client.patch("/api/simulations/nope", json={"hidden": True}).status_code == 404
+
+
+def test_there_is_no_way_to_delete_a_job(client):
+    station = FakeWorkStation()
+    job_id = submit_job(client, station)
+
+    assert client.delete(f"/api/simulations/{job_id}").status_code == 405
+    assert client.get(f"/api/simulations/{job_id}").status_code == 200
+
+
+def submit_job_in_thread(client, station, thread_id: str) -> str:
+    service = SimulationService(
+        client.app.state.db, station, workdir="/w", script="/w/bin/run_case.sh"
+    )
+    client.app.state.services.simulations = service
+    case = CfdCase(shape="cylinder", reynolds=100)
+    return client.portal.call(partial(service.submit, case, thread_id=thread_id)).id
+
+
+def test_deleting_a_chat_deletes_its_simulations_for_real(client):
+    station = FakeWorkStation()
+    thread = client.post("/api/threads", json={"title": "cfd"}).json()["id"]
+    other = client.post("/api/threads", json={"title": "other"}).json()["id"]
+    mine = submit_job_in_thread(client, station, thread)
+    hidden = submit_job_in_thread(client, station, thread)
+    client.patch(f"/api/simulations/{hidden}", json={"hidden": True})
+    kept = submit_job_in_thread(client, station, other)
+
+    assert client.delete(f"/api/threads/{thread}").status_code == 204
+
+    for job_id in (mine, hidden):  # listed or not, both go
+        assert client.get(f"/api/simulations/{job_id}").status_code == 404
+        removal = next(c for c in station.commands if f"rm -rf -- /w/jobs/{job_id}" in c)
+        assert "kill -TERM" in removal  # a running job is stopped first
+    # Another chat's simulation is untouched.
+    assert client.get(f"/api/simulations/{kept}").status_code == 200
+    assert not any(f"/w/jobs/{kept}" in c and "rm -rf" in c for c in station.commands)
+
+
+def test_deleting_a_chat_works_when_the_work_station_is_unreachable(client):
+    station = FakeWorkStation()
+    thread = client.post("/api/threads", json={"title": "cfd"}).json()["id"]
+    job_id = submit_job_in_thread(client, station, thread)
     station.fail = True
 
-    response = client.delete(f"/api/simulations/{job_id}")
-
-    assert response.json() == {"files_removed": False}
+    assert client.delete(f"/api/threads/{thread}").status_code == 204
     assert client.get(f"/api/simulations/{job_id}").status_code == 404
 
 
-def test_deleting_an_unknown_job_is_404(client):
-    assert client.delete("/api/simulations/nope").status_code == 404
-
-
-def test_odd_job_ids_never_reach_a_recursive_delete(client):
+def test_deleting_a_chat_without_simulations_runs_nothing_on_the_work_station(client):
     station = FakeWorkStation()
-    submit_job(client, station)
-    service = client.app.state.services.simulations
-    now = datetime.now(UTC)
-    client.portal.call(
-        partial(
-            service._collection.insert_one,  # noqa: SLF001
-            {
-                "_id": "../..",
-                "thread_id": None,
-                "case": CfdCase(shape="cylinder", reynolds=100).model_dump(),
-                "status": "failed",
-                "created_at": now,
-                "updated_at": now,
-            },
-        )
-    )
+    submit_job(client, station)  # not tied to any chat
+    thread = client.post("/api/threads", json={"title": "plain"}).json()["id"]
     before = len(station.commands)
 
-    removed = client.portal.call(service.delete, "../..")
+    assert client.delete(f"/api/threads/{thread}").status_code == 204
+    assert len(station.commands) == before
 
-    assert removed is False
-    assert len(station.commands) == before  # nothing was run on the work station
+
+def test_removing_messages_does_not_delete_simulations(client):
+    station = FakeWorkStation()
+    thread = client.post("/api/threads", json={"title": "cfd"}).json()["id"]
+    job_id = submit_job_in_thread(client, station, thread)
+
+    client.delete(f"/api/threads/{thread}/messages/missing")
+
+    assert client.get(f"/api/simulations/{job_id}").status_code == 200
