@@ -63,9 +63,9 @@ export const api = {
     return response.json();
   },
   listSimulations: () => request<SimulationSummary[]>("/simulations"),
-  /** Stops the job if it's running, then deletes its record and its files on the work station. */
-  deleteSimulation: (id: string) =>
-    request<{ files_removed: boolean }>(`/simulations/${id}`, { method: "DELETE" }),
+  /** Takes a job off the simulations list, or puts it back. Nothing is deleted. */
+  setSimulationHidden: (id: string, hidden: boolean) =>
+    request<Simulation>(`/simulations/${id}`, { method: "PATCH", body: JSON.stringify({ hidden }) }),
   getSimulation: (id: string) => request<Simulation>(`/simulations/${id}`),
   simulationInfo: (id: string) => request<SimulationInfo>(`/simulations/${id}/info`),
   /** What the run did since the given offsets (0, 0 for everything). */

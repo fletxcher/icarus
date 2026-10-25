@@ -66,6 +66,8 @@ export type SimulationResult = {
 export type Simulation = {
   id: string;
   thread_id: string | null;
+  /** Taken off the simulations list; the job and its results are kept. */
+  hidden?: boolean;
   case: SimulationCase;
   status: SimulationStatus;
   result: SimulationResult | null;

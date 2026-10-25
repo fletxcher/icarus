@@ -2,12 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   ArrowLeftIcon,
   CheckIcon,
   CircleAlertIcon,
   CircleXIcon,
+  EyeIcon,
   LoaderCircleIcon,
   Trash2Icon,
 } from "lucide-react";
@@ -23,7 +23,8 @@ import type {
 } from "@/lib/chat/simulation-types";
 import { cn } from "@/lib/utils";
 import { useSimulationMonitor, type Monitor } from "@/hooks/use-simulation-monitor";
-import { DeleteSimulationDialog } from "./delete-simulation-dialog";
+import { showSimulation } from "@/stores/chat-actions";
+import { RemoveSimulationDialog } from "./remove-simulation-dialog";
 import { PlotBlock, type PlotFigure } from "./plot-block";
 
 const MAX_POINTS = 600;
@@ -371,21 +372,39 @@ function Results({ simulation }: { simulation: Simulation | null }) {
   );
 }
 
-/** The delete button; leaves the page once the job is gone. */
-function DeleteSimulationButton({ jobId, simulation }: { jobId: string; simulation: Simulation | null }) {
-  const router = useRouter();
+/**
+ * Takes the job off the simulations list, after a confirmation, or puts it back. The page
+ * stays: the job and its results are kept, and the chat still links here.
+ */
+function ListToggle({ jobId, simulation }: { jobId: string; simulation: Simulation | null }) {
   const [confirming, setConfirming] = useState(false);
+  const [hidden, setHidden] = useState<boolean | null>(null); // set once this page changes it
+  const isHidden = hidden ?? simulation?.hidden ?? false;
+
+  if (isHidden) {
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-7 rounded-full"
+        onClick={async () => (await showSimulation(jobId)) && setHidden(false)}
+      >
+        <EyeIcon />
+        Show in list
+      </Button>
+    );
+  }
   return (
     <>
-      <Button variant="ghost" size="icon-sm" aria-label="Delete simulation" onClick={() => setConfirming(true)}>
+      <Button variant="ghost" size="icon-sm" aria-label="Remove from the list" onClick={() => setConfirming(true)}>
         <Trash2Icon />
       </Button>
-      <DeleteSimulationDialog
+      <RemoveSimulationDialog
         open={confirming}
         onOpenChange={setConfirming}
         jobId={jobId}
         simulation={simulation}
-        onDeleted={() => router.push("/")}
+        onRemoved={() => setHidden(true)}
       />
     </>
   );
@@ -426,7 +445,7 @@ export function SimulationDetail({ jobId, monitor }: { jobId: string; monitor: M
           {/* One group, centred on the title block, so the badge and the icon share a midline. */}
           <div className="flex items-center gap-1.5">
             <StatusBadge status={simulation?.status ?? progress?.status} />
-            <DeleteSimulationButton jobId={jobId} simulation={simulation} />
+            <ListToggle jobId={jobId} simulation={simulation} />
           </div>
         </div>
         <nav className="flex gap-1 border-b pb-1.5" role="tablist">

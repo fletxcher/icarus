@@ -43,12 +43,26 @@ async function loadMessages(threadId: string) {
   }
 }
 
-export async function deleteSimulation(jobId: string): Promise<boolean> {
+/** Puts a simulation back on the list. */
+export async function showSimulation(jobId: string): Promise<boolean> {
   try {
-    const { files_removed } = await api.deleteSimulation(jobId);
+    await api.setSimulationHidden(jobId, false);
+    store().setSimulations(await api.listSimulations());
+    return true;
+  } catch (error) {
+    toast.error(errorMessage(error));
+    return false;
+  }
+}
+
+/** Takes a simulation off the list. The job, its results and its files are all kept. */
+export async function hideSimulation(jobId: string): Promise<boolean> {
+  try {
+    await api.setSimulationHidden(jobId, true);
     store().setSimulations(store().simulations.filter((job) => job.id !== jobId));
-    if (files_removed) toast.success("Simulation deleted");
-    else toast.warning("Simulation deleted, but its files on the work station couldn't be removed");
+    toast.success("Removed from the simulations list", {
+      action: { label: "Undo", onClick: () => void showSimulation(jobId) },
+    });
     return true;
   } catch (error) {
     toast.error(errorMessage(error));
@@ -89,6 +103,8 @@ export async function deleteThread(threadId: string) {
   try {
     await api.deleteThread(threadId);
     store().removeThread(threadId);
+    // The chat's simulations are deleted with it.
+    store().setSimulations(store().simulations.filter((job) => job.thread_id !== threadId));
   } catch (error) {
     toast.error(errorMessage(error));
   }
