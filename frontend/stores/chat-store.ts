@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import type { SimulationSummary } from "@/lib/chat/simulation-types";
 import type { Attachment, Message, Model, Thread } from "@/lib/chat/types";
 
 export type LoadStatus = "loading" | "ready" | "error";
@@ -28,6 +29,11 @@ type ChatState = {
   pendingFiles: PendingFile[];
   /** Set while a reply is streaming. */
   controller: AbortController | null;
+  /** The simulations list panel on the right. */
+  simulationsOpen: boolean;
+  simulations: SimulationSummary[];
+  /** Counts picks of a chat in the sidebar, so other pages know to go back to the chat. */
+  chatViewRequests: number;
 };
 
 type ChatActions = {
@@ -46,6 +52,10 @@ type ChatActions = {
   removePendingFile: (localId: string) => void;
   clearPendingFiles: () => void;
   setController: (controller: AbortController | null) => void;
+  setSimulations: (simulations: SimulationSummary[]) => void;
+  toggleSimulations: () => void;
+  closeSimulations: () => void;
+  requestChatView: () => void;
 };
 
 export const useChatStore = create<ChatState & ChatActions>()(
@@ -60,6 +70,9 @@ export const useChatStore = create<ChatState & ChatActions>()(
       draft: "",
       pendingFiles: [],
       controller: null,
+      simulationsOpen: false,
+      simulations: [],
+      chatViewRequests: 0,
 
       setThreads: (threads, threadsStatus = "ready") => set({ threads, threadsStatus }),
       setThreadsStatus: (threadsStatus) => set({ threadsStatus }),
@@ -102,6 +115,10 @@ export const useChatStore = create<ChatState & ChatActions>()(
         })),
       clearPendingFiles: () => set({ pendingFiles: [] }),
       setController: (controller) => set({ controller }),
+      setSimulations: (simulations) => set({ simulations }),
+      toggleSimulations: () => set((state) => ({ simulationsOpen: !state.simulationsOpen })),
+      closeSimulations: () => set({ simulationsOpen: false }),
+      requestChatView: () => set((state) => ({ chatViewRequests: state.chatViewRequests + 1 })),
     }),
     {
       name: "icarus-ui",

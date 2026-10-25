@@ -1,4 +1,10 @@
 import type {
+  Simulation,
+  SimulationInfo,
+  SimulationProgress,
+  SimulationSummary,
+} from "@/lib/chat/simulation-types";
+import type {
   Attachment,
   Model,
   StreamEvent,
@@ -56,6 +62,19 @@ export const api = {
     if (!response.ok) throw await toApiError(response);
     return response.json();
   },
+  listSimulations: () => request<SimulationSummary[]>("/simulations"),
+  /** Stops the job if it's running, then deletes its record and its files on the work station. */
+  deleteSimulation: (id: string) =>
+    request<{ files_removed: boolean }>(`/simulations/${id}`, { method: "DELETE" }),
+  getSimulation: (id: string) => request<Simulation>(`/simulations/${id}`),
+  simulationInfo: (id: string) => request<SimulationInfo>(`/simulations/${id}/info`),
+  /** What the run did since the given offsets (0, 0 for everything). */
+  simulationProgress: (id: string, logOffset: number, coeffOffset: number) =>
+    request<SimulationProgress>(
+      `/simulations/${id}/progress?log_offset=${logOffset}&coeff_offset=${coeffOffset}`,
+    ),
+  /** URL of a file a finished job rendered (flow.mp4 / flow.png). */
+  simulationFileUrl: (id: string, name: string) => `${API_URL}/api/simulations/${id}/files/${name}`,
   /** Removes a file that hasn't been sent yet. */
   deleteFile: (id: string) => request<void>(`/files/${id}`, { method: "DELETE" }),
   /** Deletes a message and every later one (before an edit or regenerate). */

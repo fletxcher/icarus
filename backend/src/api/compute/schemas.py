@@ -89,6 +89,14 @@ class CfdCase(BaseModel):
         ),
     )
 
+    video: bool = Field(
+        default=True,
+        description=(
+            "Render velocity and pressure images after the solve, and for transient runs a "
+            "flow video. Costs a few minutes; the numbers don't depend on it."
+        ),
+    )
+
     @model_validator(mode="after")
     def _needs_for_shape(self) -> "CfdCase":
         if self.shape == "airfoil":
@@ -108,6 +116,21 @@ class CfdCase(BaseModel):
         if self.wall_type == "rotating" and self.shape != "cylinder":
             raise ValueError("a rotating wall is only supported for a cylinder")
         return self
+
+
+class SimulationSummary(BaseModel):
+    """One row of the simulations list: the job, and how far along it is."""
+
+    id: str
+    thread_id: str | None
+    case: CfdCase
+    status: SimulationStatus
+    error: str | None
+    created_at: datetime
+    # Progress of a running job, from the work station; None if it can't be reached.
+    stage: str | None = None
+    fraction: float | None = None
+    eta_s: float | None = None
 
 
 class Simulation(MongoModel):

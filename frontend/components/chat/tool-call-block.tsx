@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import {
+  ActivityIcon,
   ChartLineIcon,
   ChevronRightIcon,
   CircleCheckIcon,
@@ -12,6 +14,7 @@ import {
   WrenchIcon,
   type LucideIcon,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import type { ToolPart } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
@@ -42,7 +45,38 @@ function summarizeArgs(args: Record<string, unknown>): string {
   return parts.join(" · ");
 }
 
+const JOB_ID = /Job ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
+
+/** The CFD job a tool call started or asked about, once its id is known. */
+function jobIdOf(part: ToolPart): string | null {
+  if (part.name === "get_simulation_status" && typeof part.args.job_id === "string") {
+    return part.args.job_id;
+  }
+  if (part.name === "submit_cfd_simulation" && part.result) {
+    return JOB_ID.exec(part.result)?.[1] ?? null;
+  }
+  return null;
+}
+
 export function ToolCallBlock({ part }: { part: ToolPart }) {
+  const jobId = jobIdOf(part);
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <ToolCallCard part={part} />
+      {jobId && (
+        <Button variant="outline" size="sm" className="self-start" asChild>
+          <Link href={`/simulations/${jobId}`}>
+            <ActivityIcon />
+            Open simulation
+          </Link>
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function ToolCallCard({ part }: { part: ToolPart }) {
   const tool = TOOLS[part.name] ?? { label: part.name, icon: WrenchIcon };
   const status = STATUS[part.status];
   const summary = summarizeArgs(part.args);

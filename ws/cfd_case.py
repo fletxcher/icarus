@@ -8,6 +8,11 @@ Standard library only, so it runs on a fresh work station.
   cfd_case.py boundary <job_dir>            mark the patches gmshToFoam made as wall/empty
   cfd_case.py results  <job_dir>            write the finished status.json with the results
   cfd_case.py status   <job_dir> <state> [message]   write status.json atomically
+  cfd_case.py info     <job_dir>            print the static facts about a job (JSON)
+  cfd_case.py summary  <jobs_dir> <job_id>...   print each job's status and progress (JSON)
+  cfd_case.py progress <job_dir> <log_offset> <coeff_offset> [final]
+                                            print what the run has done since those offsets
+                                            (JSON), for the live monitor
 
 Incompressible flow (simpleFoam for steady cases, pimpleFoam for transient ones) around
 a body of reference length 1 in a unit freestream, so the Reynolds number sets the
@@ -23,6 +28,7 @@ import math
 import re
 import statistics
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -34,6 +40,7 @@ LAMINAR_BELOW_REYNOLDS = 1000.0
 MAX_HISTORY_POINTS = 200
 TRANSIENT_END_TIME = 80.0  # convective times (reference length / freestream speed)
 MAX_COURANT = 1.0
+VIDEO_INTERVAL = 0.25  # convective times between the snapshots a video is rendered from
 
 # Surface spacing, points per airfoil side, farfield spacing, boundary layer growth
 # and the iteration limit of steady runs.
@@ -68,6 +75,7 @@ def read_case(job_dir: Path) -> dict:
         ("spin_ratio", 0.0),
         ("roughness_height", 0.0),
         ("regime", "auto"),
+        ("video", True),
     ):
         if case.get(key) is None:
             case[key] = default
@@ -469,6 +477,12 @@ def write_foam(job_dir: Path, processors: int) -> None:
     )
     foam_file(job_dir / "constant" / "turbulenceProperties", "dictionary", "turbulenceProperties", model)
 
+    video = transient and case["video"]
+    if video:
+        # Keep every snapshot for the video; binary files keep them small.
+        write_control = f"writeControl    adjustableRunTime;\nwriteInterval   {VIDEO_INTERVAL};"
+    else:
+        write_control = f"writeControl    runTime;\nwriteInterval   {TRANSIENT_END_TIME};"
     if transient:
         time_control = f"""
 application     pimpleFoam;
@@ -480,8 +494,7 @@ deltaT          0.001;
 adjustTimeStep  yes;
 maxCo           {MAX_COURANT};
 maxDeltaT       0.05;
-writeControl    runTime;
-writeInterval   {TRANSIENT_END_TIME};
+{write_control}
 """
     else:
         time_control = f"""
@@ -500,8 +513,8 @@ writeInterval   {level['iterations']};
         "controlDict",
         f"""
 {time_control}
-purgeWrite      1;
-writeFormat     ascii;
+purgeWrite      {0 if video else 1};
+writeFormat     {"binary" if video else "ascii"};
 writePrecision  8;
 timeFormat      general;
 timePrecision   6;
@@ -751,6 +764,20 @@ def subsample(history: dict[str, list[float]]) -> dict[str, list[float]]:
     return sampled
 
 
+def read_media(job_dir: Path, case: dict, warnings: list[str]) -> list[dict] | None:
+    """The images and video render_video.py made, or a warning if it was asked to and couldn't."""
+    info_file = job_dir / "video.json"
+    if info_file.exists():
+        return json.loads(info_file.read_text())["media"]
+    if case["video"]:
+        failed = job_dir / "video.failed"
+        reason = failed.read_text().strip() if failed.exists() else "it did not run"
+        warnings.append(
+            f"The flow images and video could not be made ({reason}); the numbers are unaffected."
+        )
+    return None
+
+
 def build_results(job_dir: Path) -> dict:
     case = read_case(job_dir)
     history = read_coefficients(job_dir)
@@ -815,6 +842,9 @@ def build_results(job_dir: Path) -> dict:
         warnings.append(f"Re < {LAMINAR_BELOW_REYNOLDS:g}: solved laminar, without a turbulence model.")
     if case["wall_type"] == "rotating" and case["shape"] != "cylinder":
         warnings.append("Rotation is only meaningful for a cylinder.")
+    media = read_media(job_dir, case, warnings)
+    if media:
+        result["media"] = media
     result["warnings"] = warnings
     result["history"] = subsample(history)
 
@@ -827,6 +857,283 @@ def build_results(job_dir: Path) -> dict:
         if cells:
             result["cells"] = int(cells.group(1))
     return result
+
+
+# --- live monitoring --------------------------------------------------------
+
+# The steps run_case.sh logs to log.<step>, in the order it runs them.
+STAGES = [
+    "geo", "gmsh", "foam", "gmshToFoam", "boundary", "checkMesh", "decomposePar",
+    "solver", "reconstruct", "vtk", "render", "results",
+]  # fmt: skip
+MAX_CHUNK_BYTES = 4_000_000  # the most log read in one progress call
+TAIL_BYTES = 6000
+DICTIONARIES = (
+    "system/controlDict",
+    "system/fvSchemes",
+    "system/fvSolution",
+    "system/decomposeParDict",
+    "constant/turbulenceProperties",
+    "constant/transportProperties",
+)
+STEP_START = re.compile(r"^Time = (\S+)\s*$", re.M)
+RESIDUAL = re.compile(r"Solving for (\w+), Initial residual = ([-+0-9.eE]+)")
+COURANT = re.compile(r"Courant Number mean: \S+ max: ([-+0-9.eE]+)")
+DELTA_T = re.compile(r"^deltaT = ([-+0-9.eE]+)", re.M)
+
+
+def read_chunk(path: Path, offset: int, *, final: bool) -> tuple[str, int]:
+    """New text of an append-only log after `offset`, ending where a solver step starts.
+
+    The step being written is left for the next call, so that no step is split between two
+    chunks (`final` takes everything, once the run has ended).
+    """
+    if not path.exists():
+        return "", offset
+    with path.open("rb") as file:
+        file.seek(offset)
+        data = file.read(MAX_CHUNK_BYTES)
+    if not data:
+        return "", offset
+    if final and len(data) < MAX_CHUNK_BYTES:
+        end = len(data)
+    else:
+        end = data.rfind(b"\nTime = ")
+        if end < 0:
+            return "", offset  # no complete step yet (or one step bigger than the chunk)
+        # A step's Courant number and time step are printed just before its "Time =" line.
+        preamble = data.rfind(b"\nCourant Number", 0, end)
+        if preamble >= 0 and b"Solving for" not in data[preamble:end]:
+            end = preamble
+        end += 1
+    return data[:end].decode(errors="replace"), offset + end
+
+
+def parse_steps(text: str) -> dict[str, list]:
+    """One entry per solver step: its time, the first residual of each field, Courant, dt."""
+    starts = list(STEP_START.finditer(text))
+    steps: dict[str, list] = {"time": [], "courant_max": [], "delta_t": [], "residuals": {}}
+    fields: list[str] = []
+    parsed = []
+    for i, start in enumerate(starts):
+        try:
+            moment = float(start.group(1))
+        except ValueError:
+            continue
+        end = starts[i + 1].start() if i + 1 < len(starts) else len(text)
+        residuals: dict[str, float] = {}
+        for name, value in RESIDUAL.findall(text[start.end() : end]):
+            residuals.setdefault(name, float(value))  # the first solve of the step
+        fields += [name for name in residuals if name not in fields]
+        # The Courant number and time step are printed just before the "Time =" line.
+        before = text[starts[i - 1].end() if i else 0 : start.start()]
+        courant = COURANT.findall(before)
+        delta_t = DELTA_T.findall(before)
+        parsed.append((moment, residuals, float(courant[-1]) if courant else None,
+                       float(delta_t[-1]) if delta_t else None))  # fmt: skip
+    for moment, residuals, courant, delta_t in parsed:
+        steps["time"].append(moment)
+        steps["courant_max"].append(courant)
+        steps["delta_t"].append(delta_t)
+    steps["residuals"] = {name: [r.get(name) for _, r, _, _ in parsed] for name in fields}
+    return steps
+
+
+def coefficient_files(job_dir: Path) -> list[Path]:
+    root = job_dir / "postProcessing" / "forceCoeffs"
+    return sorted(root.glob("*/coefficient.dat")) + sorted(root.glob("*/forceCoeffs.dat"))
+
+
+def read_new_coefficients(job_dir: Path, offset: int) -> tuple[dict[str, list[float]], int]:
+    files = coefficient_files(job_dir)
+    empty: dict[str, list[float]] = {"time": [], "cl": [], "cd": [], "cm": []}
+    if not files:
+        return empty, offset
+    columns: list[str] = []
+    with files[-1].open("rb") as file:
+        for raw in file:
+            line = raw.decode(errors="replace").strip()
+            if not line.startswith("#"):
+                break
+            names = line.lstrip("#").split()
+            if names and names[0] == "Time":
+                columns = names
+        file.seek(offset)
+        data = file.read(MAX_CHUNK_BYTES)
+    end = data.rfind(b"\n") + 1
+    if not columns or end <= 0:
+        return empty, offset
+    wanted = {"time": ("Time",), "cl": ("Cl",), "cd": ("Cd",), "cm": ("CmPitch", "Cm")}
+    index = {key: next((columns.index(n) for n in names if n in columns), None) for key, names in wanted.items()}
+    if any(position is None for position in index.values()):
+        return empty, offset
+    for line in data[:end].decode(errors="replace").splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        values = line.split()
+        if len(values) < len(columns):
+            continue
+        for key, position in index.items():
+            empty[key].append(float(values[position]))
+    return empty, offset + end
+
+
+def last_solver_time(log: Path) -> float | None:
+    if not log.exists():
+        return None
+    with log.open("rb") as file:
+        file.seek(0, 2)
+        file.seek(max(0, file.tell() - 65536))
+        tail = file.read().decode(errors="replace")
+    found = STEP_START.findall(tail)
+    return float(found[-1]) if found else None
+
+
+def log_tail(job_dir: Path, stage: str | None) -> list[str]:
+    if stage is None:
+        return []
+    path = job_dir / f"log.{stage}"
+    if not path.exists():
+        return []
+    with path.open("rb") as file:
+        file.seek(0, 2)
+        file.seek(max(0, file.tell() - TAIL_BYTES))
+        text = file.read().decode(errors="replace")
+    return text.splitlines()[-30:]
+
+
+def present_stages(job_dir: Path) -> list[str]:
+    return [stage for stage in STAGES if (job_dir / f"log.{stage}").exists()]
+
+
+def run_horizon(case: dict) -> float:
+    """The simulated time (transient) or iteration count (steady) a run is set to reach."""
+    return TRANSIENT_END_TIME if is_transient(case) else float(MESHES[case["mesh"]]["iterations"])
+
+
+def build_progress(job_dir: Path, log_offset: int, coeff_offset: int, final: bool) -> dict:
+    case = read_case(job_dir)
+    now = time.time()
+    chunk, new_log_offset = read_chunk(job_dir / "log.solver", log_offset, final=final)
+    coefficients, new_coeff_offset = read_new_coefficients(job_dir, coeff_offset)
+    stages = present_stages(job_dir)
+    current = stages[-1] if stages else None
+    latest = last_solver_time(job_dir / "log.solver")
+    horizon = run_horizon(case)
+    started = (job_dir / "case.json").stat().st_mtime
+    decomposed = job_dir / "log.decomposePar"
+    solver_started = decomposed.stat().st_mtime if decomposed.exists() else None
+
+    fraction = min(1.0, latest / horizon) if latest is not None and horizon else None
+    eta = None
+    if fraction and solver_started and 0 < fraction < 1 and current == "solver":
+        eta = (now - solver_started) * (1 - fraction) / fraction
+    return {
+        "log_offset": new_log_offset,
+        "coeff_offset": new_coeff_offset,
+        "steps": parse_steps(chunk),
+        "coefficients": coefficients,
+        "stage": current,
+        "stages": stages,
+        "latest_time": latest,
+        "horizon": horizon,
+        "horizon_unit": "convective times" if is_transient(case) else "iterations",
+        "fraction": fraction,
+        "elapsed_s": now - started,
+        "solver_elapsed_s": now - solver_started if solver_started else None,
+        "eta_s": eta,
+        "tail": log_tail(job_dir, current),
+    }
+
+
+def build_summary(jobs_dir: Path, job_ids: list[str]) -> dict[str, dict]:
+    """For the job list: where each job is, without reading its whole log."""
+    summary: dict[str, dict] = {}
+    for job_id in job_ids:
+        job_dir = jobs_dir / job_id
+        if not (job_dir / "case.json").exists():
+            summary[job_id] = {"missing": True}
+            continue
+        case = read_case(job_dir)
+        stages = present_stages(job_dir)
+        latest = last_solver_time(job_dir / "log.solver")
+        horizon = run_horizon(case)
+        try:
+            status = json.loads((job_dir / "status.json").read_text()).get("status")
+        except (OSError, ValueError):
+            status = None
+        fraction = min(1.0, latest / horizon) if latest is not None and horizon else None
+        decomposed = job_dir / "log.decomposePar"
+        eta = None
+        if fraction and 0 < fraction < 1 and decomposed.exists() and stages[-1:] == ["solver"]:
+            eta = (time.time() - decomposed.stat().st_mtime) * (1 - fraction) / fraction
+        summary[job_id] = {
+            "status": status,
+            "stage": stages[-1] if stages else None,
+            "fraction": 1.0 if status == "completed" else fraction,
+            "eta_s": eta,
+        }
+    return summary
+
+
+def mesh_quality(job_dir: Path) -> dict:
+    log = job_dir / "log.checkMesh"
+    if not log.exists():
+        return {}
+    text = log.read_text(errors="replace")
+
+    def number(pattern: str) -> float | None:
+        match = re.search(pattern, text)
+        return float(match.group(1)) if match else None
+
+    return {
+        "cells": number(r"cells:\s+(\d+)"),
+        "points": number(r"points:\s+(\d+)"),
+        "max_non_orthogonality": number(r"Mesh non-orthogonality Max: ([-+0-9.eE]+)"),
+        "max_skewness": number(r"Max skewness = ([-+0-9.eE]+)"),
+        "max_aspect_ratio": number(r"Max aspect ratio = ([-+0-9.eE]+)"),
+        "ok": "Mesh OK" in text,
+    }
+
+
+def build_info(job_dir: Path) -> dict:
+    case = read_case(job_dir)
+    dictionaries = {}
+    for name in DICTIONARIES:
+        path = job_dir / name
+        if path.exists():
+            text = path.read_text(errors="replace")
+            dictionaries[name] = re.sub(r"^FoamFile\s*\{.*?\}\s*", "", text, flags=re.S).strip()
+    processors = len(list(job_dir.glob("processor*")))
+    return {
+        "case": case,
+        "regime": "transient" if is_transient(case) else "steady",
+        "solver": "pimpleFoam" if is_transient(case) else "simpleFoam",
+        "turbulence": "laminar" if is_laminar(case) else "kOmegaSST",
+        "processors": processors or None,
+        "horizon": run_horizon(case),
+        "horizon_unit": "convective times" if is_transient(case) else "iterations",
+        "mesh": mesh_quality(job_dir),
+        "dictionaries": dictionaries,
+        "stages_expected": STAGES,
+    }
+
+
+def describe_results(result: dict) -> str:
+    """A few lines for log.results: what was written to status.json."""
+    lines = [
+        f"{result['regime']} {result['shape']}: "
+        f"Cl = {result['cl']:.4f}, Cd = {result['cd']:.4f}, Cm = {result['cm']:.4f}",
+        f"averaged over {result['averaged_over']}",
+    ]
+    if "strouhal" in result:
+        lines.append(f"Strouhal number = {result['strouhal']:.4f}")
+    if "converged" in result:
+        lines.append(f"converged = {result['converged']} ({result['iterations']} iterations)")
+    lines += [f"media: {item['file']}" for item in result.get("media", [])]
+    lines += [f"warning: {warning}" for warning in result["warnings"]]
+    lines.append("wrote status.json")
+    return "\n".join(lines)
 
 
 def write_status(job_dir: Path, state: str, message: str | None, result: dict | None = None) -> None:
@@ -852,7 +1159,16 @@ def main(argv: list[str]) -> None:
     elif command == "boundary":
         fix_boundary(job_dir)
     elif command == "results":
-        write_status(job_dir, "completed", None, build_results(job_dir))
+        result = build_results(job_dir)
+        write_status(job_dir, "completed", None, result)
+        print(describe_results(result))  # ends up in log.results
+    elif command == "info":
+        print(json.dumps(build_info(job_dir)))
+    elif command == "summary":
+        print(json.dumps(build_summary(job_dir, argv[3:])))
+    elif command == "progress":
+        offsets = (int(argv[3]), int(argv[4]))
+        print(json.dumps(build_progress(job_dir, *offsets, final=len(argv) > 5 and argv[5] == "final")))
     elif command == "status":
         write_status(job_dir, argv[3], argv[4] if len(argv) > 4 else None)
     else:

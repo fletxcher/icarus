@@ -16,6 +16,11 @@ _spec = importlib.util.spec_from_file_location("cfd_case", _path)
 cfd_case = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cfd_case)
 
+_render_path = _path.with_name("render_video.py")
+_render_spec = importlib.util.spec_from_file_location("render_video", _render_path)
+render_video = importlib.util.module_from_spec(_render_spec)
+_render_spec.loader.exec_module(render_video)  # paraview itself is only imported by main()
+
 CASES = {
     "airfoil": {"shape": "airfoil", "naca": "2412", "alpha": 4, "reynolds": 1e6},
     "cylinder": {"shape": "cylinder", "reynolds": 1e5},
@@ -209,7 +214,7 @@ def write_coefficients(job: Path, rows: list[tuple[float, float, float, float]])
 
 
 def test_steady_results_average_the_tail_and_report_convergence(tmp_path):
-    job = make_job(tmp_path, **CASES["airfoil"])
+    job = make_job(tmp_path, **CASES["airfoil"], video=False)
     write_coefficients(job, [(i, 0.02, 0.5 + 1 / i, -0.05) for i in range(1, 301)])
     (job / "log.solver").write_text(
         "Solving for Ux, Initial residual = 1e-3\nSolving for p, Initial residual = 2e-6\n"
@@ -275,3 +280,243 @@ def test_status_is_written_atomically(tmp_path):
         "error": "boom",
     }
     assert not (tmp_path / "status.json.tmp").exists()
+
+
+def test_video_runs_keep_every_snapshot_and_other_runs_only_the_last(tmp_path):
+    (tmp_path / "video").mkdir()
+    (tmp_path / "plain").mkdir()
+    with_video = make_job(tmp_path / "video", **CASES["cylinder"])
+    without = make_job(tmp_path / "plain", **CASES["cylinder"], video=False)
+    steady = make_job(tmp_path, **CASES["airfoil"])
+    for job in (with_video, without, steady):
+        cfd_case.write_foam(job, 1)
+
+    control = (with_video / "system" / "controlDict").read_text()
+    assert "adjustableRunTime" in control
+    assert f"writeInterval   {cfd_case.VIDEO_INTERVAL};" in control
+    assert "purgeWrite      0;" in control
+    assert "writeFormat     binary;" in control
+    assert "writeInterval   80.0;" in (without / "system" / "controlDict").read_text()
+    assert "purgeWrite      1;" in (steady / "system" / "controlDict").read_text()
+
+
+def test_results_include_the_video_that_was_rendered(tmp_path):
+    job = make_job(tmp_path, **CASES["cylinder"])
+    write_coefficients(job, [(t / 10, 1.2, 0.5 * math.sin(t), 0.0) for t in range(1, 800)])
+    (job / "log.solver").write_text("")
+    media = [
+        {"file": "velocity.png", "title": "Velocity magnitude", "kind": "image"},
+        {"file": "flow.mp4", "title": "Vorticity (z)", "kind": "video", "frames": 320, "fps": 25},
+    ]
+    (job / "video.json").write_text(json.dumps({"media": media}))
+
+    result = cfd_case.build_results(job)
+
+    assert result["media"] == media
+    assert not any("video" in warning for warning in result["warnings"])
+
+
+def test_failed_video_is_a_warning_not_a_failed_job(tmp_path):
+    job = make_job(tmp_path, **CASES["cylinder"])
+    write_coefficients(job, [(t / 10, 1.2, 0.5 * math.sin(t), 0.0) for t in range(1, 800)])
+    (job / "log.solver").write_text("")
+    (job / "video.failed").write_text("ParaView (pvbatch), ffmpeg or xvfb-run isn't installed")
+
+    result = cfd_case.build_results(job)
+
+    assert "media" not in result
+    assert any("pvbatch" in warning and "unaffected" in warning for warning in result["warnings"])
+
+
+def test_video_can_be_turned_off(tmp_path):
+    job = make_job(tmp_path, **CASES["cylinder"], video=False)
+    write_coefficients(job, [(t / 10, 1.2, 0.5 * math.sin(t), 0.0) for t in range(1, 800)])
+    (job / "log.solver").write_text("")
+
+    assert not any("video" in warning for warning in cfd_case.build_results(job)["warnings"])
+
+
+def test_snapshots_are_ordered_by_time_index_not_by_name(tmp_path):
+    for index in (0, 2, 10, 1):
+        folder = tmp_path / "VTK" / f"case_{index}"
+        folder.mkdir(parents=True)
+        (folder / "internal.vtu").write_text("")
+
+    names = [path.parent.name for path in render_video.snapshot_files(tmp_path)]
+
+    assert names == ["case_0", "case_1", "case_2", "case_10"]
+
+
+def test_snapshot_times_come_from_the_series_file(tmp_path):
+    files = []
+    for index in (0, 10, 25):
+        folder = tmp_path / "VTK" / f"case_{index}"
+        folder.mkdir(parents=True)
+        files.append(folder / "internal.vtu")
+    series = {
+        "file-series-version": "1.0",
+        "files": [
+            {"name": f"case_{i}.vtm", "time": t} for i, t in ((0, 0.0), (10, 0.25), (25, 0.5))
+        ],
+    }
+    (tmp_path / "VTK" / "case.vtm.series").write_text(json.dumps(series))
+
+    assert render_video.snapshot_times(tmp_path, files) == [0.0, 0.25, 0.5]
+
+
+def test_snapshot_times_fall_back_to_the_time_directories(tmp_path):
+    for name in ("0", "0.25", "0.5", "constant", "system", "VTK"):
+        (tmp_path / name).mkdir()
+    files = [tmp_path / "VTK" / f"case_{i}" / "internal.vtu" for i in range(3)]
+
+    assert render_video.snapshot_times(tmp_path, files) == [0.0, 0.25, 0.5]
+    assert render_video.snapshot_times(tmp_path, files[:2]) == [0.0, 1.0]  # unknown: indices
+
+
+def test_view_follows_the_body_geometry():
+    wedge = {"shape": "wedge", "half_angle": 30}
+    assert render_video.body_length(wedge) == pytest.approx(0.5 / math.tan(math.radians(30)))
+    assert render_video.body_centre(wedge) == (
+        pytest.approx(render_video.body_length(wedge) / 2),
+        0.0,
+    )
+    assert render_video.body_centre({"shape": "airfoil"}) == (0.5, 0.0)
+    assert render_video.body_length({"shape": "cylinder"}) == 1.0
+
+
+SOLVER_LOG = """\
+Courant Number mean: 0.1 max: 0.5
+deltaT = 0.002
+Time = 0.002
+
+smoothSolver:  Solving for Ux, Initial residual = 1, Final residual = 1e-6, No Iterations 2
+smoothSolver:  Solving for Uy, Initial residual = 0.5, Final residual = 1e-6, No Iterations 2
+GAMG:  Solving for p, Initial residual = 0.9, Final residual = 1e-3, No Iterations 4
+GAMG:  Solving for p, Initial residual = 0.1, Final residual = 1e-8, No Iterations 6
+ExecutionTime = 0.1 s
+
+Courant Number mean: 0.1 max: 0.7
+deltaT = 0.003
+Time = 0.005
+
+smoothSolver:  Solving for Ux, Initial residual = 0.1, Final residual = 1e-6, No Iterations 2
+GAMG:  Solving for p, Initial residual = 0.2, Final residual = 1e-3, No Iterations 4
+"""
+
+
+def test_solver_steps_are_parsed_with_the_first_residual_of_each_field():
+    steps = cfd_case.parse_steps(SOLVER_LOG)
+
+    assert steps["time"] == [0.002, 0.005]
+    assert steps["residuals"]["Ux"] == [1.0, 0.1]
+    assert steps["residuals"]["p"] == [0.9, 0.2]  # the first of the step's pressure solves
+    assert steps["residuals"]["Uy"] == [0.5, None]
+    assert steps["courant_max"] == [0.5, 0.7]  # printed just before each step's "Time ="
+    assert steps["delta_t"] == [0.002, 0.003]
+
+
+def test_log_chunks_stop_before_the_step_being_written(tmp_path):
+    log = tmp_path / "log.solver"
+    log.write_text(SOLVER_LOG)
+
+    first, offset = cfd_case.read_chunk(log, 0, final=False)
+    assert "Time = 0.002" in first
+    assert "Time = 0.005" not in first
+    assert not first.rstrip().endswith("deltaT = 0.003")  # the pending step's preamble waits too
+
+    # More output arrives; the pending step is now complete and nothing is read twice.
+    log.write_text(SOLVER_LOG + "ExecutionTime = 0.2 s\n\nTime = 0.008\n")
+    second, offset = cfd_case.read_chunk(log, offset, final=False)
+    assert "Time = 0.005" in second
+    assert "Time = 0.008" not in second
+    assert cfd_case.parse_steps(first)["time"] + cfd_case.parse_steps(second)["time"] == [
+        0.002,
+        0.005,
+    ]
+
+    # Once the run has ended, the last step is included too.
+    last, _ = cfd_case.read_chunk(log, offset, final=True)
+    assert "Time = 0.008" in last
+
+
+def test_progress_reports_stage_fraction_and_new_coefficients(tmp_path):
+    job = make_job(tmp_path, **CASES["cylinder"])
+    for stage in ("geo", "gmsh", "decomposePar"):
+        (job / f"log.{stage}").write_text("")
+    (job / "log.solver").write_text(SOLVER_LOG + "\nTime = 20\n")
+    write_coefficients(job, [(0.002, 1.2, 0.01, 0.0), (0.005, 1.1, 0.02, 0.0)])
+
+    first = cfd_case.build_progress(job, 0, 0, final=False)
+
+    assert first["stage"] == "solver"
+    assert first["latest_time"] == 20
+    assert first["fraction"] == pytest.approx(20 / cfd_case.TRANSIENT_END_TIME)
+    assert first["steps"]["time"] == [0.002, 0.005]
+    assert first["coefficients"]["cd"] == [1.2, 1.1]
+    assert first["horizon_unit"] == "convective times"
+    assert first["eta_s"] is not None
+
+    again = cfd_case.build_progress(job, first["log_offset"], first["coeff_offset"], final=False)
+    assert again["steps"]["time"] == []
+    assert again["coefficients"]["time"] == []
+
+
+def test_info_collects_the_case_the_mesh_and_the_dictionaries(tmp_path):
+    job = make_job(tmp_path, **CASES["airfoil"])
+    cfd_case.write_foam(job, 4)
+    (job / "log.checkMesh").write_text(
+        "    cells:            1234\n    Max aspect ratio = 12.5 OK.\n"
+        "    Mesh non-orthogonality Max: 40.5 average: 3\n    Max skewness = 0.8 OK.\nMesh OK.\n"
+    )
+
+    info = cfd_case.build_info(job)
+
+    assert info["solver"] == "simpleFoam"
+    assert info["regime"] == "steady"
+    assert info["turbulence"] == "kOmegaSST"
+    assert info["mesh"] == {
+        "cells": 1234, "points": None, "max_non_orthogonality": 40.5,
+        "max_skewness": 0.8, "max_aspect_ratio": 12.5, "ok": True,
+    }  # fmt: skip
+    assert "system/fvSchemes" in info["dictionaries"]
+    assert not info["dictionaries"]["system/fvSchemes"].startswith("FoamFile")
+    assert info["horizon"] == cfd_case.MESHES["medium"]["iterations"]
+
+
+def test_summary_reports_each_jobs_stage_fraction_and_status(tmp_path):
+    jobs = tmp_path / "jobs"
+    running = make_job(_mkdir(jobs / "a"), **CASES["cylinder"])
+    for stage in ("geo", "decomposePar", "solver"):
+        (running / f"log.{stage}").write_text("")
+    (running / "log.solver").write_text("Time = 40\n")
+    done = make_job(_mkdir(jobs / "b"), **CASES["airfoil"])
+    cfd_case.write_status(done, "completed", None, {"cl": 1})
+
+    summary = cfd_case.build_summary(jobs, ["a", "b", "gone"])
+
+    assert summary["a"]["stage"] == "solver"
+    assert summary["a"]["fraction"] == pytest.approx(0.5)
+    assert summary["a"]["status"] is None
+    assert summary["a"]["eta_s"] is not None
+    assert summary["b"]["status"] == "completed"
+    assert summary["b"]["fraction"] == 1.0
+    assert summary["gone"] == {"missing": True}
+
+
+def _mkdir(path):
+    path.mkdir(parents=True)
+    return path
+
+
+def test_results_command_logs_what_it_wrote(tmp_path, capsys):
+    job = make_job(tmp_path, **CASES["cylinder"], video=False)
+    write_coefficients(job, [(t / 10, 1.2, 0.5 * math.sin(t), 0.0) for t in range(1, 800)])
+    (job / "log.solver").write_text("")
+
+    cfd_case.main(["cfd_case.py", "results", str(job)])
+
+    printed = capsys.readouterr().out
+    assert "transient cylinder: Cl =" in printed
+    assert "Cd = 1.2000" in printed
+    assert "wrote status.json" in printed
+    assert json.loads((job / "status.json").read_text())["status"] == "completed"

@@ -87,5 +87,28 @@ else
   run solver "$solver" -case "$job_dir"
 fi
 
+# --- video -------------------------------------------------------------------
+# A flow video (transient) or still (steady) from the saved time steps. The numbers don't
+# depend on it, so a failure here is recorded as a warning in the results, not a failed job.
+make_video() {
+  stage="render"
+  command -v pvbatch > /dev/null && command -v ffmpeg > /dev/null && command -v xvfb-run > /dev/null ||
+    { echo "ParaView (pvbatch), ffmpeg or xvfb-run isn't installed" > "$job_dir/log.render"; return 1; }
+  # Transient runs: every saved time step. Steady runs: just the last.
+  local reconstruct=(-newTimes) vtk=()
+  ((transient)) || { reconstruct=(-latestTime); vtk=(-latestTime); }
+  run reconstruct reconstructPar -case "$job_dir" "${reconstruct[@]}" &&
+    run vtk foamToVTK -case "$job_dir" -fields '(U p)' -no-boundary "${vtk[@]}" &&
+    run render xvfb-run -a pvbatch "$here/render_video.py" "$job_dir"
+}
+rm -f video.json video.failed
+if [[ "$(python3 -c "import json; print(json.load(open('case.json')).get('video', True))")" == "True" ]]; then
+  if ! make_video; then
+    echo "$(tail -n 3 "$job_dir/log.$stage" 2> /dev/null | tr '\n' ' ' | cut -c1-300)" > video.failed
+  fi
+  rm -rf VTK frames
+fi
+
 # --- results -----------------------------------------------------------------
+stage="results"
 run results python3 "${case_tool[0]}" results "$job_dir"

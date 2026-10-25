@@ -11,6 +11,8 @@ CFD runs take minutes to hours, so jobs are fire-and-poll rather than awaited:
 
 import json
 import logging
+import posixpath
+import re
 import shlex
 from datetime import UTC, datetime
 from typing import Any
@@ -21,9 +23,27 @@ from pymongo.asynchronous.database import AsyncDatabase
 
 from ..catalog import SIMULATIONS
 from .runner import CommandRunner
-from .schemas import TERMINAL_STATUSES, CfdCase, Simulation
+from .schemas import TERMINAL_STATUSES, CfdCase, Simulation, SimulationSummary
 
 logger = logging.getLogger(__name__)
+
+LAUNCH_TIMEOUT_S = 30.0
+MONITOR_TIMEOUT_S = 20.0
+MAX_LISTED = 50  # running jobs in the list
+RECENT_FINISHED = 10  # finished jobs kept in the list
+# Files a finished job can serve (made by ws/render_video.py), with their media types.
+JOB_FILES = {
+    "flow.mp4": "video/mp4",
+    "velocity.png": "image/png",
+    "pressure.png": "image/png",
+}
+
+
+SAFE_JOB_ID = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+class MonitorError(Exception):
+    """The work station couldn't report on a job (unreachable, or the job's files are gone)."""
 
 
 class SimulationService:
@@ -53,10 +73,13 @@ class SimulationService:
         try:
             await self._runner.run(f"mkdir -p {shlex.quote(job_dir)}")
             await self._runner.write_file(f"{job_dir}/case.json", case.model_dump_json(indent=2))
+            # The job must be detached from this command: the command returns when its output
+            # streams close, so anything still holding them (a backgrounded `cd && ...` list,
+            # say) would keep the submission waiting until the whole simulation is done.
             launch = await self._runner.run(
-                f"nohup {shlex.quote(self._script)} {shlex.quote(job_dir)} "
-                "> run.log 2>&1 < /dev/null &",
-                cwd=job_dir,
+                f"cd {shlex.quote(job_dir)} && {{ setsid nohup {shlex.quote(self._script)} "
+                f"{shlex.quote(job_dir)} > run.log 2>&1 < /dev/null & }}",
+                timeout_s=LAUNCH_TIMEOUT_S,
             )
             if not launch.ok:
                 raise RuntimeError(launch.stderr.strip() or "launch failed")
@@ -66,6 +89,116 @@ class SimulationService:
 
         logger.info("cfd job %s launched on work station in %s", doc["_id"], job_dir)
         return await self._update(doc["_id"], status="running")
+
+    async def _monitor(self, *args: str) -> dict[str, Any]:
+        """Runs ws/cfd_case.py (installed next to the run script) and returns its JSON."""
+        tool = posixpath.join(posixpath.dirname(self._script), "cfd_case.py")
+        command = " ".join(["python3", *map(shlex.quote, (tool, *args))])
+        try:
+            result = await self._runner.run(command, timeout_s=MONITOR_TIMEOUT_S)
+        except Exception as error:
+            raise MonitorError(f"could not reach the work station: {error}") from error
+        if not result.ok:
+            raise MonitorError(
+                result.stderr.strip().splitlines()[-1] if result.stderr else "failed"
+            )
+        try:
+            return json.loads(result.stdout)
+        except ValueError as error:
+            raise MonitorError(f"unreadable monitor output: {error}") from error
+
+    async def info(self, job_id: str) -> dict[str, Any]:
+        """Static facts about the job: case, solver, mesh quality, dictionaries."""
+        return await self._monitor("info", self._job_dir(job_id))
+
+    async def progress(
+        self, job_id: str, *, log_offset: int, coeff_offset: int, final: bool
+    ) -> dict[str, Any]:
+        """What the run did since the given offsets (residuals, coefficients, stage, ETA)."""
+        args = ["progress", self._job_dir(job_id), str(log_offset), str(coeff_offset)]
+        return await self._monitor(*args, *(["final"] if final else []))
+
+    async def list_summaries(self, finished: int = RECENT_FINISHED) -> list[SimulationSummary]:
+        """Running jobs with their progress, then the most recently finished ones."""
+        active_docs = (
+            await self._collection.find({"status": {"$in": ["queued", "running"]}})
+            .sort("created_at", -1)
+            .to_list(MAX_LISTED)
+        )
+        progress: dict[str, dict[str, Any]] = {}
+        if active_docs:
+            try:
+                progress = await self._monitor(
+                    "summary", f"{self._workdir}/jobs", *(doc["_id"] for doc in active_docs)
+                )
+            except MonitorError as error:
+                logger.warning("job list: no progress from the work station (%s)", error)
+        for doc in active_docs:
+            # A job that ended since the last look: record its result before listing it.
+            if progress.get(doc["_id"], {}).get("status") in TERMINAL_STATUSES:
+                await self.get(doc["_id"])
+                doc.update(await self._collection.find_one({"_id": doc["_id"]}) or {})
+        finished_docs = (
+            await self._collection.find({"status": {"$in": sorted(TERMINAL_STATUSES)}})
+            .sort("created_at", -1)
+            .to_list(finished)
+        )
+
+        summaries = []
+        for doc in [*active_docs, *finished_docs]:
+            job = progress.get(doc["_id"], {})
+            summaries.append(
+                SimulationSummary(
+                    id=doc["_id"],
+                    thread_id=doc.get("thread_id"),
+                    case=doc["case"],
+                    status=doc["status"],
+                    error=doc.get("error"),
+                    created_at=doc["created_at"],
+                    stage=job.get("stage"),
+                    fraction=job.get("fraction")
+                    if doc["status"] not in TERMINAL_STATUSES
+                    else None,
+                    eta_s=job.get("eta_s"),
+                )
+            )
+        return sorted(
+            summaries, key=lambda s: (s.status in TERMINAL_STATUSES, -s.created_at.timestamp())
+        )
+
+    async def delete(self, job_id: str) -> bool | None:
+        """Stops the job if it is running and deletes its record and its files.
+
+        Returns None if there is no such job, else whether its files on the work station were
+        removed (False if the work station couldn't be reached: the record is deleted anyway).
+        """
+        deleted = await self._collection.find_one_and_delete({"_id": job_id})
+        if deleted is None:
+            return None
+        removed = False
+        if SAFE_JOB_ID.match(job_id):  # it becomes part of a path that is removed recursively
+            job_dir = shlex.quote(self._job_dir(job_id))
+            # run_case.sh leads its own process group (setsid at launch), so one signal to
+            # the group stops the solver and everything else the job started. The [r] keeps
+            # pgrep from matching this very command.
+            stop = (
+                f"pid=$(pgrep -f '[r]un_case.sh .*{job_id}' | head -n 1); "
+                'if [ -n "$pid" ]; then kill -TERM -- "-$pid"; sleep 2; fi; '
+                f"rm -rf -- {job_dir}"
+            )
+            try:
+                result = await self._runner.run(stop, timeout_s=MONITOR_TIMEOUT_S)
+                removed = result.ok
+            except Exception:
+                logger.exception("could not remove the files of cfd job %s", job_id)
+        logger.info("cfd job %s deleted (files removed: %s)", job_id, removed)
+        return removed
+
+    async def job_file(self, job_id: str, name: str) -> bytes:
+        """A file the job produced (see JOB_FILES); FileNotFoundError if it isn't there."""
+        if name not in JOB_FILES:
+            raise FileNotFoundError(name)
+        return await self._runner.read_bytes(f"{self._job_dir(job_id)}/{name}")
 
     async def get(self, job_id: str) -> Simulation | None:
         """Returns the job, refreshing it from the work station while it's still in flight."""

@@ -122,6 +122,9 @@
                 "steady",
                 "transient"
               ]
+            },
+            "video": {
+              "bsonType": "bool"
             }
           }
         },

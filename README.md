@@ -286,6 +286,31 @@ half and report the Strouhal number when the lift oscillates. Results carry `cl`
 `cm` (per unit span, on the reference length), `history` for plotting, final residuals,
 the airfoil's y+, the cell count and `warnings`.
 
+**Simulations.** The chart icon at the top right opens a panel on the right (the count on
+it is the running jobs). It lists the running simulations, each with a progress bar, stage
+and time left, or "No simulations running", plus the most recent finished ones. Clicking
+one goes to its own page, `/simulations/<id>`, which has the full monitor: stages,
+progress, Courant number and live force-coefficient plots (Overview), residuals, setup
+(case, solver, mesh quality, the OpenFOAM dictionaries), the log tail and the results with
+the flow video. The trash button on that page deletes the job after a confirmation: a
+running job is stopped, then its record and its files on the work station are removed
+(`DELETE /api/simulations/{id}`). A CFD tool card in the chat links to its job's page too. The backend
+serves it from `GET /api/simulations` (the list), `/api/simulations/{id}/info`,
+`/progress?log_offset=&coeff_offset=` (only what is new since the offsets the last call
+returned) and `/files/flow.mp4|flow.png`; these read the work station's logs over SSH
+through `ws/cfd_case.py`.
+
+**Images and flow video.** With `video` on (the default), every run gets a
+`velocity.png` and a `pressure.png` (pressure coefficient) of the final flow field, and
+transient runs also get `flow.mp4`, the z-vorticity at every saved time step. Transient runs
+save a snapshot every 0.25 convective times, afterwards `foamToVTK` converts them and
+`ws/render_video.py` (ParaView's `pvbatch` on a virtual display) draws them, zoomed on the
+body and its wake with fixed colour ranges, and ffmpeg encodes the video (25 fps). The
+Results tab shows them, and the result's `media` entry lists them. If ParaView or ffmpeg is
+missing or rendering fails, the job still completes and a warning says why (see
+`log.render`); the VTK files and frames are deleted afterwards. `log.results` records what
+was written to `status.json`.
+
 Wall conditions on the body (`wall_type`): `no_slip`, `slip`, `moving` (surface velocity
 `wall_velocity_x` / `wall_velocity_y` in freestream speeds) and `rotating` (a cylinder with
 `spin_ratio` = surface speed / freestream speed). `roughness_height` (fraction of the
@@ -296,7 +321,7 @@ flow direction is rotated by `alpha`, so the farfield and mesh stay the same.
 backend connects as:
 
 ```bash
-./setup.sh --install     # XFOIL, gmsh, OpenFOAM; ~/icarus/bin/run_case.sh; ~/icarus/jobs
+./setup.sh --install     # XFOIL, gmsh, OpenFOAM, ParaView, ffmpeg; ~/icarus/bin/run_case.sh; ~/icarus/jobs
 ./setup.sh --uninstall   # removes what --install added (asks before deleting job data)
 ```
 

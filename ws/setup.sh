@@ -2,7 +2,7 @@
 # Prepares (or cleans up) the simulation work station the Icarus backend reaches over SSH.
 #
 # Run it on the work station as the user the backend connects as (WS_USER, default "ubuntu"):
-#   ./setup.sh --install      install XFOIL, gmsh and OpenFOAM, and the CFD job layout
+#   ./setup.sh --install      install XFOIL, gmsh, OpenFOAM, ParaView and ffmpeg, and the CFD job layout
 #   ./setup.sh --uninstall    remove what --install added (asks before deleting job data)
 #
 # Layout under ICARUS_HOME (default ~/icarus), matching the backend's defaults:
@@ -19,14 +19,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Packages installed by --install, so --uninstall removes only those.
 MANIFEST="$ICARUS_HOME/.setup-packages"
 OPENFOAM_PACKAGE="${OPENFOAM_PACKAGE:-openfoam2512}"
-PACKAGES=(xfoil xvfb xauth gmsh "$OPENFOAM_PACKAGE")
+PACKAGES=(xfoil xvfb xauth gmsh paraview ffmpeg "$OPENFOAM_PACKAGE")
 
 usage() {
   cat <<EOF
 Usage: $(basename "$0") --install | --uninstall [--yes]
 
-  --install     Install XFOIL, xvfb, xauth, gmsh and OpenFOAM ($OPENFOAM_PACKAGE), and
-                create $ICARUS_HOME with the CFD runner.
+  --install     Install XFOIL, xvfb, xauth, gmsh, OpenFOAM ($OPENFOAM_PACKAGE), ParaView
+                and ffmpeg, and create $ICARUS_HOME with the CFD runner.
   --uninstall   Remove packages this script installed and delete $ICARUS_HOME.
   --yes         Don't ask before deleting $ICARUS_HOME (job data included).
 
@@ -70,6 +70,13 @@ ensure_openfoam_repo() {
   as_root apt-get install -y -qq curl ca-certificates
   curl -fsSL https://dl.openfoam.com/add-debian-repo.sh | as_root bash
   as_root apt-get update -qq
+}
+
+check_video() {
+  for tool in pvbatch ffmpeg xvfb-run; do
+    command -v "$tool" > /dev/null || { log "Video check FAILED: $tool not found"; return 1; }
+  done
+  log "Video tools found (pvbatch, ffmpeg, xvfb-run)"
 }
 
 check_openfoam() {
@@ -120,10 +127,12 @@ do_install() {
 
   install -m 755 "$SCRIPT_DIR/run_case.sh" "$ICARUS_HOME/bin/run_case.sh"
   install -m 755 "$SCRIPT_DIR/cfd_case.py" "$ICARUS_HOME/bin/cfd_case.py"
+  install -m 755 "$SCRIPT_DIR/render_video.py" "$ICARUS_HOME/bin/render_video.py"
   log "Installed CFD runner at $ICARUS_HOME/bin/run_case.sh (and cfd_case.py)"
 
   check_xfoil
   check_openfoam
+  check_video
 
   cat <<EOF
 

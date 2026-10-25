@@ -43,12 +43,27 @@ async function loadMessages(threadId: string) {
   }
 }
 
+export async function deleteSimulation(jobId: string): Promise<boolean> {
+  try {
+    const { files_removed } = await api.deleteSimulation(jobId);
+    store().setSimulations(store().simulations.filter((job) => job.id !== jobId));
+    if (files_removed) toast.success("Simulation deleted");
+    else toast.warning("Simulation deleted, but its files on the work station couldn't be removed");
+    return true;
+  } catch (error) {
+    toast.error(errorMessage(error));
+    return false;
+  }
+}
+
 export function newChat() {
   store().setActiveThread(null);
+  store().requestChatView();
 }
 
 export async function selectThread(threadId: string) {
   store().setActiveThread(threadId);
+  store().requestChatView();
   if (!store().messages[threadId]) await loadMessages(threadId);
 }
 

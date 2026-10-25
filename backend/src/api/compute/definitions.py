@@ -48,6 +48,7 @@ SIMULATIONS_VALIDATOR: dict[str, Any] = {
                     "spin_ratio": {"bsonType": "number", "minimum": -10, "maximum": 10},
                     "roughness_height": {"bsonType": "number", "minimum": 0, "maximum": 0.05},
                     "regime": {"bsonType": "string", "enum": _enum("regime")},
+                    "video": {"bsonType": "bool"},
                 },
             },
             "status": {"bsonType": "string", "enum": list(get_args(SimulationStatus))},

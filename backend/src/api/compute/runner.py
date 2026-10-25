@@ -65,6 +65,10 @@ class CommandRunner(Protocol):
         """Raises FileNotFoundError if the file doesn't exist."""
         ...
 
+    async def read_bytes(self, path: str) -> bytes:
+        """Raises FileNotFoundError if the file doesn't exist."""
+        ...
+
     async def make_temp_dir(self) -> str: ...
 
     async def remove_dir(self, path: str) -> None: ...
@@ -100,6 +104,9 @@ class LocalRunner:
 
     async def read_file(self, path: str) -> str:
         return await asyncio.to_thread(Path(path).read_text)
+
+    async def read_bytes(self, path: str) -> bytes:
+        return await asyncio.to_thread(Path(path).read_bytes)
 
     async def make_temp_dir(self) -> str:
         return await asyncio.to_thread(tempfile.mkdtemp, prefix="icarus-")
@@ -165,6 +172,14 @@ class SSHRunner:
         connection = await self._connect()
         try:
             async with connection.start_sftp_client() as sftp, sftp.open(path, "r") as file:
+                return await file.read()
+        except asyncssh.SFTPNoSuchFile as error:
+            raise FileNotFoundError(path) from error
+
+    async def read_bytes(self, path: str) -> bytes:
+        connection = await self._connect()
+        try:
+            async with connection.start_sftp_client() as sftp, sftp.open(path, "rb") as file:
                 return await file.read()
         except asyncssh.SFTPNoSuchFile as error:
             raise FileNotFoundError(path) from error

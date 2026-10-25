@@ -132,7 +132,14 @@ def simulation_tools(simulations: SimulationService) -> list[BaseTool]:
     async def submit_cfd_simulation(config: RunnableConfig, **fields) -> str:
         thread_id = config.get("configurable", {}).get("thread_id")
         simulation = await simulations.submit(CfdCase(**fields), thread_id=thread_id)
-        return _format_simulation(simulation)
+        text = _format_simulation(simulation)
+        if simulation.status == "running":
+            text += (
+                "\n\nThe simulation is now running in the background and will take a while. "
+                "Tell the user the job id and what was submitted, then end your turn: do not "
+                "wait for it or call get_simulation_status again until the user asks."
+            )
+        return text
 
     async def get_simulation_status(job_id: str) -> str:
         simulation = await simulations.get(job_id)
@@ -157,7 +164,10 @@ def simulation_tools(simulations: SimulationService) -> list[BaseTool]:
         StructuredTool.from_function(
             coroutine=get_simulation_status,
             name="get_simulation_status",
-            description="Check the status and results of a CFD simulation job.",
+            description=(
+                "Check the status and results of a CFD simulation job once, when the user asks "
+                "about it. Never call it repeatedly to wait for a job to finish."
+            ),
             args_schema=SimulationLookup,
         ),
     ]
