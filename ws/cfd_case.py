@@ -25,6 +25,7 @@ The patches are `body`, `farfield` and `frontAndBack` (empty: the mesh is one ce
 
 import json
 import math
+import os
 import re
 import statistics
 import sys
@@ -38,7 +39,9 @@ TURBULENCE_INTENSITY = 0.001
 VISCOSITY_RATIO = 10.0  # freestream nut / nu
 LAMINAR_BELOW_REYNOLDS = 1000.0
 MAX_HISTORY_POINTS = 200
-TRANSIENT_END_TIME = 80.0  # convective times (reference length / freestream speed)
+# Convective times (reference length / freestream speed) a transient run covers. The
+# environment variable shortens it, e.g. for a quick check of a new case.
+TRANSIENT_END_TIME = float(os.environ.get("ICARUS_TRANSIENT_END_TIME", "80"))
 MAX_COURANT = 1.0
 VIDEO_INTERVAL = 0.25  # convective times between the snapshots a video is rendered from
 

@@ -11,6 +11,7 @@
 #
 # Settings (environment): OPENFOAM_BASHRC  OpenFOAM's etc/bashrc (found automatically)
 #                         ICARUS_NPROC     MPI ranks (default: min(cores, 4))
+#                         ICARUS_TRANSIENT_END_TIME  convective times of a transient run (default 80)
 set -euo pipefail
 
 job_dir="$(cd "$1" && pwd)"
