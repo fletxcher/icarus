@@ -134,7 +134,8 @@ check_video() {
 
 check_openfoam() {
   local bashrc
-  bashrc="$(ls /usr/lib/openfoam/openfoam*/etc/bashrc /opt/openfoam*/etc/bashrc 2> /dev/null | tail -n 1)"
+  # ls exits 2 when one of the two globs matches nothing, which pipefail would turn into an abort.
+  bashrc="$(ls /usr/lib/openfoam/openfoam*/etc/bashrc /opt/openfoam*/etc/bashrc 2> /dev/null | tail -n 1 || true)"
   if [[ -z "$bashrc" ]]; then
     log "OpenFOAM check FAILED: no etc/bashrc found"
     return 1
