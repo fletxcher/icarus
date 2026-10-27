@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 HOST_KEY_TIMEOUT_S = 10.0
 COMMAND_TIMEOUT_S = 30.0
 # The runner scripts shipped in the repository, put on the machine at connection time.
-WS_SOURCE = Path(__file__).resolve().parents[4] / "ws"
+WS_SOURCE = Path(__file__).resolve().parents[4] / "workstation"
 SCRIPTS = ["run_case.sh", "cfd_case.py", "render_video.py", "run_calculix.sh"]
 SETUP_SCRIPT = "setup.sh"
 

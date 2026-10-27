@@ -58,7 +58,7 @@ export type SimulationResult = {
   coefficient_basis?: string;
   warnings?: string[];
   y_plus_body?: { min: number; max: number; average: number };
-  /** Images and the flow video rendered after the solve (ws/render_video.py). */
+  /** Images and the flow video rendered after the solve (workstation/render_video.py). */
   media?: SimulationMedia[];
   [key: string]: unknown;
 };

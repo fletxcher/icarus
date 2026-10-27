@@ -7,7 +7,7 @@ and shows its reasoning, every tool call with its result, and the answer.
 - `frontend/`: Next.js + shadcn/ui chat interface
 - `backend/`: FastAPI service that stores chats in MongoDB and runs a LangGraph agent
   (Mistral) with tools for XFOIL analyses and CFD simulations on the simulation work station
-- `ws/`: scripts that set up and run the solvers on the simulation work station
+- `workstation/`: scripts that set up and run the solvers on the simulation work station
 
 Configuration for both lives in the `.env` at the repo root.
 
@@ -21,7 +21,7 @@ Configuration for both lives in the `.env` at the repo root.
 | gmsh | Meshing for the CFD cases | [gmsh.info](https://gmsh.info) |
 | ParaView, ffmpeg | Flow images and video | [paraview.org](https://www.paraview.org) · [ffmpeg.org](https://ffmpeg.org) |
 
-All of them are installed on the work station by `ws/setup.sh` (see
+All of them are installed on the work station by `workstation/setup.sh` (see
 [Setting up a work station](#simulation-work-station)).
 
 ## Frontend
@@ -109,8 +109,8 @@ backend/src/api/
     xfoil.py          XFOIL script builder, polar parser, XfoilService
     simulations.py    CFD job submission and polling
     router.py         /api/simulations
-ws/setup.sh             Prepares (or cleans up) a fresh simulation work station
-ws/run_case.sh          Placeholder CFD entrypoint, installed on the work station by setup.sh
+workstation/setup.sh             Prepares (or cleans up) a fresh simulation work station
+workstation/run_case.sh          Placeholder CFD entrypoint, installed on the work station by setup.sh
 ```
 
 ### API
@@ -353,9 +353,9 @@ host key must be in `~/.ssh/known_hosts` (or `WS_KNOWN_HOSTS_PATH`).
    `{"status": "running" | "completed" | "failed", "result": {...}, "error": "..."}`.
 4. `get_simulation_status` / `GET /api/simulations/{id}` read it back into Mongo.
 
-`ws/run_case.sh` implements that contract: gmsh meshes the case (one cell thick,
+`workstation/run_case.sh` implements that contract: gmsh meshes the case (one cell thick,
 boundary layer resolved to y+ ~ 1), `gmshToFoam` converts it, and OpenFOAM solves it on
-up to 4 cores with the k-omega SST model (laminar below Re 1000). `ws/cfd_case.py` writes
+up to 4 cores with the k-omega SST model (laminar below Re 1000). `workstation/cfd_case.py` writes
 the mesh script and the OpenFOAM dictionaries from `case.json` and reads the results
 back; each step logs to `{job_dir}/log.<step>`, and a failure puts the end of that log in
 the job's `error`. The flow is incompressible, so `mach` is ignored (and flagged above
@@ -393,13 +393,13 @@ its files on the work station. The backend serves the rest from `GET /api/simula
 list), `/api/simulations/{id}/info`, `/progress?log_offset=&coeff_offset=` (only what is
 new since the offsets the last call returned) and
 `/files/velocity.png|pressure.png|flow.mp4`; these read the work station's logs over SSH
-through `ws/cfd_case.py`.
+through `workstation/cfd_case.py`.
 
 **Images and flow video.** With `video` on (the default), every run gets a
 `velocity.png` and a `pressure.png` (pressure coefficient) of the final flow field, and
 transient runs also get `flow.mp4`, the z-vorticity at every saved time step. Transient runs
 save a snapshot every 0.25 convective times, afterwards `foamToVTK` converts them and
-`ws/render_video.py` (ParaView's `pvbatch` on a virtual display) draws them, zoomed on the
+`workstation/render_video.py` (ParaView's `pvbatch` on a virtual display) draws them, zoomed on the
 body and its wake with fixed colour ranges, and ffmpeg encodes the video (25 fps). The
 Results tab shows them, and the result's `media` entry lists them. If ParaView or ffmpeg is
 missing or rendering fails, the job still completes and a warning says why (see
@@ -414,7 +414,7 @@ flow direction is rotated by `alpha`, so the farfield and mesh stay the same.
 
 #### Setting up a work station
 
-Copy `ws/` to a fresh Debian/Ubuntu work station and run, as the user the backend connects as:
+Copy `workstation/` to a fresh Debian/Ubuntu work station and run, as the user the backend connects as:
 
 ```bash
 ./setup.sh --install     # installs the tools below and creates ~/icarus/bin and ~/icarus/jobs

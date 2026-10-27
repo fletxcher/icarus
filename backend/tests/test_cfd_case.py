@@ -1,4 +1,4 @@
-"""The work station's case builder (ws/cfd_case.py), checked without gmsh or OpenFOAM."""
+"""The work station's case builder (workstation/cfd_case.py), checked without gmsh or OpenFOAM."""
 
 import importlib.util
 import json
@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from api.compute.schemas import CfdCase
 
-_path = Path(__file__).resolve().parents[2] / "ws" / "cfd_case.py"
+_path = Path(__file__).resolve().parents[2] / "workstation" / "cfd_case.py"
 _spec = importlib.util.spec_from_file_location("cfd_case", _path)
 cfd_case = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cfd_case)

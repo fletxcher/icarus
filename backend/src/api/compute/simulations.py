@@ -3,7 +3,7 @@
 CFD runs take minutes to hours, so jobs are fire-and-poll rather than awaited:
 
 1. The backend creates `{WS_WORKDIR}/jobs/{job_id}/case.json` on the work station.
-2. It launches `{WS_CFD_SCRIPT} {job_dir}` detached (see `ws/run_case.sh`).
+2. It launches `{WS_CFD_SCRIPT} {job_dir}` detached (see `workstation/run_case.sh`).
 3. That script keeps `{job_dir}/status.json` up to date:
    `{"status": "running" | "completed" | "failed", "result": {...}, "error": "..."}`.
 4. Status checks read `status.json` and mirror it into the `simulations` collection.
@@ -31,7 +31,7 @@ LAUNCH_TIMEOUT_S = 30.0
 MONITOR_TIMEOUT_S = 20.0
 MAX_LISTED = 50  # running jobs in the list
 RECENT_FINISHED = 10  # finished jobs kept in the list
-# Files a finished job can serve (made by ws/render_video.py), with their media types.
+# Files a finished job can serve (made by workstation/render_video.py), with their media types.
 JOB_FILES = {
     "flow.mp4": "video/mp4",
     "velocity.png": "image/png",
@@ -104,7 +104,7 @@ class SimulationService:
         return await self._update(doc["_id"], status="running")
 
     async def _monitor(self, *args: str) -> dict[str, Any]:
-        """Runs ws/cfd_case.py (installed next to the run script) and returns its JSON."""
+        """Runs workstation/cfd_case.py (installed next to the run script) and returns its JSON."""
         tool = posixpath.join(posixpath.dirname(self._script), "cfd_case.py")
         command = " ".join(["python3", *map(shlex.quote, (tool, *args))])
         try:
