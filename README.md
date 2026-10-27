@@ -1,12 +1,28 @@
 # Icarus
 
-An LLM chat app for airfoil analysis and design.
+An AI engineering assistant for airfoil analysis and design. Describe what you need (a NACA
+profile, a polar at some Reynolds number, a CFD run) and Icarus runs the real solvers
+and shows its reasoning, every tool call with its result, and the answer.
 
 - `frontend/`: Next.js + shadcn/ui chat interface
 - `backend/`: FastAPI service that stores chats in MongoDB and runs a LangGraph agent
   (Mistral) with tools for XFOIL analyses and CFD simulations on the simulation work station
+- `ws/`: scripts that set up and run the solvers on the simulation work station
 
 Configuration for both lives in the `.env` at the repo root.
+
+## Solvers and tools
+
+| Tool | Used for | Links |
+|---|---|---|
+| XFOIL | Fast 2D airfoil polars | [Home page](https://web.mit.edu/drela/Public/web/xfoil/) |
+| OpenFOAM (ESI) | CFD: incompressible flow around airfoils and bluff bodies | [openfoam.com](https://www.openfoam.com) · [Documentation](https://www.openfoam.com/documentation) · [User guide](https://www.openfoam.com/documentation/user-guide) · [Source](https://develop.openfoam.com/Development/openfoam) |
+| CalculiX | Open source finite element solver (structural and thermal) | [calculix.de](https://www.calculix.de) · [Solver author's page](http://www.dhondt.de) |
+| gmsh | Meshing for the CFD cases | [gmsh.info](https://gmsh.info) |
+| ParaView, ffmpeg | Flow images and video | [paraview.org](https://www.paraview.org) · [ffmpeg.org](https://ffmpeg.org) |
+
+All of them are installed on the work station by `ws/setup.sh` (see
+[Setting up a work station](#simulation-work-station)).
 
 ## Frontend
 
@@ -27,6 +43,7 @@ and result, then the answer.
 cd backend
 uv sync
 uv run api   # http://localhost:8000, docs at /docs
+uv run uvicorn api.app:app --reload
 ```
 
 Every setting is in `backend/src/api/config.py`. The API starts without any model
@@ -312,7 +329,7 @@ SSH host key, and the person approves its fingerprint. That host key is then pin
 backend connects only to a machine presenting it. They paste a private key (kept
 without its passphrase, encrypted); the connection uses only that key (no agent, no
 `~/.ssh` of the server). Saving connects, creates `~/icarus` (or the chosen directory),
-puts the runner scripts and `setup.sh` there and reports what's installed (XFOIL, OpenFOAM,
+puts the runner scripts and `setup.sh` there and reports what's installed (XFOIL, OpenFOAM, CalculiX,
 gmsh, ParaView, ffmpeg); anything missing is installed by running
 `bash ~/icarus/setup/setup.sh --install` on the machine. The machine must be reachable from
 the server running the backend, so "my own computer" works when the backend runs on it
@@ -395,18 +412,25 @@ Wall conditions on the body (`wall_type`): `no_slip`, `slip`, `moving` (surface 
 reference length) adds a rough-wall function and sizes the first cell for y+ ~ 30. The
 flow direction is rotated by `alpha`, so the farfield and mesh stay the same.
 
-**Setting up a work station.** Copy `ws/` to a fresh Debian/Ubuntu work station and run, as the user the
-backend connects as:
+#### Setting up a work station
+
+Copy `ws/` to a fresh Debian/Ubuntu work station and run, as the user the backend connects as:
 
 ```bash
-./setup.sh --install     # XFOIL, gmsh, OpenFOAM, ParaView, ffmpeg; ~/icarus/bin/run_case.sh; ~/icarus/jobs
+./setup.sh --install     # installs the tools below and creates ~/icarus/bin and ~/icarus/jobs
 ./setup.sh --uninstall   # removes what --install added (asks before deleting job data)
 ```
 
-`--install` adds the OpenFOAM apt repository if it's missing (it needs `sudo`), installs
-`OPENFOAM_PACKAGE` (default `openfoam2512`, about 1 GB), checks that XFOIL and OpenFOAM
-work and prints the matching `.env` values. `--uninstall` only removes packages that
-`--install` itself installed, then runs `apt-get autoremove`.
+| Installed | Package | Notes |
+|---|---|---|
+| [XFOIL](https://web.mit.edu/drela/Public/web/xfoil/) | `xfoil`, `xvfb`, `xauth` | |
+| [OpenFOAM](https://www.openfoam.com) | `OPENFOAM_PACKAGE` (default `openfoam2512`) | About 1 GB; `--install` adds the official [apt repository](https://www.openfoam.com/download) if it's missing (needs `sudo`) |
+| [CalculiX](https://www.calculix.de) | `calculix-ccx` | `bin/run_calculix.sh <job_dir>` solves `<job_dir>/model.inp` and writes `model.dat`, `model.frd` and `log.ccx` |
+| gmsh, ParaView, ffmpeg | `gmsh`, `paraview`, `ffmpeg` | Meshing, flow images and video |
+
+`--install` then checks that XFOIL, OpenFOAM and CalculiX work (CalculiX solves a one-element
+block under load) and prints the matching `.env` values. `--uninstall` only removes
+packages that `--install` itself installed, then runs `apt-get autoremove`.
 
 **XFOIL** runs wherever `XFOIL_RUNNER` points (`ws` or `local`), through the same
 `CommandRunner` interface. One polar takes about a second, so CPU isn't the deciding
