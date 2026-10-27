@@ -17,6 +17,7 @@ import { useChatStore } from "@/stores/chat-store";
 const PROVIDER_LABELS: Record<Provider, string> = {
   mistral: "Mistral",
   openrouter: "OpenRouter",
+  ollama: "Ollama (local)",
 };
 
 function groupByProvider(models: Model[]): [Provider, Model[]][] {

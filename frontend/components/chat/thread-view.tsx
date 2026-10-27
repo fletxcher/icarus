@@ -44,7 +44,7 @@ export function ThreadView({ threadId }: { threadId: string }) {
           setIsAtBottom(scrollHeight - scrollTop - clientHeight < STICK_THRESHOLD_PX);
         }}
       >
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 pt-6 pb-10">
+        <div className="mx-auto flex w-full max-w-(--transcript-width) flex-col gap-8 px-4 pt-6 pb-10">
           {messages ? (
             <MessageList threadId={threadId} messages={messages} />
           ) : (
@@ -53,7 +53,7 @@ export function ThreadView({ threadId }: { threadId: string }) {
         </div>
       </div>
 
-      <div className="relative mx-auto w-full max-w-3xl px-4 pb-2">
+      <div className="relative mx-auto w-full max-w-(--transcript-width) px-4 pb-2">
         <div className="pointer-events-none absolute inset-x-0 -top-10 h-10 bg-linear-to-t from-background to-transparent" />
         {!isAtBottom && (
           <Button

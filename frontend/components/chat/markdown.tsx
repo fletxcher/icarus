@@ -67,7 +67,7 @@ export const Markdown = memo(function Markdown({
   return (
     <div
       className={cn(
-        "prose prose-stone max-w-none text-[15px] leading-7 dark:prose-invert prose-headings:font-semibold prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:font-normal prose-code:before:content-none prose-code:after:content-none",
+        "prose prose-stone max-w-none text-(length:--transcript-text-size) leading-7 dark:prose-invert prose-headings:font-semibold prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:font-normal prose-code:before:content-none prose-code:after:content-none",
         className,
       )}
     >

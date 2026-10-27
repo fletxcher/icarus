@@ -131,3 +131,16 @@ export type MonitorData = {
   cd: number[];
   cm: number[];
 };
+
+/** CFD runs started in a period (GET /api/simulations/usage). */
+export type UsagePeriod = {
+  runs: number;
+  completed: number;
+  failed: number;
+  running: number;
+  /** Seconds from start to being seen finished, summed over finished runs (approximate). */
+  compute_s: number;
+  by_shape: Record<string, number>;
+};
+
+export type SimulationUsage = { week: UsagePeriod; month: UsagePeriod; all_time: UsagePeriod };

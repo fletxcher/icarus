@@ -2,6 +2,7 @@ import { toast } from "sonner";
 import { ApiError, api, streamReply } from "@/lib/api";
 import { applyStreamEvent } from "@/lib/chat/apply-event";
 import type { Attachment, Message } from "@/lib/chat/types";
+import { useAuth } from "@/stores/auth-store";
 import { useChatStore } from "./chat-store";
 
 const TITLE_MAX_LENGTH = 60;
@@ -29,6 +30,18 @@ export async function bootstrap() {
     }
   } catch (error) {
     store().setThreadsStatus("error");
+    toast.error(errorMessage(error));
+  }
+}
+
+/** Re-reads the models the signed-in person can use (their own keys change the list). */
+export async function refreshModels() {
+  try {
+    const models = await api.listModels();
+    const { model, setModels, setModel } = store();
+    setModels(models);
+    if (!models.some((option) => option.id === model) && models[0]) setModel(models[0].id);
+  } catch (error) {
     toast.error(errorMessage(error));
   }
 }
@@ -115,12 +128,20 @@ export async function addFiles(files: File[]) {
   await Promise.all(
     files.map(async (file) => {
       const localId = crypto.randomUUID();
-      store().addPendingFile({ localId, name: file.name, size: file.size, status: "uploading" });
+      store().addPendingFile({
+        localId,
+        name: file.name,
+        size: file.size,
+        status: "uploading",
+      });
       try {
         const attachment = await api.uploadFile(file);
         store().updatePendingFile(localId, { status: "ready", attachment });
       } catch (error) {
-        store().updatePendingFile(localId, { status: "error", error: errorMessage(error) });
+        store().updatePendingFile(localId, {
+          status: "error",
+          error: errorMessage(error),
+        });
       }
     }),
   );
@@ -183,6 +204,7 @@ async function runTurn(threadId: string, content?: string, attachments: Attachme
       content,
       model: model ?? undefined,
       attachments: attachments.map((attachment) => attachment.id),
+      language: useAuth.getState().language ?? undefined,
     };
     for await (const event of streamReply(threadId, body, controller.signal)) {
       if (event.type === "start") {
@@ -200,7 +222,11 @@ async function runTurn(threadId: string, content?: string, attachments: Attachme
       updateReply(markStopped);
     } else {
       const reason = errorMessage(error);
-      updateReply((message) => ({ ...message, status: "error", error: reason }));
+      updateReply((message) => ({
+        ...message,
+        status: "error",
+        error: reason,
+      }));
       toast.error(reason);
     }
   } finally {
@@ -221,7 +247,11 @@ function markStopped(message: Message): Message {
     status: "stopped",
     parts: message.parts.map((part) =>
       part.type === "tool" && part.status === "running"
-        ? { ...part, status: "error", result: "Interrupted before the tool finished." }
+        ? {
+            ...part,
+            status: "error",
+            result: "Interrupted before the tool finished.",
+          }
         : part,
     ),
   };

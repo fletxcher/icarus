@@ -1,7 +1,7 @@
-import Link from "next/link"
-import { FeatherIcon } from "lucide-react"
+import Link from "next/link";
+import { FeatherIcon } from "lucide-react";
 
-import { FluidCanvas } from "./fluid-canvas"
+import { FluidCanvas } from "./fluid-canvas";
 
 /** The frame of the login and signup pages: the form on the left, a fluid to stir on the right. */
 export function AuthLayout({ children }: { children: React.ReactNode }) {
@@ -27,5 +27,5 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
         </p>
       </div>
     </div>
-  )
+  );
 }

@@ -250,7 +250,11 @@ interface Pointer {
   dy: number;
 }
 
-function compile(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
+function compile(
+  gl: WebGL2RenderingContext,
+  type: number,
+  source: string,
+): WebGLShader {
   const shader = gl.createShader(type)!;
   gl.shaderSource(shader, source);
   gl.compileShader(shader);
@@ -260,7 +264,11 @@ function compile(gl: WebGL2RenderingContext, type: number, source: string): WebG
   return shader;
 }
 
-function link(gl: WebGL2RenderingContext, vertex: WebGLShader, fragment: string): Program {
+function link(
+  gl: WebGL2RenderingContext,
+  vertex: WebGLShader,
+  fragment: string,
+): Program {
   const program = gl.createProgram()!;
   gl.attachShader(program, vertex);
   gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, fragment));
@@ -332,7 +340,11 @@ export class FluidSimulation {
       pressure: link(gl, vertex, PRESSURE),
       gradient: link(gl, vertex, GRADIENT),
       particles: link(gl, vertex, PARTICLE_UPDATE),
-      points: link(gl, compile(gl, gl.VERTEX_SHADER, POINT_VERTEX), POINT_FRAGMENT),
+      points: link(
+        gl,
+        compile(gl, gl.VERTEX_SHADER, POINT_VERTEX),
+        POINT_FRAGMENT,
+      ),
       fade: link(gl, vertex, FADE),
       display: link(gl, vertex, DISPLAY),
     };
@@ -390,7 +402,12 @@ export class FluidSimulation {
     const [simW, simH] = gridSize(SIM_RESOLUTION, aspect);
     this.velocity = this.createDouble(simW, simH, this.gl.RG16F, this.gl.RG);
     this.pressure = this.createDouble(simW, simH, this.gl.R16F, this.gl.RED);
-    this.trail = this.createDouble(width, height, this.gl.RGBA16F, this.gl.RGBA);
+    this.trail = this.createDouble(
+      width,
+      height,
+      this.gl.RGBA16F,
+      this.gl.RGBA,
+    );
     this.particles = this.createParticles();
     this.divergence = this.createTarget(simW, simH, this.gl.R16F, this.gl.RED);
     this.curl = this.createTarget(simW, simH, this.gl.R16F, this.gl.RED);
@@ -432,14 +449,25 @@ export class FluidSimulation {
     gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, format, type, data);
     const framebuffer = gl.createFramebuffer()!;
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      gl.COLOR_ATTACHMENT0,
+      gl.TEXTURE_2D,
+      texture,
+      0,
+    );
     gl.viewport(0, 0, w, h);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     return { texture, framebuffer, width: w, height: h, texel: [1 / w, 1 / h] };
   }
 
-  private createDouble(w: number, h: number, internal: number, format: number): DoubleTarget {
+  private createDouble(
+    w: number,
+    h: number,
+    internal: number,
+    format: number,
+  ): DoubleTarget {
     const pair: DoubleTarget = {
       read: this.createTarget(w, h, internal, format),
       write: this.createTarget(w, h, internal, format),
@@ -456,11 +484,23 @@ export class FluidSimulation {
     const count = PARTICLE_SIDE * PARTICLE_SIDE;
     const data = new Float32Array(count * 4);
     for (let i = 0; i < count; i++) {
-      const life = PARTICLE_LIFE[0] + Math.random() * (PARTICLE_LIFE[1] - PARTICLE_LIFE[0]);
-      data.set([Math.random(), Math.random(), Math.random() * life, life], i * 4);
+      const life =
+        PARTICLE_LIFE[0] +
+        Math.random() * (PARTICLE_LIFE[1] - PARTICLE_LIFE[0]);
+      data.set(
+        [Math.random(), Math.random(), Math.random() * life, life],
+        i * 4,
+      );
     }
     const make = () =>
-      this.createTarget(PARTICLE_SIDE, PARTICLE_SIDE, gl.RGBA32F, gl.RGBA, gl.FLOAT, data);
+      this.createTarget(
+        PARTICLE_SIDE,
+        PARTICLE_SIDE,
+        gl.RGBA32F,
+        gl.RGBA,
+        gl.FLOAT,
+        data,
+      );
     const pair: DoubleTarget = {
       read: make(),
       write: make(),
@@ -495,7 +535,11 @@ export class FluidSimulation {
     return program.uniforms;
   }
 
-  private bind(unit: number, target: Target, uniform: WebGLUniformLocation | null): void {
+  private bind(
+    unit: number,
+    target: Target,
+    uniform: WebGLUniformLocation | null,
+  ): void {
     const { gl } = this;
     gl.activeTexture(gl.TEXTURE0 + unit);
     gl.bindTexture(gl.TEXTURE_2D, target.texture);
@@ -505,7 +549,12 @@ export class FluidSimulation {
   private draw(target: Target | null): void {
     const { gl } = this;
     gl.bindFramebuffer(gl.FRAMEBUFFER, target?.framebuffer ?? null);
-    gl.viewport(0, 0, target?.width ?? this.width, target?.height ?? this.height);
+    gl.viewport(
+      0,
+      0,
+      target?.width ?? this.width,
+      target?.height ?? this.height,
+    );
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
@@ -598,7 +647,10 @@ export class FluidSimulation {
     this.bind(0, this.particles.read, u.uParticles);
     this.bind(1, v.read, u.uVelocity);
     gl.uniform1i(u.uSide, PARTICLE_SIDE);
-    gl.uniform1f(u.uSize, PARTICLE_SIZE * Math.min(window.devicePixelRatio || 1, 1.5));
+    gl.uniform1f(
+      u.uSize,
+      PARTICLE_SIZE * Math.min(window.devicePixelRatio || 1, 1.5),
+    );
     gl.uniform1f(u.uSpeedScale, SPEED_SCALE);
     gl.uniform1f(u.uGain, GAIN * dt);
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.trail.write.framebuffer);

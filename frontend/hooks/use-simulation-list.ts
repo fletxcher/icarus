@@ -10,12 +10,14 @@ const CLOSED_MS = 15000;
 /**
  * Keeps the store's simulation list fresh: often while the simulations panel shows it,
  * rarely otherwise (the header badge only needs the count), and not while the tab is hidden.
+ * Does nothing while `enabled` is false (nobody is signed in).
  */
-export function useSimulationListPolling() {
+export function useSimulationListPolling(enabled = true) {
   const setSimulations = useChatStore((state) => state.setSimulations);
   const watching = useChatStore((state) => state.simulationsOpen);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -36,5 +38,5 @@ export function useSimulationListPolling() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [watching, setSimulations]);
+  }, [enabled, watching, setSimulations]);
 }

@@ -129,3 +129,20 @@
     @apply font-sans;
   }
 }
+
+/* Chat display settings (Settings > General); components/appearance-sync.tsx sets the attributes. */
+@layer base {
+  :root {
+    --transcript-text-size: 15px;
+    --transcript-width: 48rem;
+  }
+  html[data-text-size="small"] {
+    --transcript-text-size: 14px;
+  }
+  html[data-text-size="large"] {
+    --transcript-text-size: 17px;
+  }
+  html[data-width="wide"] {
+    --transcript-width: 64rem;
+  }
+}

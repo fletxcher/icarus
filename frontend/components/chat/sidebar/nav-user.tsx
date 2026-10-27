@@ -1,15 +1,30 @@
 "use client";
 
-import { ChevronsUpDownIcon, MonitorIcon, MoonIcon, SunIcon } from "lucide-react";
-import { useTheme } from "next-themes";
+import {
+  ActivityIcon,
+  ChevronsUpDownIcon,
+  CircleHelpIcon,
+  GlobeIcon,
+  LogInIcon,
+  LogOutIcon,
+  SettingsIcon,
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import { HelpDialog } from "@/components/auth/help-dialog";
+import {
+  SettingsDialog,
+  type SettingsSection,
+} from "@/components/auth/settings-dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -18,19 +33,54 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { languageName } from "@/lib/languages";
+import { useAuth } from "@/stores/auth-store";
 
-const THEMES = [
-  { value: "light", label: "Light", icon: SunIcon },
-  { value: "dark", label: "Dark", icon: MoonIcon },
-  { value: "system", label: "System", icon: MonitorIcon },
-];
-
-// Placeholder until auth exists.
-const USER = { name: "Guest", email: "Not signed in", initials: "G" };
+function initialsOf(text: string): string {
+  return (
+    text
+      .split(/[\s@.]+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((word) => word[0].toUpperCase())
+      .join("") || "?"
+  );
+}
 
 export function NavUser() {
   const { isMobile } = useSidebar();
-  const { theme, setTheme } = useTheme();
+  const router = useRouter();
+  const { user, logout, language } = useAuth();
+  const [dialog, setDialog] = useState<"settings" | "help" | null>(null);
+  const [section, setSection] = useState<SettingsSection>("general");
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key === "," &&
+        event.shiftKey &&
+        (event.metaKey || event.ctrlKey)
+      ) {
+        event.preventDefault();
+        setSection("general");
+        setDialog("settings");
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  const name = user ? (user.name ?? user.email) : "Guest";
+  const detail = user ? user.email : "Not signed in";
+
+  async function onLogout() {
+    try {
+      await logout();
+      router.push("/login");
+    } catch {
+      toast.error("Couldn't log out. Try again.");
+    }
+  }
 
   return (
     <SidebarMenu>
@@ -42,11 +92,15 @@ export function NavUser() {
               className="data-open:bg-sidebar-accent data-open:text-sidebar-accent-foreground"
             >
               <Avatar className="size-8 rounded-lg">
-                <AvatarFallback className="rounded-lg">{USER.initials}</AvatarFallback>
+                <AvatarFallback className="rounded-lg">
+                  {user ? initialsOf(name) : "G"}
+                </AvatarFallback>
               </Avatar>
               <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-medium">{USER.name}</span>
-                <span className="truncate text-xs text-muted-foreground">{USER.email}</span>
+                <span className="truncate font-medium">{name}</span>
+                <span className="truncate text-xs text-muted-foreground">
+                  {detail}
+                </span>
               </div>
               <ChevronsUpDownIcon className="ml-auto size-4" />
             </SidebarMenuButton>
@@ -57,22 +111,73 @@ export function NavUser() {
             align="end"
             sideOffset={4}
           >
-            <DropdownMenuLabel className="text-xs text-muted-foreground">Theme</DropdownMenuLabel>
-            <DropdownMenuRadioGroup value={theme} onValueChange={setTheme}>
-              {THEMES.map(({ value, label, icon: Icon }) => (
-                <DropdownMenuRadioItem key={value} value={value}>
-                  <Icon />
-                  {label}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
+            {user && (
+              <DropdownMenuLabel className="truncate text-xs font-normal text-muted-foreground">
+                {user.email}
+              </DropdownMenuLabel>
+            )}
+            <DropdownMenuItem
+              onSelect={() => {
+                setSection("general");
+                setDialog("settings");
+              }}
+            >
+              <SettingsIcon />
+              Settings
+              <DropdownMenuShortcut>Ctrl+Shift+,</DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => {
+                setSection("usage");
+                setDialog("settings");
+              }}
+            >
+              <ActivityIcon />
+              Usage
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => {
+                setSection("language");
+                setDialog("settings");
+              }}
+            >
+              <GlobeIcon />
+              Language
+              <span className="ml-auto truncate pl-3 text-xs text-muted-foreground">
+                {languageName(language)}
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setDialog("help")}>
+              <CircleHelpIcon />
+              Get help
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-              Chats are stored in this browser.
-            </DropdownMenuLabel>
+            {user ? (
+              <DropdownMenuItem onSelect={onLogout}>
+                <LogOutIcon />
+                Log out
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem onSelect={() => router.push("/login")}>
+                <LogInIcon />
+                Log in
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>
+      <SettingsDialog
+        open={dialog === "settings"}
+        onOpenChange={(open) => setDialog(open ? "settings" : null)}
+        user={user}
+        section={section}
+        onSectionChange={setSection}
+        onLogout={onLogout}
+      />
+      <HelpDialog
+        open={dialog === "help"}
+        onOpenChange={(open) => setDialog(open ? "help" : null)}
+      />
     </SidebarMenu>
   );
 }

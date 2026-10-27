@@ -1,6 +1,8 @@
 "use client"
 
+import { useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { cn } from "cn"
 
 import { Button } from "@/components/ui/button"
@@ -11,18 +13,42 @@ import {
   FieldLabel,
   FieldSeparator,
 } from "@/components/ui/field"
+import { PasswordInput } from "@/components/auth/password-input"
 import { SocialButtons } from "@/components/auth/social-buttons"
 import { Input } from "@/components/ui/input"
+import { api } from "@/lib/api"
+import { useAuth } from "@/stores/auth-store"
 
 export function LoginForm({
   className,
   ...props
 }: React.ComponentProps<"form">) {
+  const router = useRouter()
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault() // never let the browser put the password in the URL
+    const form = new FormData(event.currentTarget)
+    setError(null)
+    setSubmitting(true)
+    try {
+      const user = await api.login({
+        email: String(form.get("email")),
+        password: String(form.get("password")),
+      })
+      useAuth.setState({ user, status: "ready" }) // so the chat doesn't think nobody is signed in
+      router.push("/") // the chat
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Couldn't log in.")
+      setSubmitting(false)
+    }
+  }
+
   return (
     <form
       className={cn("flex flex-col gap-6", className)}
-      // Accounts aren't wired to the backend yet; keep the credentials out of the URL.
-      onSubmit={(event) => event.preventDefault()}
+      onSubmit={onSubmit}
       {...props}
     >
       <FieldGroup>
@@ -36,6 +62,8 @@ export function LoginForm({
           <FieldLabel htmlFor="email">Email</FieldLabel>
           <Input
             id="email"
+            name="email"
+            autoComplete="email"
             type="email"
             placeholder="m@example.com"
             required
@@ -44,15 +72,17 @@ export function LoginForm({
         </Field>
         <Field>
           <FieldLabel htmlFor="password">Password</FieldLabel>
-          <Input
-            id="password"
-            type="password"
-            required
-            className="bg-background"
-          />
+          <PasswordInput id="password" name="password" autoComplete="current-password" required />
         </Field>
         <Field>
-          <Button type="submit">Login</Button>
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
+          <Button type="submit" disabled={submitting}>
+            {submitting ? "Logging in…" : "Login"}
+          </Button>
         </Field>
         <FieldSeparator>Or continue with</FieldSeparator>
         <Field>

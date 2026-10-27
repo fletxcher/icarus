@@ -8,6 +8,10 @@ const SHAPE_NAMES: Record<string, string> = {
   rectangle: "Rectangle",
 };
 
+export function shapeName(shape: string): string {
+  return SHAPE_NAMES[shape] ?? shape;
+}
+
 /** A job's display name, e.g. "NACA 2412 · Re 3.0e+6" or "Cylinder · Re 1.0e+2". */
 export function jobName(simulation: SimulationCase): string {
   const body =
