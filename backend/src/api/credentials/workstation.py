@@ -19,11 +19,11 @@ HOST_KEY_TIMEOUT_S = 10.0
 COMMAND_TIMEOUT_S = 30.0
 # The runner scripts shipped in the repository, put on the machine at connection time.
 WS_SOURCE = Path(__file__).resolve().parents[4] / "ws"
-SCRIPTS = ["run_case.sh", "cfd_case.py", "render_video.py"]
+SCRIPTS = ["run_case.sh", "cfd_case.py", "render_video.py", "run_calculix.sh"]
 SETUP_SCRIPT = "setup.sh"
 
 TOOLS_SCRIPT = r"""
-for tool in xfoil xvfb-run gmsh pvbatch ffmpeg python3; do
+for tool in xfoil xvfb-run gmsh ccx pvbatch ffmpeg python3; do
   if command -v "$tool" > /dev/null 2>&1; then echo "$tool=1"; else echo "$tool=0"; fi
 done
 if ls /usr/lib/openfoam/openfoam*/etc/bashrc /opt/openfoam*/etc/bashrc > /dev/null 2>&1; then
@@ -222,6 +222,7 @@ async def run_checks(runner: SSHRunner) -> list[Check]:
     for check_id, label, names in [
         ("xfoil", "XFOIL", ("xfoil", "xvfb-run")),
         ("cfd", "OpenFOAM and gmsh", ("openfoam", "gmsh", "python3")),
+        ("fea", "CalculiX", ("ccx",)),
         ("video", "Flow videos (ParaView, ffmpeg)", ("pvbatch", "ffmpeg", "xvfb-run")),
     ]:
         ok, detail = tools(*names)
