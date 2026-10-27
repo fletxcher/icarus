@@ -22,6 +22,7 @@ from .chats.definitions import (
     THREADS_VALIDATOR,
 )
 from .compute.definitions import SIMULATIONS_INDEXES, SIMULATIONS_VALIDATOR
+from .credentials.definitions import CREDENTIALS_INDEXES, CREDENTIALS_VALIDATOR
 from .files.definitions import FILES_INDEXES, FILES_VALIDATOR
 
 THREADS = "threads"
@@ -30,6 +31,7 @@ SIMULATIONS = "simulations"
 FILES = "files"
 USERS = "users"
 SESSIONS = "sessions"
+CREDENTIALS = "credentials"
 
 
 @dataclass(frozen=True)
@@ -88,6 +90,14 @@ COLLECTIONS = [
         "deleted automatically.",
         SESSIONS_VALIDATOR,
         SESSIONS_INDEXES,
+        enforced=True,
+    ),
+    CollectionSpec(
+        CREDENTIALS,
+        "Each user's own model API keys and work station. The secrets are encrypted with "
+        "CREDENTIALS_KEY; `details` holds what can be shown without decrypting.",
+        CREDENTIALS_VALIDATOR,
+        CREDENTIALS_INDEXES,
         enforced=True,
     ),
 ]

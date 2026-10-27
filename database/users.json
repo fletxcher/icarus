@@ -116,6 +116,24 @@
                 "dark",
                 "system"
               ]
+            },
+            "language": {
+              "enum": [
+                "en",
+                "es",
+                "fr",
+                "de",
+                "it",
+                "pt",
+                "ru",
+                "tr",
+                "ar",
+                "hi",
+                "zh",
+                "ja",
+                "ko",
+                null
+              ]
             }
           }
         },

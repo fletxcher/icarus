@@ -16,9 +16,12 @@ class FileRepository:
     def __init__(self, db: AsyncDatabase) -> None:
         self._files = db[FILES]
 
-    async def create(self, name: str, content_type: str, text: str, size: int) -> StoredFile:
+    async def create(
+        self, user_id: str, name: str, content_type: str, text: str, size: int
+    ) -> StoredFile:
         doc = {
             "_id": str(uuid4()),
+            "user_id": user_id,
             "name": name,
             "size": size,
             "content_type": content_type,
@@ -29,9 +32,9 @@ class FileRepository:
         await self._files.insert_one(doc)
         return StoredFile.model_validate(doc)
 
-    async def get_many(self, file_ids: list[str]) -> list[StoredFile]:
-        """The files that exist, in the order given."""
-        cursor = self._files.find({"_id": {"$in": file_ids}}, METADATA)
+    async def get_many(self, file_ids: list[str], user_id: str) -> list[StoredFile]:
+        """The user's files that exist, in the order given."""
+        cursor = self._files.find({"_id": {"$in": file_ids}, "user_id": user_id}, METADATA)
         found = {doc["_id"]: StoredFile.model_validate(doc) async for doc in cursor}
         return [found[file_id] for file_id in file_ids if file_id in found]
 
@@ -39,14 +42,16 @@ class FileRepository:
         cursor = self._files.find({"_id": {"$in": file_ids}}, {"text": True})
         return {doc["_id"]: doc["text"] async for doc in cursor}
 
-    async def attach(self, file_ids: list[str], thread_id: str) -> None:
+    async def attach(self, file_ids: list[str], thread_id: str, user_id: str) -> None:
         await self._files.update_many(
-            {"_id": {"$in": file_ids}}, {"$set": {"thread_id": thread_id}}
+            {"_id": {"$in": file_ids}, "user_id": user_id}, {"$set": {"thread_id": thread_id}}
         )
 
-    async def delete_unattached(self, file_id: str) -> bool:
+    async def delete_unattached(self, file_id: str, user_id: str) -> bool:
         """Removes a file that hasn't been sent yet (e.g. taken out of the composer)."""
-        result = await self._files.delete_one({"_id": file_id, "thread_id": None})
+        result = await self._files.delete_one(
+            {"_id": file_id, "user_id": user_id, "thread_id": None}
+        )
         return result.deleted_count == 1
 
     async def delete_for_thread(self, thread_id: str) -> None:

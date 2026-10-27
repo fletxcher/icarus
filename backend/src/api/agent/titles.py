@@ -39,19 +39,21 @@ def clean_title(raw: str) -> str | None:
     return line or None
 
 
+# Running title tasks. Each request makes its own TitleGenerator, and a task may outlive its
+# request (e.g. when the user stops the reply) and should still finish and save the title.
+_running: set[asyncio.Task] = set()
+
+
 class TitleGenerator:
     def __init__(self, chats: ChatRepository, models: Mapping[str, BaseChatModel]) -> None:
         self._chats = chats
         self._models = models
-        # Keeps running tasks referenced: one may outlive its request (e.g. when the user
-        # stops the reply) and should still finish and save the title.
-        self._tasks: set[asyncio.Task[str | None]] = set()
 
     def start(self, thread_id: str, model_id: str, message: str) -> asyncio.Task[str | None]:
         """Generates a title in the background; await the task for the saved title."""
         task = asyncio.create_task(self.generate(thread_id, model_id, message))
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        _running.add(task)
+        task.add_done_callback(_running.discard)
         return task
 
     async def generate(self, thread_id: str, model_id: str, message: str) -> str | None:

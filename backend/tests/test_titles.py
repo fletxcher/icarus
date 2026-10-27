@@ -81,7 +81,7 @@ def test_reply_is_not_held_back_by_a_slow_title(
     use_scripted_agent(client, [AIMessage("Here you go.")])
     services = client.app.state.services
     model = SlowTitleModel(replies=[title_call("Slow Title")], seen=[])
-    services.titles = TitleGenerator(services.chats, {"mistral-medium-3-5": model})
+    services.agents.override.titles = TitleGenerator(services.chats, {"mistral-medium-3-5": model})
     thread_id = create_thread(client)
 
     events = read_events(client, thread_id, {"content": "Hello"})
@@ -109,7 +109,7 @@ def test_model_without_tool_calling_leaves_the_reply_intact(client: TestClient):
     use_scripted_agent(client, [AIMessage("Here you go.")])
     services = client.app.state.services
     model = NoToolsModel(replies=[], seen=[])
-    services.titles = TitleGenerator(services.chats, {"mistral-medium-3-5": model})
+    services.agents.override.titles = TitleGenerator(services.chats, {"mistral-medium-3-5": model})
     thread_id = create_thread(client, "Placeholder")
 
     events = read_events(client, thread_id, {"content": "Hello"})

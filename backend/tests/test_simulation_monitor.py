@@ -1,9 +1,9 @@
 import json
 from functools import partial
 
+from api.compute.pool import Workstation
 from api.compute.runner import CommandResult
 from api.compute.schemas import CfdCase
-from api.compute.simulations import SimulationService
 
 
 class FakeWorkStation:
@@ -58,11 +58,17 @@ class FakeWorkStation:
         return self.files[path]
 
 
+def service_for(client, station):
+    """The signed-in user's simulations on the fake work station (also kept on `client`)."""
+    compute = client.app.state.services.compute
+    compute.set_shared(Workstation(station, "/w", "/w/bin/run_case.sh", "shared"))
+    user_id = client.get("/api/auth/me").json()["id"]
+    client.simulations = client.portal.call(compute.simulations_for, user_id)
+    return client.simulations
+
+
 def submit_job(client, station) -> str:
-    service = SimulationService(
-        client.app.state.db, station, workdir="/w", script="/w/bin/run_case.sh"
-    )
-    client.app.state.services.simulations = service
+    service = service_for(client, station)
     case = CfdCase(shape="cylinder", reynolds=100)
     return client.portal.call(partial(service.submit, case)).id
 
@@ -96,7 +102,7 @@ def test_progress_asks_for_the_whole_remainder_once_the_job_has_ended(client):
     job_id = submit_job(client, station)
     client.portal.call(
         partial(
-            client.app.state.services.simulations._update,  # noqa: SLF001
+            client.simulations._update,  # noqa: SLF001
             job_id,
             status="completed",
         )
@@ -147,7 +153,7 @@ def test_the_list_shows_running_jobs_with_progress_first(client):
     station = FakeWorkStation()
     done = submit_job(client, station)
     client.portal.call(
-        partial(client.app.state.services.simulations._update, done, status="completed")  # noqa: SLF001
+        partial(client.simulations._update, done, status="completed")  # noqa: SLF001
     )
     running = submit_job(client, station)
 
@@ -228,7 +234,7 @@ def test_finished_jobs_can_be_hidden_too(client):
     station = FakeWorkStation()
     job_id = submit_job(client, station)
     client.portal.call(
-        partial(client.app.state.services.simulations._update, job_id, status="completed")  # noqa: SLF001
+        partial(client.simulations._update, job_id, status="completed")  # noqa: SLF001
     )
 
     client.patch(f"/api/simulations/{job_id}", json={"hidden": True})
@@ -250,10 +256,7 @@ def test_there_is_no_way_to_delete_a_job(client):
 
 
 def submit_job_in_thread(client, station, thread_id: str) -> str:
-    service = SimulationService(
-        client.app.state.db, station, workdir="/w", script="/w/bin/run_case.sh"
-    )
-    client.app.state.services.simulations = service
+    service = service_for(client, station)
     case = CfdCase(shape="cylinder", reynolds=100)
     return client.portal.call(partial(service.submit, case, thread_id=thread_id)).id
 

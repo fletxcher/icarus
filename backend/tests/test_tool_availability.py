@@ -2,12 +2,17 @@ import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
+from api.agent.capabilities import (
+    CFD_CAPABILITY,
+    NO_WORKSTATION,
+    XFOIL_CAPABILITY,
+    unavailable_capabilities,
+)
 from api.agent.graph import build_agent
 from api.agent.prompts import build_system_prompt
 from api.agent.tools import plot_tools
 from api.config import Settings
-from api.services import CFD_CAPABILITY, XFOIL_CAPABILITY, unavailable_capabilities
-from tests.conftest import ScriptedModel
+from tests.conftest import ScriptedModel, use_agent
 from tests.test_chats_api import create_thread, read_events
 
 
@@ -20,22 +25,21 @@ def test_capabilities_follow_the_setup(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr("shutil.which", lambda name: name if name in installed else None)
 
     # Local XFOIL with xvfb, no work station: only CFD is missing.
-    assert unavailable_capabilities(settings(xfoil_runner="local")) == {
-        CFD_CAPABILITY: "the simulation work station isn't configured"
-    }
+    local = settings(xfoil_runner="local")
+    assert unavailable_capabilities(local, workstation=False) == {CFD_CAPABILITY: NO_WORKSTATION}
     # A work station makes both available.
-    assert unavailable_capabilities(settings(xfoil_runner="ws", ws_host="10.0.0.5")) == {}
+    assert unavailable_capabilities(settings(xfoil_runner="ws"), workstation=True) == {}
     # XFOIL on the work station without a work station: neither.
-    assert set(unavailable_capabilities(settings(xfoil_runner="ws"))) == {
+    assert set(unavailable_capabilities(settings(xfoil_runner="ws"), workstation=False)) == {
         XFOIL_CAPABILITY,
         CFD_CAPABILITY,
     }
 
     installed.discard("xvfb-run")
-    reason = unavailable_capabilities(settings(xfoil_runner="local"))[XFOIL_CAPABILITY]
+    reason = unavailable_capabilities(local, workstation=True)[XFOIL_CAPABILITY]
     assert "xvfb" in reason
     installed.discard("xfoil")
-    reason = unavailable_capabilities(settings(xfoil_runner="local"))[XFOIL_CAPABILITY]
+    reason = unavailable_capabilities(local, workstation=True)[XFOIL_CAPABILITY]
     assert reason == "XFOIL isn't installed on the server"
 
 
@@ -55,9 +59,11 @@ def test_prompt_without_missing_capabilities_has_no_unavailable_section():
 
 
 def test_unconfigured_tools_are_not_given_to_the_model(client: TestClient):
-    # The test client has no work station and no xfoil binary configured for the app.
+    # The test user has no work station of their own and the server has none.
     services = client.app.state.services
-    graph = services.agent.get_graph()
+    user_id = client.get("/api/auth/me").json()["id"]
+    agent = client.portal.call(services.agents.for_user, user_id).agent
+    graph = agent.get_graph()
     tool_names = set(graph.nodes["tools"].data.tools_by_name)
     assert "create_plot" in tool_names
     assert "submit_cfd_simulation" not in tool_names
@@ -72,8 +78,11 @@ def test_calling_a_tool_that_does_not_exist_reports_an_error_to_the_model(client
         ],
         seen=[],
     )
-    client.app.state.services.agent = build_agent(
-        {"mistral-medium-3-5": model}, plot_tools(), default_model="mistral-medium-3-5"
+    use_agent(
+        client,
+        build_agent(
+            {"mistral-medium-3-5": model}, plot_tools(), default_model="mistral-medium-3-5"
+        ),
     )
     thread_id = create_thread(client)
 

@@ -143,3 +143,22 @@ class Simulation(MongoModel):
     error: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class UsagePeriod(BaseModel):
+    """CFD simulations started in a period."""
+
+    runs: int = 0
+    completed: int = 0
+    failed: int = 0
+    running: int = 0
+    # Time from starting to being seen finished, summed over finished runs. Approximate: the
+    # end is when the app noticed the run was done, which is soon after it is looked at.
+    compute_s: float = 0.0
+    by_shape: dict[str, int] = Field(default_factory=dict)
+
+
+class Usage(BaseModel):
+    week: UsagePeriod
+    month: UsagePeriod
+    all_time: UsagePeriod

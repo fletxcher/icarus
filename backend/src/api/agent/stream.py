@@ -38,6 +38,7 @@ from ..chats.schemas import (
 )
 from ..config import get_settings
 from ..files.repository import FileRepository
+from ..languages import Language
 from .logging_callbacks import AgentLoggingHandler
 
 logger = logging.getLogger(__name__)
@@ -105,7 +106,7 @@ def split_message(message: AIMessage) -> tuple[str, str]:
 
 # What the user should know when a model provider rejects a request.
 PROVIDER_ERRORS = {
-    401: "{provider} rejected the API key. Check it in your .env.",
+    401: "{provider} rejected the API key. Check it in Settings, under API keys.",
     402: "{provider} requires credits or a payment method on this account.",
     429: "{provider}'s rate limit was exceeded. Wait a moment, or check the plan's limits.",
 }
@@ -117,6 +118,12 @@ def _provider_failure(error: Exception) -> tuple[str, int, str | None] | None:
         return "Mistral", error.response.status_code, None
     if isinstance(error, OpenRouterError):
         return "OpenRouter", error.status_code, error.message
+    # Ollama's client raises ResponseError carrying the HTTP status.
+    names = {"ollama": "Ollama"}
+    module = type(error).__module__.split(".")[0]
+    status = getattr(error, "status_code", None)
+    if module in names and isinstance(status, int):
+        return names[module], status, None
     return None
 
 
@@ -185,6 +192,7 @@ async def stream_turn(
     *,
     thread_id: str,
     model: str,
+    language: Language | None = None,
 ) -> AsyncIterator[ServerSentEvent]:
     settings = get_settings()
     messages = await chats.list_messages(thread_id)
@@ -206,7 +214,7 @@ async def stream_turn(
     status: MessageStatus = "error"
     error_message: str | None = None
     config: RunnableConfig = {
-        "configurable": {"thread_id": thread_id, "model": model},
+        "configurable": {"thread_id": thread_id, "model": model, "language": language},
         "callbacks": [AgentLoggingHandler(payload_max_chars=settings.log_body_max_chars)],
     }
 

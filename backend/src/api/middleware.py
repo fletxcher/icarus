@@ -16,6 +16,8 @@ from .log_config import request_id_var, truncate
 logger = logging.getLogger("api.http")
 
 TEXT_TYPES = ("application/json", "text/plain")
+# Requests to these paths carry passwords, API keys and private keys: their bodies are never logged.
+SECRET_PATHS = ("/api/auth/", "/api/credentials")
 
 
 class RequestLoggingMiddleware:
@@ -48,7 +50,9 @@ class RequestLoggingMiddleware:
             if logged_request:
                 return
             logged_request = True
-            body = self._decode(bytes(request_body))
+            body = (
+                "[hidden]" if path.startswith(SECRET_PATHS) else self._decode(bytes(request_body))
+            )
             logger.info(
                 "--> %s %s from %s%s",
                 method,

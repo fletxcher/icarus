@@ -7,7 +7,7 @@ from langchain_core.messages import AIMessage
 from api.agent.graph import build_agent
 from api.agent.tools import PlotRequest, plot_tools
 from api.compute.plots import PlotError, repair_spec, validate_figure
-from tests.conftest import ScriptedModel
+from tests.conftest import ScriptedModel, use_agent
 from tests.test_chats_api import create_thread, read_events
 
 POLAR = {
@@ -57,8 +57,11 @@ def test_create_plot_sends_the_figure_to_the_ui_but_only_a_summary_to_the_model(
 ):
     call = {"id": "p1", "name": "create_plot", "args": {"title": "Lift curve", "figure": POLAR}}
     model = ScriptedModel(replies=[AIMessage("", tool_calls=[call]), AIMessage("Done.")], seen=[])
-    client.app.state.services.agent = build_agent(
-        {"mistral-medium-3-5": model}, plot_tools(), default_model="mistral-medium-3-5"
+    use_agent(
+        client,
+        build_agent(
+            {"mistral-medium-3-5": model}, plot_tools(), default_model="mistral-medium-3-5"
+        ),
     )
     thread_id = create_thread(client)
 
@@ -179,8 +182,11 @@ def test_malformed_figures_models_really_sent_still_plot_through_the_agent(
 ):
     call = {"id": "p1", "name": "create_plot", "args": {"title": "L/D", "figure": figure}}
     model = ScriptedModel(replies=[AIMessage("", tool_calls=[call]), AIMessage("Done.")], seen=[])
-    client.app.state.services.agent = build_agent(
-        {"mistral-medium-3-5": model}, plot_tools(), default_model="mistral-medium-3-5"
+    use_agent(
+        client,
+        build_agent(
+            {"mistral-medium-3-5": model}, plot_tools(), default_model="mistral-medium-3-5"
+        ),
     )
     thread_id = create_thread(client)
 

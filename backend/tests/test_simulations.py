@@ -30,7 +30,11 @@ def test_submitting_a_job_does_not_wait_for_it_to_finish(client, tmp_path):
     )
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
     service = SimulationService(
-        client.app.state.db, RemoteLikeRunner(), workdir=str(tmp_path), script=str(script)
+        client.app.state.db,
+        RemoteLikeRunner(),
+        user_id="someone",
+        workdir=str(tmp_path),
+        script=str(script),
     )
 
     started = time.perf_counter()

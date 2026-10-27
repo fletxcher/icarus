@@ -14,7 +14,7 @@ import logging
 import posixpath
 import re
 import shlex
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -23,7 +23,7 @@ from pymongo.asynchronous.database import AsyncDatabase
 
 from ..catalog import SIMULATIONS
 from .runner import CommandRunner
-from .schemas import TERMINAL_STATUSES, CfdCase, Simulation, SimulationSummary
+from .schemas import TERMINAL_STATUSES, CfdCase, Simulation, SimulationSummary, Usage, UsagePeriod
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +48,19 @@ class MonitorError(Exception):
 
 
 class SimulationService:
-    def __init__(self, db: AsyncDatabase, runner: CommandRunner, *, workdir: str, script: str):
+    """One user's CFD jobs, run on the work station `runner` reaches."""
+
+    def __init__(
+        self,
+        db: AsyncDatabase,
+        runner: CommandRunner,
+        *,
+        user_id: str,
+        workdir: str,
+        script: str,
+    ):
         self._collection = db[SIMULATIONS]
+        self._user_id = user_id
         self._runner = runner
         self._workdir = workdir
         self._script = script
@@ -61,6 +72,7 @@ class SimulationService:
         now = datetime.now(UTC)
         doc = {
             "_id": str(uuid4()),
+            "user_id": self._user_id,
             "thread_id": thread_id,
             "case": case.model_dump(),
             "status": "queued",
@@ -123,7 +135,11 @@ class SimulationService:
         """Running jobs with their progress, then the most recently finished ones."""
         active_docs = (
             await self._collection.find(
-                {"status": {"$in": ["queued", "running"]}, "hidden": {"$ne": True}}
+                {
+                    "user_id": self._user_id,
+                    "status": {"$in": ["queued", "running"]},
+                    "hidden": {"$ne": True},
+                }
             )
             .sort("created_at", -1)
             .to_list(MAX_LISTED)
@@ -143,7 +159,11 @@ class SimulationService:
                 doc.update(await self._collection.find_one({"_id": doc["_id"]}) or {})
         finished_docs = (
             await self._collection.find(
-                {"status": {"$in": sorted(TERMINAL_STATUSES)}, "hidden": {"$ne": True}}
+                {
+                    "user_id": self._user_id,
+                    "status": {"$in": sorted(TERMINAL_STATUSES)},
+                    "hidden": {"$ne": True},
+                }
             )
             .sort("created_at", -1)
             .to_list(finished)
@@ -171,6 +191,37 @@ class SimulationService:
             summaries, key=lambda s: (s.status in TERMINAL_STATUSES, -s.created_at.timestamp())
         )
 
+    async def usage(self) -> Usage:
+        """CFD runs started in the last week, month and ever, with how long they took."""
+        now = datetime.now(UTC)
+        periods = {
+            "week": (now - timedelta(days=7), UsagePeriod()),
+            "month": (now - timedelta(days=30), UsagePeriod()),
+            "all_time": (None, UsagePeriod()),
+        }
+        projection = {"case.shape": 1, "status": 1, "created_at": 1, "updated_at": 1}
+        async for doc in self._collection.find({"user_id": self._user_id}, projection):
+            created = doc["created_at"].replace(tzinfo=UTC)
+            shape = doc.get("case", {}).get("shape") or "airfoil"
+            for since, period in periods.values():
+                if since is not None and created < since:
+                    continue
+                period.runs += 1
+                period.by_shape[shape] = period.by_shape.get(shape, 0) + 1
+                status = doc["status"]
+                if status == "completed":
+                    period.completed += 1
+                elif status == "failed":
+                    period.failed += 1
+                else:
+                    period.running += 1
+                if status in TERMINAL_STATUSES:
+                    updated = doc["updated_at"].replace(tzinfo=UTC)
+                    period.compute_s += max(0.0, (updated - created).total_seconds())
+        return Usage(
+            week=periods["week"][1], month=periods["month"][1], all_time=periods["all_time"][1]
+        )
+
     async def delete_for_thread(self, thread_id: str) -> int:
         """Deletes a chat's simulations for real: each running job is stopped, its files on the
         work station are removed and its record is deleted. This is the only way a simulation
@@ -178,7 +229,8 @@ class SimulationService:
 
         Returns how many simulations were deleted.
         """
-        ids = [doc["_id"] async for doc in self._collection.find({"thread_id": thread_id})]
+        query = {"user_id": self._user_id, "thread_id": thread_id}
+        ids = [doc["_id"] async for doc in self._collection.find(query)]
         for job_id in ids:
             await self._remove_files(job_id)
         if ids:
@@ -208,7 +260,7 @@ class SimulationService:
         """Takes a job off the simulations list (or puts it back). Nothing is deleted: the job
         keeps running or keeps its results, and its page and files stay available."""
         doc = await self._collection.find_one_and_update(
-            {"_id": job_id},
+            {"_id": job_id, "user_id": self._user_id},
             {"$set": {"hidden": hidden}},
             return_document=ReturnDocument.AFTER,
         )
@@ -222,7 +274,7 @@ class SimulationService:
 
     async def get(self, job_id: str) -> Simulation | None:
         """Returns the job, refreshing it from the work station while it's still in flight."""
-        doc = await self._collection.find_one({"_id": job_id})
+        doc = await self._collection.find_one({"_id": job_id, "user_id": self._user_id})
         if doc is None:
             return None
         simulation = Simulation.model_validate(doc)

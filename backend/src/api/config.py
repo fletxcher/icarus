@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     # Model providers: each one's models are offered only when its key is set.
     mistral_api_token: SecretStr | None = None
     openrouter_api_key: SecretStr | None = None
+    # An Ollama server (e.g. http://localhost:11434) whose installed models are offered.
+    ollama_base_url: str | None = None
     # Used when a message doesn't pick a model; falls back to the first available one.
     default_model: str = "mistral-medium-3-5"
     # Name new chats from their first message (one extra model request per chat).
@@ -32,6 +34,12 @@ class Settings(BaseSettings):
     # The remote one (e.g. MongoDB Atlas); the URI carries the credentials.
     mongodb_remote_uri: SecretStr | None = None
     mongodb_remote_name: str = "icarus"
+
+    # Fernet key(s) that encrypt users' API keys and SSH keys in the database. Without it
+    # those can't be stored; make one with
+    # `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+    # Comma-separated to rotate: the first seals new values, all of them open old ones.
+    credentials_key: SecretStr | None = None
 
     # HTTP
     cors_origins: list[str] = ["http://localhost:3000"]
@@ -54,6 +62,10 @@ class Settings(BaseSettings):
     ws_known_hosts_path: str | None = None
     ws_workdir: str = "/home/ubuntu/icarus"
     ws_cfd_script: str = "/home/ubuntu/icarus/bin/run_case.sh"
+    # Whether a user may connect their own work station at a loopback, private-network or
+    # link-local address (their own computer, a VM on their network). Turn it off for a server
+    # on the public internet, where those addresses are the server's own network.
+    allow_private_workstations: bool = True
 
     # XFOIL: run on this server ("local") or on the simulation work station ("ws")
     xfoil_runner: Literal["local", "ws"] = "ws"

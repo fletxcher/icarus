@@ -7,9 +7,12 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "argon2-cffi>=25.1.0",
     "asyncssh>=2.24.1",
+    "cryptography>=50.0.2",
     "fastapi[standard]>=0.159.1",
     "langchain-mistralai>=1.1.6",
+    "langchain-ollama>=1.1.0",
     "langchain-openrouter>=0.2.9",
     "langgraph>=1.2.16",
     "plotly>=7.1.0",
@@ -22,6 +25,7 @@ dependencies = [
 [project.scripts]
 api = "api:main"
 export-schemas = "api.schema_export:main"
+claim-data = "api.claim_data:main"
 
 [build-system]
 requires = ["uv_build>=0.12.21,<0.13.0"]

@@ -72,7 +72,10 @@ backend/src/api/
   log_config.py       Logging setup (request ids on every line)
   middleware.py       Request/response logging
   db.py               Mongo client and indexes
-  services.py         Builds the shared services and the agent at startup
+  services.py         Builds the shared services at startup
+  claim_data.py       `uv run claim-data <email>`: gives pre-accounts chats, files and simulations to an account
+  auth/               Users + sessions: schemas, password hashing, user repository, /api/auth/signup, /login, /me and /logout
+  credentials/        Users' own model keys and work station: vault (encryption), repository, SSH checks, /api/credentials
   chats/              Threads + messages: schemas, repository, routes
   agent/
     graph.py          LangGraph graph: agent node <-> tool node loop
@@ -80,9 +83,12 @@ backend/src/api/
     stream.py         Runs one turn, streams SSE events, persists the reply
     logging_callbacks.py  Logs model and tool calls
     prompts.py        System prompt
-    models.py         Selectable Mistral models
+    models.py         Selectable models and the provider keys that enable them
+    factory.py        Builds one user's agent from their keys and work station
+    capabilities.py   Which tools can run, and why not
   compute/
     runner.py         CommandRunner: LocalRunner (this server) / SSHRunner (work station)
+    pool.py           Each user's work station: their own, or the shared one
     xfoil.py          XFOIL script builder, polar parser, XfoilService
     simulations.py    CFD job submission and polling
     router.py         /api/simulations
@@ -92,17 +98,32 @@ ws/run_case.sh          Placeholder CFD entrypoint, installed on the work statio
 
 ### API
 
+Everything except `/api/auth/signup`, `/login`, `/logout` and `/api/health` needs a signed-in user (401
+otherwise), and chats, files and simulations belong to the user who made them: anyone else gets a 404.
+
 | Method | Path | |
 |---|---|---|
-| GET | `/api/threads` | List threads, newest first |
+| POST | `/api/auth/signup` | Create an account `{name, email, password}` (password 8–128 characters, stored as an Argon2id hash); 409 if the email is taken. Doesn't sign in |
+| POST | `/api/auth/login` | Sign in `{email, password}`: starts a session and sets the HttpOnly `icarus_session` cookie (30 days); 401 for any wrong email or password |
+| GET | `/api/auth/me` | The signed-in user (from the session cookie); 401 if nobody is |
+| PATCH | `/api/auth/me/preferences` | Save the reply language `{language}` (`en`, `es`, … or null) |
+| POST | `/api/auth/logout` | End the session and clear the cookie (204, also when not signed in) |
+| GET | `/api/credentials` | The user's saved model keys (last 4 characters only) and work station, and what the server supplies by default |
+| PUT / DELETE | `/api/credentials/model-keys/{provider}` | Save `{api_key}` for `mistral` or `openrouter` (checked with the provider first), or remove it |
+| POST | `/api/credentials/workstation/host-key` | Look up a machine's SSH host key `{host, port}` so the person can approve its fingerprint |
+| PUT | `/api/credentials/workstation` | Connect `{host, port, username, private_key, passphrase?, host_key, workdir?}`, install the runner scripts and save the machine; returns what's installed there |
+| POST / DELETE | `/api/credentials/workstation/check`, `/workstation` | Re-check the saved machine, or forget it |
+| GET | `/api/threads` | List the user's threads, newest first |
 | POST | `/api/threads` | Create a thread `{title}` |
 | GET | `/api/threads/{id}` | Thread with messages |
 | PATCH | `/api/threads/{id}` | Rename / pin `{title?, pinned?}` |
 | DELETE | `/api/threads/{id}` | Delete thread and messages |
 | DELETE | `/api/threads/{id}/messages/{message_id}` | Delete a message and all later ones |
-| POST | `/api/threads/{id}/messages` | Send `{content, model?, attachments?}` and stream the reply (SSE) |
+| POST | `/api/threads/{id}/messages` | Send `{content, model?, attachments?, language?}` and stream the reply (SSE) |
 | POST | `/api/files` | Upload a text file (multipart `file`) to attach; returns its id |
 | DELETE | `/api/files/{id}` | Remove a file that hasn't been sent yet |
+| GET | `/api/simulations/usage` | CFD runs started in the last 7 days, 30 days and ever, with outcomes, shapes and approximate time |
+| GET | `/api/status` | Checks the database, model provider, XFOIL and the work station (the help dialog's connection status) |
 | GET | `/api/simulations/{job_id}` | CFD job status (refreshes from the work station) |
 | GET | `/api/models`, `/api/health` | |
 
@@ -140,14 +161,14 @@ live in the assistant's text.
 MongoDB, database `MONGODB_LOCAL_NAME` or `MONGODB_REMOTE_NAME`. IDs are UUID strings and dates are timezone-aware UTC.
 
 Each collection's schema and indexes are written out in `database/<collection>.json`
-(`threads`, `messages`, `files`, `simulations`, `users`, `sessions`): a `$jsonSchema`
+(`threads`, `messages`, `files`, `simulations`, `users`, `sessions`, `credentials`): a `$jsonSchema`
 validator, the indexes, and whether it's `enforced`. Those files are generated from the
 Python definitions (`backend/src/api/catalog.py`), which the backend reads, not the
 files. After changing a definition, run `uv run export-schemas` in `backend/`; a test
 fails if the files are out of date (`--check` does the same).
 
 At startup the backend builds every index and, for the enforced collections (`users`,
-`sessions`), creates them with their validator or re-applies it, so a schema change
+`sessions`, `credentials`), creates them with their validator or re-applies it, so a schema change
 reaches the database on the next start. The other four hold data from earlier versions of
 the app, so their schemas document what is written today and are checked by tests (every
 kind of document the app produces is inserted into a collection that enforces them), not
@@ -160,12 +181,20 @@ by MongoDB.
 | `simulations` | CFD jobs submitted to the work station |
 | `users` | Accounts (validated) |
 | `sessions` | Signed-in browsers (validated) |
+| `credentials` | Each user's own model keys and work station, secrets encrypted (validated) |
 
 **`users`**: `email` (lowercase, unique), `email_verified_at`, `name`, `avatar_url`,
 `password_hash` (Argon2id; null for OAuth-only users), `identities` (`provider` +
 `subject`, unique across users), `role` (`user` / `admin`), `status` (`active` /
 `disabled`), `preferences` (`default_model`, `theme`), `created_at`, `updated_at`,
 `last_login_at`. The API returns `UserPublic`, which leaves out the hash and identities.
+
+**`credentials`**: one document per user, `kind` (`model_key` / `workstation`) and `name`
+(the provider, or `default`): `sealed` (the secret, encrypted) and `details` (what can be
+shown: a key's last 4 characters, or a machine's host, port, user, directory, host key and
+fingerprints).
+
+`threads`, `files` and `simulations` carry the owner's `user_id`.
 
 **`sessions`**: `user_id`, `token_hash`, `created_at`, `last_seen_at`, `expires_at`,
 `revoked_at`, `user_agent`, `ip`. The browser cookie holds a random token; only its
@@ -234,25 +263,69 @@ cut at `FILE_CONTEXT_MAX_CHARS` (20,000) characters per file. Files are stored i
 
 ### Models and reasoning
 
-Models are offered per provider, and only when that provider's key is in `.env`;
-`/api/models` and the model picker list just those:
+Models are offered per provider, and only when a key for that provider exists: the server's
+(in `.env`) or the user's own (Settings, API keys). A user's own key replaces the
+server's for that provider only. `/api/models` and the model picker list just the models
+the signed-in user can use:
 
 | Key | Models |
 |---|---|
 | `MISTRAL_API_TOKEN` | `mistral-medium-3-5`, `mistral-small-latest` |
 | `OPENROUTER_API_KEY` | `openrouter/free` (routes to a free model; 50 requests a day, 1,000 after buying $10 of credits) |
+| `OLLAMA_BASE_URL` | whatever models that [Ollama](https://ollama.com) server has installed, as `ollama/<name>` |
+
+Ollama needs no key: a user gives the address of their server (Settings, API keys), the
+backend lists its installed models (`/api/tags`, refreshed every 30 s) and offers them.
+The models must support tool calling, and the server must be reachable from the backend
+(the same address rules as a work station apply, see `ALLOW_PRIVATE_WORKSTATIONS`).
 
 An agent turn makes several model requests (one per step plus the answer), so free
 quotas run out quickly. `DEFAULT_MODEL` picks the default; if it isn't available, the
 first available model is used, with a warning in the logs.
 
-`REASONING_EFFORT=high` (default) streams the model's thinking before its answer; `none`
-turns it off. Mistral sends thinking as content blocks and OpenRouter as
+Only providers whose thinking can stream into the chat are offered. `REASONING_EFFORT=high` (default)
+streams the model's thinking before its answer; `none` turns it off. Mistral sends thinking as content blocks and OpenRouter as
 `reasoning_content`; both stream as `reasoning` events.
+
+### Credentials: your own keys and machine
+
+Users bring their own model API keys and their own simulation machine (Settings → API
+keys, Settings → Work station). Without them they use what the server provides: the keys in
+`.env` and the shared work station (`WS_*`).
+
+**Storage.** Secrets (API keys, SSH private keys) are encrypted with Fernet under
+`CREDENTIALS_KEY` and kept in the `credentials` collection; each is sealed together with
+its owner and name, so a copied value is refused. No endpoint returns a secret: the API
+shows a key's last 4 characters and a machine's host, user and fingerprints. Make a key with
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Losing `CREDENTIALS_KEY` makes saved credentials unreadable (they're then ignored and
+the user falls back to the server's). To rotate, put the new key first:
+`CREDENTIALS_KEY=<new>,<old>`. Without any key the app runs, but nothing can be saved.
+Request bodies of `/api/auth/*` and `/api/credentials*` are never logged.
+
+**Their machine.** The person enters host, port and user, the backend shows the machine's
+SSH host key, and the person approves its fingerprint. That host key is then pinned: the
+backend connects only to a machine presenting it. They paste a private key (kept
+without its passphrase, encrypted); the connection uses only that key (no agent, no
+`~/.ssh` of the server). Saving connects, creates `~/icarus` (or the chosen directory),
+puts the runner scripts and `setup.sh` there and reports what's installed (XFOIL, OpenFOAM,
+gmsh, ParaView, ffmpeg); anything missing is installed by running
+`bash ~/icarus/setup/setup.sh --install` on the machine. The machine must be reachable from
+the server running the backend, so "my own computer" works when the backend runs on it
+(use `127.0.0.1`) or the machine is reachable on the network. `ALLOW_PRIVATE_WORKSTATIONS=false`
+refuses loopback, private and link-local addresses, which a server on the public internet
+should set. A job lives on the machine it started on; switching machines doesn't move it.
+
+**Existing data.** Chats, files and simulations from before accounts have no owner and
+stay hidden until claimed: `uv run claim-data you@example.com` (add `--dry-run` to count).
 
 ### Simulation work station
 
-The backend reaches the work station over SSH (`WS_HOST`, `WS_USER`, `WS_SSH_KEY_PATH`). The work station's
+The backend reaches the shared work station over SSH (`WS_HOST`, `WS_USER`, `WS_SSH_KEY_PATH`). The work station's
 host key must be in `~/.ssh/known_hosts` (or `WS_KNOWN_HOSTS_PATH`).
 
 **CFD** jobs are submit-and-poll, since they outlast any HTTP request:
@@ -366,7 +439,8 @@ crash, `XFOIL_DISPLAY=none` turns its graphics off instead.
 - Set the backend's variables (`MONGODB_TARGET=remote`, `MONGODB_REMOTE_*`, provider keys, `WS_*`, ...) in the Vercel
   project. `MONGODB_REMOTE_URI` must be reachable from Vercel, e.g. MongoDB Atlas; a local
   Docker container isn't. XFOIL can't be installed on Vercel, so use `XFOIL_RUNNER=ws`.
-- There's no authentication yet. Add it before exposing the API publicly.
+- Set `CREDENTIALS_KEY` (and `ALLOW_PRIVATE_WORKSTATIONS=false` on a public server), and keep a copy of the
+  key: it can't be recovered.
 
 ### Development
 

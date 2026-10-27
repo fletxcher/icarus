@@ -1,15 +1,17 @@
 """The chat models the app can offer, grouped by the provider whose API key enables them."""
 
+from collections.abc import Mapping
 from typing import Literal
 
 from langchain_core.language_models import BaseChatModel
 from langchain_mistralai import ChatMistralAI
+from langchain_ollama import ChatOllama
 from langchain_openrouter import ChatOpenRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 
 from ..config import Settings
 
-Provider = Literal["mistral", "openrouter"]
+Provider = Literal["mistral", "openrouter", "ollama"]
 
 
 class ModelOption(BaseModel):
@@ -46,33 +48,50 @@ MODELS: list[ModelOption] = [
 ]
 
 
-def configured_providers(settings: Settings) -> set[Provider]:
-    """Providers whose API key is set."""
-    providers: set[Provider] = set()
+# The API key to use for each provider that has one.
+ProviderKeys = Mapping[Provider, SecretStr]
+
+
+def server_keys(settings: Settings) -> dict[Provider, SecretStr]:
+    """The keys the server itself supplies (from the environment), used until a user adds
+    their own."""
+    keys: dict[Provider, SecretStr] = {}
     if settings.mistral_api_token:
-        providers.add("mistral")
+        keys["mistral"] = settings.mistral_api_token
     if settings.openrouter_api_key:
-        providers.add("openrouter")
-    return providers
+        keys["openrouter"] = settings.openrouter_api_key
+    if settings.ollama_base_url:
+        keys["ollama"] = SecretStr(settings.ollama_base_url)
+    return keys
 
 
-def available_models(settings: Settings) -> list[ModelOption]:
-    """The models usable with the API keys present, in display order."""
-    providers = configured_providers(settings)
-    return [option for option in MODELS if option.provider in providers]
+def available_models(keys: ProviderKeys) -> list[ModelOption]:
+    """The built-in models usable with these API keys, in display order (Ollama's models
+    depend on the server; see `ollama.model_options`)."""
+    return [option for option in MODELS if option.provider in keys]
 
 
-def create_chat_model(option: ModelOption, settings: Settings) -> BaseChatModel:
+def create_chat_model(
+    option: ModelOption, keys: ProviderKeys, *, reasoning_effort: Literal["high", "none"]
+) -> BaseChatModel:
     if option.provider == "mistral":
         return ChatMistralAI(
             model_name=option.id,
-            api_key=settings.mistral_api_token,
+            api_key=keys["mistral"],
             temperature=0.3,
-            model_kwargs={"reasoning_effort": settings.reasoning_effort},
+            model_kwargs={"reasoning_effort": reasoning_effort},
         )
-    return ChatOpenRouter(
-        model=option.id,
-        api_key=settings.openrouter_api_key,
-        temperature=0.3,
-        reasoning={"effort": settings.reasoning_effort},
-    )
+    if option.provider == "openrouter":
+        return ChatOpenRouter(
+            model=option.id,
+            api_key=keys["openrouter"],
+            temperature=0.3,
+            reasoning={"effort": reasoning_effort},
+        )
+    if option.provider == "ollama":
+        # For Ollama the "key" is the server's address; the model's name follows the prefix.
+        return ChatOllama(
+            model=option.id.removeprefix("ollama/"),
+            base_url=keys["ollama"].get_secret_value(),
+            temperature=0.3,
+        )

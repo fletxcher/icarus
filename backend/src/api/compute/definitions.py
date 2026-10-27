@@ -20,6 +20,8 @@ SIMULATIONS_VALIDATOR: dict[str, Any] = {
         "required": ["_id", "thread_id", "case", "status", "created_at", "updated_at"],
         "properties": {
             "_id": {"bsonType": "string"},
+            # The owner. Missing only on data from before accounts existed; `claim-data` assigns it.
+            "user_id": {"bsonType": "string"},
             # The chat that started the job, if any.
             "thread_id": {"bsonType": NULLABLE_STRING},
             # True once taken off the simulations list; the job itself is kept.
@@ -64,4 +66,8 @@ SIMULATIONS_VALIDATOR: dict[str, Any] = {
     }
 }
 
-SIMULATIONS_INDEXES = [IndexModel([("thread_id", ASCENDING), ("created_at", DESCENDING)])]
+SIMULATIONS_INDEXES = [
+    IndexModel([("thread_id", ASCENDING), ("created_at", DESCENDING)]),
+    # A user's simulations, newest first (the list and the usage totals).
+    IndexModel([("user_id", ASCENDING), ("created_at", DESCENDING)], name="user_simulations"),
+]

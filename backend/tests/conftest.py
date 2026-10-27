@@ -3,15 +3,20 @@ from collections.abc import Iterator
 from uuid import uuid4
 
 import pytest
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import tool
+from langgraph.graph.state import CompiledStateGraph
+from pydantic import SecretStr
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
+from api.agent.factory import UserAgent
 from api.agent.graph import build_agent
+from api.agent.models import available_models
 from api.agent.titles import TitleGenerator
 from api.config import Settings, get_settings
 
@@ -74,10 +79,12 @@ def mongo_db_name(_test_database: str) -> str:
 
 
 @pytest.fixture
-def client(mongo_db_name: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+def anon_client(mongo_db_name: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    """The app with nobody signed in."""
     # Ignore the developer's .env so local keys and settings can't leak into tests.
     monkeypatch.setitem(Settings.model_config, "env_file", None)
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    for name in ("OPENROUTER_API_KEY", "OLLAMA_BASE_URL"):
+        monkeypatch.delenv(name, raising=False)
     # Always the local server, whatever the developer's environment says.
     monkeypatch.setenv("MONGODB_TARGET", "local")
     monkeypatch.setenv("MONGODB_LOCAL_URI", MONGODB_URI)
@@ -86,6 +93,9 @@ def client(mongo_db_name: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     monkeypatch.setenv("DEFAULT_MODEL", "mistral-medium-3-5")
     # Off unless a test plugs in a scripted title model (see use_scripted_titles).
     monkeypatch.setenv("AUTO_TITLE", "false")
+    # A key of its own, so tests never use (or write with) the developer's.
+    monkeypatch.setenv("CREDENTIALS_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("WS_HOST", raising=False)
     get_settings.cache_clear()
 
     from api.app import create_app
@@ -95,10 +105,40 @@ def client(mongo_db_name: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     get_settings.cache_clear()
 
 
+TEST_USER = {"name": "Test User", "email": "tester@example.com", "password": "correct horse"}
+
+
+def sign_up_and_in(client: TestClient, **changes: str) -> dict:
+    """Creates an account and signs in as it (the session cookie stays on `client`)."""
+    account = TEST_USER | changes
+    assert client.post("/api/auth/signup", json=account).status_code == 201
+    login = client.post("/api/auth/login", json=account)
+    assert login.status_code == 200
+    return login.json()
+
+
+@pytest.fixture
+def client(anon_client: TestClient) -> TestClient:
+    """The app with a user signed in; `anon_client` is the same app with nobody."""
+    sign_up_and_in(anon_client)
+    return anon_client
+
+
+def use_agent(
+    client: TestClient, agent: CompiledStateGraph | None, titles: TitleGenerator | None = None
+) -> None:
+    """Every user gets this agent (None: no model is available) instead of one built from keys."""
+    models = available_models({"mistral": SecretStr("test-token")}) if agent else []
+    client.app.state.services.agents.override = UserAgent(
+        models, "mistral-medium-3-5" if agent else None, agent, titles
+    )
+
+
 def use_scripted_agent(client: TestClient, replies: list[AIMessage]) -> ScriptedModel:
     model = ScriptedModel(replies=replies, seen=[])
-    client.app.state.services.agent = build_agent(
-        {"mistral-medium-3-5": model}, [add], default_model="mistral-medium-3-5"
+    use_agent(
+        client,
+        build_agent({"mistral-medium-3-5": model}, [add], default_model="mistral-medium-3-5"),
     )
     return model
 
@@ -106,5 +146,5 @@ def use_scripted_agent(client: TestClient, replies: list[AIMessage]) -> Scripted
 def use_scripted_titles(client: TestClient, replies: list[AIMessage]) -> ScriptedModel:
     services = client.app.state.services
     model = ScriptedModel(replies=replies, seen=[])
-    services.titles = TitleGenerator(services.chats, {"mistral-medium-3-5": model})
+    services.agents.override.titles = TitleGenerator(services.chats, {"mistral-medium-3-5": model})
     return model

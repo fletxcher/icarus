@@ -11,6 +11,8 @@ FILES_VALIDATOR: dict[str, Any] = {
         "required": ["_id", "name", "size", "content_type", "text", "thread_id", "created_at"],
         "properties": {
             "_id": {"bsonType": "string"},
+            # The owner. Missing only on data from before accounts existed; `claim-data` assigns it.
+            "user_id": {"bsonType": "string"},
             "name": {"bsonType": "string"},
             # Size of the upload in bytes (the text below can have fewer characters).
             "size": {"bsonType": ["int", "long"], "minimum": 0},

@@ -31,6 +31,8 @@ THREADS_VALIDATOR: dict[str, Any] = {
         "required": ["_id", "title", "auto_title", "created_at", "updated_at", "message_seq"],
         "properties": {
             "_id": {"bsonType": "string"},
+            # The owner. Missing only on data from before accounts existed; `claim-data` assigns it.
+            "user_id": {"bsonType": "string"},
             "title": {"bsonType": "string", "minLength": 1, "maxLength": 200},
             # True while the title is a placeholder that a generated one may replace.
             "auto_title": {"bsonType": "bool"},
@@ -122,5 +124,9 @@ MESSAGES_VALIDATOR: dict[str, Any] = {
 
 # No explicit names: MongoDB's generated ones (e.g. "updated_at_-1") match the indexes that
 # already exist in deployed databases.
-THREADS_INDEXES = [IndexModel([("updated_at", DESCENDING)])]
+THREADS_INDEXES = [
+    IndexModel([("updated_at", DESCENDING)]),
+    # A user's chats, most recently active first (the sidebar).
+    IndexModel([("user_id", ASCENDING), ("updated_at", DESCENDING)], name="user_threads"),
+]
 MESSAGES_INDEXES = [IndexModel([("thread_id", ASCENDING), ("seq", ASCENDING)], unique=True)]

@@ -12,7 +12,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 import asyncssh
 
@@ -115,31 +115,83 @@ class LocalRunner:
         await asyncio.to_thread(shutil.rmtree, path, ignore_errors=True)
 
 
-class SSHRunner:
-    """Runs commands on the simulation work station, reusing one SSH connection."""
+CONNECT_TIMEOUT_S = 15.0
 
-    def __init__(self, settings: Settings) -> None:
+
+@dataclass(frozen=True)
+class WorkstationTarget:
+    """Where and how to reach a work station, and where the CFD files live on it."""
+
+    host: str
+    port: int
+    username: str
+    workdir: str
+    cfd_script: str
+    # The server's own work station reads ~/.ssh (keys, config, agent); a user's connects
+    # with only the key they gave and the host key they approved.
+    own_key: asyncssh.SSHKey | None = None
+    host_keys: asyncssh.SSHKnownHosts | None = None
+    key_path: str | None = None
+    known_hosts_path: str | None = None
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> "WorkstationTarget":
         if not settings.ws_host:
             raise ValueError("WS_HOST must be set to run commands on the simulation work station")
-        self._settings = settings
+        return cls(
+            host=settings.ws_host,
+            port=settings.ws_port,
+            username=settings.ws_user,
+            workdir=settings.ws_workdir,
+            cfd_script=settings.ws_cfd_script,
+            key_path=settings.ws_ssh_key_path,
+            known_hosts_path=settings.ws_known_hosts_path,
+        )
+
+    def connect_options(self) -> dict[str, Any]:
+        if self.own_key is not None:
+            return {
+                "client_keys": [self.own_key],
+                "known_hosts": self.host_keys,
+                "preferred_auth": "publickey",
+                "config": None,
+                "agent_path": None,
+                "agent_forwarding": False,
+            }
+        # For both options () means the ~/.ssh defaults, while None would
+        # disable key auth / host key checking, so never pass None.
+        return {
+            "client_keys": [_expand(self.key_path)] if self.key_path else (),
+            "known_hosts": _expand(self.known_hosts_path) if self.known_hosts_path else (),
+        }
+
+
+async def connect(target: WorkstationTarget) -> asyncssh.SSHClientConnection:
+    return await asyncssh.connect(
+        target.host,
+        port=target.port,
+        username=target.username,
+        connect_timeout=CONNECT_TIMEOUT_S,
+        login_timeout=CONNECT_TIMEOUT_S,
+        **target.connect_options(),
+    )
+
+
+class SSHRunner:
+    """Runs commands on a work station, reusing one SSH connection."""
+
+    def __init__(self, target: WorkstationTarget) -> None:
+        self.target = target
         self._connection: asyncssh.SSHClientConnection | None = None
         self._lock = asyncio.Lock()
 
     async def _connect(self) -> asyncssh.SSHClientConnection:
         async with self._lock:
             if self._connection is None or self._connection.is_closed():
-                s = self._settings
-                logger.info("connecting to work station %s@%s:%d", s.ws_user, s.ws_host, s.ws_port)
-                self._connection = await asyncssh.connect(
-                    s.ws_host,
-                    port=s.ws_port,
-                    username=s.ws_user,
-                    # For both options () means the ~/.ssh defaults, while None would
-                    # disable key auth / host key checking, so never pass None.
-                    client_keys=[_expand(s.ws_ssh_key_path)] if s.ws_ssh_key_path else (),
-                    known_hosts=_expand(s.ws_known_hosts_path) if s.ws_known_hosts_path else (),
-                )
-                logger.info("connected to work station %s", s.ws_host)
+                t = self.target
+                logger.info("connecting to work station %s@%s:%d", t.username, t.host, t.port)
+                self._connection = await connect(t)
+                logger.info("connected to work station %s", t.host)
             return self._connection
 
     async def run(

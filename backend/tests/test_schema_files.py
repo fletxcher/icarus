@@ -17,8 +17,9 @@ from api.catalog import COLLECTIONS, SESSIONS, SIMULATIONS, THREADS, USERS
 from api.compute.runner import CommandResult
 from api.compute.schemas import CfdCase
 from api.compute.simulations import SimulationService
+from api.credentials.schemas import WorkstationDetails
 from api.schema_export import DATABASE_DIR, collection_document, stale_files
-from tests.conftest import MONGODB_URI, ScriptedModel
+from tests.conftest import MONGODB_URI, ScriptedModel, use_agent
 from tests.test_auth_schema import make_session, make_user
 from tests.test_chats_api import create_thread, read_events
 from tests.test_files import AIRFOIL, upload
@@ -56,8 +57,11 @@ def _run_app_flows(client: TestClient) -> None:
         ],
         seen=[],
     )
-    client.app.state.services.agent = build_agent(
-        {"mistral-medium-3-5": model}, plot_tools(), default_model="mistral-medium-3-5"
+    use_agent(
+        client,
+        build_agent(
+            {"mistral-medium-3-5": model}, plot_tools(), default_model="mistral-medium-3-5"
+        ),
     )
     read_events(client, thread_id, {"content": "Plot it", "attachments": [uploaded["id"]]})
 
@@ -67,10 +71,13 @@ def _run_app_flows(client: TestClient) -> None:
             request = httpx.Request("POST", "https://example.test")
             raise OpenRouterError("Rate limit exceeded", httpx.Response(429, request=request))
 
-    client.app.state.services.agent = build_agent(
-        {"mistral-medium-3-5": FailingModel(replies=[], seen=[])},
-        [],
-        default_model="mistral-medium-3-5",
+    use_agent(
+        client,
+        build_agent(
+            {"mistral-medium-3-5": FailingModel(replies=[], seen=[])},
+            [],
+            default_model="mistral-medium-3-5",
+        ),
     )
     read_events(client, create_thread(client), {"content": "This one fails"})
 
@@ -90,12 +97,31 @@ def _run_app_flows(client: TestClient) -> None:
         async def write_file(self, path, content):
             return None
 
+    user_id = client.get("/api/auth/me").json()["id"]
+
+    def simulations(fail: bool) -> SimulationService:
+        return SimulationService(
+            db, Runner(fail), user_id=user_id, workdir="/w", script="/w/run.sh"
+        )
+
     case = CfdCase(naca="2412", alpha=4, reynolds=3e6)
     for fail in (False, True):
-        service = SimulationService(db, Runner(fail), workdir="/w", script="/w/run.sh")
-        client.portal.call(partial(service.submit, case, thread_id=thread_id))
-    service = SimulationService(db, Runner(False), workdir="/w", script="/w/run.sh")
-    client.portal.call(service.submit, case)  # not tied to a chat
+        client.portal.call(partial(simulations(fail).submit, case, thread_id=thread_id))
+    client.portal.call(simulations(False).submit, case)  # not tied to a chat
+
+    # The user's own model key and work station, sealed.
+    credentials = client.app.state.services.credentials
+    client.portal.call(credentials.set_model_key, user_id, "mistral", "sk-test-1234")
+    station = WorkstationDetails(
+        host="10.0.0.5",
+        port=22,
+        username="ubuntu",
+        workdir="/home/ubuntu/icarus",
+        host_key="ssh-ed25519 AAAA",
+        fingerprint="SHA256:abc",
+        public_key="ssh-ed25519 BBBB",
+    )
+    client.portal.call(credentials.set_workstation, user_id, station, "PRIVATE KEY")
 
 
 def _documents(database: Database, name: str) -> list[dict[str, Any]]:

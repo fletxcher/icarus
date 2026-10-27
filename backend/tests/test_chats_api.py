@@ -7,7 +7,7 @@ from langchain_core.tools import tool
 from openrouter.errors import OpenRouterError
 
 from api.agent.graph import build_agent
-from tests.conftest import ScriptedModel, use_scripted_agent
+from tests.conftest import ScriptedModel, use_agent, use_scripted_agent
 
 
 def read_events(client: TestClient, thread_id: str, body: dict) -> list[tuple[str, dict]]:
@@ -117,7 +117,7 @@ def test_send_message_with_unconfigured_provider_model_is_422(client: TestClient
 
 
 def test_send_message_without_any_provider_is_503(client: TestClient):
-    client.app.state.services.agent = None
+    use_agent(client, None)
     thread_id = create_thread(client)
     response = client.post(f"/api/threads/{thread_id}/messages", json={"content": "hi"})
     assert response.status_code == 503
@@ -131,8 +131,8 @@ def test_provider_errors_are_explained_to_the_user(client: TestClient):
             raise httpx.HTTPStatusError("rate limited", request=request, response=response)
 
     model = RateLimitedModel(replies=[], seen=[])
-    client.app.state.services.agent = build_agent(
-        {"mistral-medium-3-5": model}, [], default_model="mistral-medium-3-5"
+    use_agent(
+        client, build_agent({"mistral-medium-3-5": model}, [], default_model="mistral-medium-3-5")
     )
     thread_id = create_thread(client)
 
@@ -158,8 +158,9 @@ def test_failing_tool_is_reported_to_the_model_and_the_turn_completes(client: Te
         ],
         seen=[],
     )
-    client.app.state.services.agent = build_agent(
-        {"mistral-medium-3-5": model}, [explode], default_model="mistral-medium-3-5"
+    use_agent(
+        client,
+        build_agent({"mistral-medium-3-5": model}, [explode], default_model="mistral-medium-3-5"),
     )
     thread_id = create_thread(client)
 
@@ -200,8 +201,8 @@ def test_openrouter_errors_are_explained_with_the_providers_reason(client: TestC
             )
 
     model = DailyQuotaModel(replies=[], seen=[])
-    client.app.state.services.agent = build_agent(
-        {"mistral-medium-3-5": model}, [], default_model="mistral-medium-3-5"
+    use_agent(
+        client, build_agent({"mistral-medium-3-5": model}, [], default_model="mistral-medium-3-5")
     )
     thread_id = create_thread(client)
 

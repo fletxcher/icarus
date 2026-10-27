@@ -21,18 +21,20 @@ class ChatRepository:
         self._threads = db[THREADS]
         self._messages = db[MESSAGES]
 
-    async def list_threads(self) -> list[Thread]:
-        cursor = self._threads.find().sort("updated_at", DESCENDING)
+    async def list_threads(self, user_id: str) -> list[Thread]:
+        cursor = self._threads.find({"user_id": user_id}).sort("updated_at", DESCENDING)
         return [Thread.model_validate(doc) async for doc in cursor]
 
-    async def get_thread(self, thread_id: str) -> Thread | None:
-        doc = await self._threads.find_one({"_id": thread_id})
+    async def get_thread(self, thread_id: str, user_id: str) -> Thread | None:
+        """The user's thread; None if it doesn't exist or belongs to someone else."""
+        doc = await self._threads.find_one({"_id": thread_id, "user_id": user_id})
         return Thread.model_validate(doc) if doc else None
 
-    async def create_thread(self, title: str) -> Thread:
+    async def create_thread(self, user_id: str, title: str) -> Thread:
         now = _now()
         doc = {
             "_id": str(uuid4()),
+            "user_id": user_id,
             "title": title,
             "auto_title": True,
             "created_at": now,
@@ -43,7 +45,12 @@ class ChatRepository:
         return Thread.model_validate(doc)
 
     async def update_thread(
-        self, thread_id: str, *, title: str | None = None, pinned: bool | None = None
+        self,
+        thread_id: str,
+        user_id: str,
+        *,
+        title: str | None = None,
+        pinned: bool | None = None,
     ) -> Thread | None:
         changes: dict[str, Any] = {}
         if title is not None:
@@ -53,9 +60,11 @@ class ChatRepository:
         if pinned is not None:
             changes["pinned_at"] = _now() if pinned else None
         if not changes:
-            return await self.get_thread(thread_id)
+            return await self.get_thread(thread_id, user_id)
         doc = await self._threads.find_one_and_update(
-            {"_id": thread_id}, {"$set": changes}, return_document=ReturnDocument.AFTER
+            {"_id": thread_id, "user_id": user_id},
+            {"$set": changes},
+            return_document=ReturnDocument.AFTER,
         )
         return Thread.model_validate(doc) if doc else None
 
@@ -67,9 +76,10 @@ class ChatRepository:
         )
         return result.modified_count == 1
 
-    async def delete_thread(self, thread_id: str) -> bool:
-        result = await self._threads.delete_one({"_id": thread_id})
-        await self._messages.delete_many({"thread_id": thread_id})
+    async def delete_thread(self, thread_id: str, user_id: str) -> bool:
+        result = await self._threads.delete_one({"_id": thread_id, "user_id": user_id})
+        if result.deleted_count == 1:
+            await self._messages.delete_many({"thread_id": thread_id})
         return result.deleted_count == 1
 
     async def list_messages(self, thread_id: str) -> list[Message]:
