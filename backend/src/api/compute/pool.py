@@ -13,10 +13,12 @@ from typing import Literal, NoReturn
 import asyncssh
 from pymongo.asynchronous.database import AsyncDatabase
 
+from ..catalog import SIMULATIONS
 from ..config import Settings
 from ..credentials.repository import CredentialRepository, StoredWorkstation
 from ..files.repository import FileRepository
 from .runner import CommandResult, CommandRunner, LocalRunner, SSHRunner, WorkstationTarget
+from .schemas import TERMINAL_STATUSES
 from .simulations import SimulationService
 from .xfoil import XfoilService
 
@@ -164,6 +166,20 @@ class ComputePool:
             timeout_s=s.xfoil_timeout_s,
             max_concurrency=s.xfoil_max_concurrency,
         )
+
+    async def users_to_watch(self) -> list[str]:
+        """Users with a job still going, or one that ended without its chat being told."""
+        collection = self._db[SIMULATIONS]
+        going = await collection.distinct("user_id", {"status": {"$in": ["queued", "running"]}})
+        ended = await collection.distinct(
+            "user_id",
+            {
+                "status": {"$in": sorted(TERMINAL_STATUSES)},
+                "thread_id": {"$ne": None},
+                "notified_at": {"$type": "null"},
+            },
+        )
+        return sorted({*going, *ended})
 
     async def close(self) -> None:
         for _, runner in self._own.values():

@@ -7,7 +7,9 @@ from ..files.schemas import Attachment
 from ..languages import Language
 from ..mongo import MongoModel
 
-Role = Literal["user", "assistant"]
+# "notice" is an automatic note (e.g. that a simulation finished): the agent reads it as if the
+# user had said it, and the chat shows it as an event.
+Role = Literal["user", "assistant", "notice"]
 MessageStatus = Literal["streaming", "done", "stopped", "error"]
 
 

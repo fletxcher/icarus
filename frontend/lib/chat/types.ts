@@ -1,6 +1,7 @@
 // Mirrors the backend's response models (backend/src/api/chats/schemas.py).
 
-export type Role = "user" | "assistant";
+/** "notice" is an automatic note, e.g. that a simulation finished. */
+export type Role = "user" | "assistant" | "notice";
 
 export type MessageStatus = "streaming" | "done" | "stopped" | "error";
 

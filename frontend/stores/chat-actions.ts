@@ -56,6 +56,17 @@ async function loadMessages(threadId: string) {
   }
 }
 
+/** Reloads a chat's messages from the server (e.g. a notice that arrived while it was open). */
+export async function refreshThread(threadId: string) {
+  await loadMessages(threadId);
+}
+
+/** Has the assistant look at the latest notice (a simulation that finished), as if asked. */
+export async function discussNotice(threadId: string) {
+  if (store().controller) return;
+  await runTurn(threadId);
+}
+
 /** Puts a simulation back on the list. */
 export async function showSimulation(jobId: string): Promise<boolean> {
   try {

@@ -7,8 +7,9 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, BeforeValidator, Field
 
+from ..compute.describe import format_simulation
 from ..compute.plots import describe_figure, validate_figure
-from ..compute.schemas import CfdCase, FeaCase, Simulation
+from ..compute.schemas import CfdCase, FeaCase
 from ..compute.simulations import GeometryUnavailable, SimulationService
 from ..compute.xfoil import Polar, PolarRequest, XfoilService
 
@@ -49,29 +50,6 @@ def _format_polar(polar: Polar) -> str:
         f"max CL {max_lift.cl:.3f} at alpha={max_lift.alpha:.2f}."
     )
     return "\n".join([header, summary, "", *rows])
-
-
-HISTORY_POINTS_FOR_MODEL = 40
-
-
-def _result_for_model(result: dict[str, Any]) -> dict[str, Any]:
-    """The coefficient history is long; give the model a thinned copy it can still plot."""
-    history = result.get("history")
-    if not isinstance(history, dict):
-        return result
-    count = max((len(values) for values in history.values()), default=0)
-    step = max(1, -(-count // HISTORY_POINTS_FOR_MODEL))
-    return {**result, "history": {name: values[::step] for name, values in history.items()}}
-
-
-def _format_simulation(simulation: Simulation) -> str:
-    case = simulation.case.model_dump(exclude_none=True)
-    lines = [f"Job {simulation.id}: {simulation.status}", f"Case: {case}"]
-    if simulation.result:
-        lines.append(f"Result: {_result_for_model(simulation.result)}")
-    if simulation.error:
-        lines.append(f"Error: {simulation.error}")
-    return "\n".join(lines)
 
 
 def xfoil_tools(xfoil: XfoilService) -> list[BaseTool]:
@@ -132,12 +110,13 @@ def simulation_tools(simulations: SimulationService) -> list[BaseTool]:
     async def submit_cfd_simulation(config: RunnableConfig, **fields) -> str:
         thread_id = config.get("configurable", {}).get("thread_id")
         simulation = await simulations.submit(CfdCase(**fields), thread_id=thread_id)
-        text = _format_simulation(simulation)
+        text = format_simulation(simulation)
         if simulation.status == "running":
             text += (
                 "\n\nThe simulation is now running in the background and will take a while. "
-                "Tell the user the job id and what was submitted, then end your turn: do not "
-                "wait for it or call get_simulation_status again until the user asks."
+                "Tell the user the job id and what was submitted, then end your turn. You will be "
+                "told in this chat when it finishes, so never call get_simulation_status to wait "
+                "for it."
             )
         return text
 
@@ -147,18 +126,19 @@ def simulation_tools(simulations: SimulationService) -> list[BaseTool]:
             simulation = await simulations.submit(FeaCase(**fields), thread_id=thread_id)
         except GeometryUnavailable as problem:
             return f"Not started: {problem}."
-        text = _format_simulation(simulation)
+        text = format_simulation(simulation)
         if simulation.status == "running":
             text += (
                 "\n\nThe analysis is now running in the background (meshing the solid, then "
-                "solving). Tell the user the job id and what was submitted, then end your turn: "
-                "do not wait for it or call get_simulation_status again until the user asks."
+                "solving). Tell the user the job id and what was submitted, then end your turn. "
+                "You will be told in this chat when it finishes, so never call "
+                "get_simulation_status to wait for it."
             )
         return text
 
     async def get_simulation_status(job_id: str) -> str:
         simulation = await simulations.get(job_id)
-        return _format_simulation(simulation) if simulation else f"No job with id {job_id}."
+        return format_simulation(simulation) if simulation else f"No job with id {job_id}."
 
     return [
         StructuredTool.from_function(
@@ -199,8 +179,9 @@ def simulation_tools(simulations: SimulationService) -> list[BaseTool]:
             coroutine=get_simulation_status,
             name="get_simulation_status",
             description=(
-                "Check the status and results of a CFD or FEA simulation job once, when the user "
-                "asks about it. Never call it repeatedly to wait for a job to finish."
+                "Look up a CFD or FEA simulation job's status and results, for a job you weren't "
+                "told about (you are told in the chat when a job finishes, and each turn lists "
+                "those still running). Never call it to wait for a job."
             ),
             args_schema=SimulationLookup,
         ),

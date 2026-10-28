@@ -95,6 +95,8 @@ SIMULATIONS_VALIDATOR: dict[str, Any] = {
             "thread_id": {"bsonType": NULLABLE_STRING},
             # True once taken off the simulations list; the job itself is kept.
             "hidden": {"bsonType": "bool"},
+            # When the chat was told the job ended (null until then; absent for jobs not in a chat).
+            "notified_at": {"bsonType": ["date", "null"]},
             # Inputs, as given to the work station in case.json: a CfdCase or a FeaCase, told
             # apart by `kind` (older CFD jobs have none).
             "case": {"anyOf": [CFD_CASE, FEA_CASE]},

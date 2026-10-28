@@ -240,6 +240,24 @@ reason, and tells the model to say plainly when something isn't available instea
 attempting it or inventing tools. The startup log shows which tools are active and why
 others aren't. A call to a tool that doesn't exist comes back to the model as an error.
 
+### Telling the chat when a simulation ends
+
+The agent never waits on or polls a simulation. A watcher in the backend (`compute/watcher.py`,
+every `SIMULATION_WATCH_S` seconds, default 10; 0 turns it off) looks at each job still going on
+the work station, which costs no model tokens, and when one has ended it records the result and
+adds a **notice** to the chat that started the job (`role: "notice"`, once per job: `notified_at`
+on the job is claimed atomically). The notice reads "Simulation <id> finished: it completed after
+about 2 min 13 s", followed by the job's inputs and results. It is part of the chat's history, so
+the next time the user writes, the agent already has the outcome (a notice and the user's message
+are sent to the model as one message), and the chat shows it as a card with **Open simulation**
+and **Discuss the results**; the latter makes the assistant answer from the notice without the
+user typing anything (`POST /api/threads/{id}/messages` with no content works when the last
+message is a notice). Each turn also tells the agent which of the chat's simulations are still
+running and for how long, so it can answer "is it done?" itself. The page notices a job ending
+too: a toast, and the open chat reloads so the notice shows without a refresh. A job that ends
+while the work station can't be reached is picked up on the next pass that can; a job started
+outside a chat has no chat to tell.
+
 ### FEA on an uploaded solid
 
 `submit_fea_simulation` analyses an STL the user attached (the model takes the file's id from

@@ -120,6 +120,11 @@ class ChatRepository:
         await self._messages.insert_one(doc)
         return Message.model_validate(doc)
 
+    async def add_notice(self, thread_id: str, text: str) -> Message:
+        """An automatic note in the chat, e.g. that a simulation finished. Raises LookupError if
+        the chat has been deleted."""
+        return await self.add_message(thread_id, "notice", text)
+
     async def finish_message(
         self,
         message_id: str,

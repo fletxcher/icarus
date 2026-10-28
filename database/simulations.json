@@ -30,6 +30,12 @@
         "hidden": {
           "bsonType": "bool"
         },
+        "notified_at": {
+          "bsonType": [
+            "date",
+            "null"
+          ]
+        },
         "case": {
           "anyOf": [
             {

@@ -42,6 +42,9 @@ def build_agent(
                     "Keep tool names, units and code as they are."
                 )
             )
+        # What's going on right now (e.g. simulations still running), refreshed every turn.
+        if situation := config.get("configurable", {}).get("situation"):
+            preface.append(SystemMessage(situation))
         response = await model.ainvoke([*preface, *state["messages"]], config)
         return {"messages": [response]}
 

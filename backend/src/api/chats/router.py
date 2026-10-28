@@ -9,6 +9,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from ..agent.stream import stream_turn, title_first
 from ..auth.router import CurrentUser
+from ..compute.describe import running_note
 from ..dependencies import ServicesDep
 from ..languages import Language
 from .schemas import (
@@ -88,6 +89,8 @@ class Turn:
     agent: CompiledStateGraph
     model: str
     language: Language | None = None
+    # What the agent is told about this chat's running simulations (see compute/describe.py).
+    situation: str | None = None
     # Running when this turn starts a chat that still has a placeholder title.
     title: asyncio.Task[str | None] | None = None
 
@@ -132,16 +135,20 @@ async def start_turn(
         )
         await services.files.attach(file_ids, thread_id, user.id)
     messages = await services.chats.list_messages(thread_id)
-    if not messages or messages[-1].role != "user":
+    if not messages or messages[-1].role == "assistant":
         raise HTTPException(
             status.HTTP_409_CONFLICT, "Nothing to regenerate: the last message isn't a user's"
         )
+    simulations = await services.compute.simulations_for(user.id)
+    situation = running_note(await simulations.running_in_thread(thread_id))
 
     # Name the chat from its first message, alongside the reply.
     title = None
     if setup.titles and thread.auto_title and len(messages) == 1:
         title = setup.titles.start(thread_id, model, messages[0].content)
-    return Turn(agent=setup.agent, model=model, language=body.language, title=title)
+    return Turn(
+        agent=setup.agent, model=model, language=body.language, situation=situation, title=title
+    )
 
 
 @router.post("/{thread_id}/messages", response_class=EventSourceResponse)
@@ -156,6 +163,7 @@ async def send_message(
         thread_id=thread_id,
         model=turn.model,
         language=turn.language,
+        situation=turn.situation,
     )
     if turn.title is not None:
         events = title_first(events, turn.title, wait_s=TITLE_WAIT_S)

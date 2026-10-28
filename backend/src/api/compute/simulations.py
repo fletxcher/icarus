@@ -125,6 +125,9 @@ class SimulationService:
             "user_id": self._user_id,
             "thread_id": thread_id,
             "case": case.model_dump(),
+            # Set once the chat has been told how the job ended (explicitly null until then);
+            # a job that isn't in a chat has nobody to tell.
+            **({"notified_at": None} if thread_id else {}),
             "status": "queued",
             "created_at": now,
             "updated_at": now,
@@ -184,6 +187,48 @@ class SimulationService:
         """What the run did since the given offsets (residuals, coefficients, stage, ETA)."""
         args = ["progress", self._job_dir(job_id), str(log_offset), str(coeff_offset)]
         return await self._monitor(*args, *(["final"] if final else []), kind=kind)
+
+    async def sync_active(self) -> None:
+        """Looks at every job of this user that is still going and records the ones that ended,
+        so the chat can be told. Jobs on a machine that can't be reached are left as they are."""
+        ids = [
+            doc["_id"]
+            async for doc in self._collection.find(
+                {"user_id": self._user_id, "status": {"$in": ["queued", "running"]}}, {"_id": 1}
+            )
+        ]
+        for job_id in ids:
+            await self.get(job_id)
+
+    async def claim_unnotified(self) -> list[Simulation]:
+        """The finished jobs whose chat hasn't been told yet, each handed out exactly once."""
+        claimed = []
+        while True:
+            doc = await self._collection.find_one_and_update(
+                {
+                    "user_id": self._user_id,
+                    "status": {"$in": sorted(TERMINAL_STATUSES)},
+                    "thread_id": {"$ne": None},
+                    "notified_at": {"$type": "null"},
+                },
+                {"$set": {"notified_at": datetime.now(UTC)}},
+                sort=[("updated_at", 1)],
+                return_document=ReturnDocument.AFTER,
+            )
+            if doc is None:
+                return claimed
+            claimed.append(Simulation.model_validate(doc))
+
+    async def running_in_thread(self, thread_id: str) -> list[Simulation]:
+        """The chat's jobs that haven't ended yet."""
+        cursor = self._collection.find(
+            {
+                "user_id": self._user_id,
+                "thread_id": thread_id,
+                "status": {"$in": ["queued", "running"]},
+            }
+        ).sort("created_at", 1)
+        return [Simulation.model_validate(doc) async for doc in cursor]
 
     async def list_summaries(self, finished: int = RECENT_FINISHED) -> list[SimulationSummary]:
         """Running jobs with their progress, then the most recently finished ones."""

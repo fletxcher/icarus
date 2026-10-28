@@ -121,7 +121,11 @@ def test_the_agents_tool_starts_the_job_and_explains_a_bad_file(client, station)
         tools["submit_fea_simulation"].ainvoke, {**args, "geometry_file_id": "nope"}
     )
 
-    assert "Job " in started and "running" in started and "do not wait for it" in started
+    assert (
+        "Job " in started
+        and "running" in started
+        and "never call get_simulation_status to wait" in started
+    )
     assert refused.startswith("Not started: no uploaded geometry has the id 'nope'")
 
 

@@ -10,6 +10,7 @@ from .auth import router as auth_router
 from .auth.router import CurrentUser
 from .chats import router as chats_router
 from .compute import router as simulations_router
+from .compute.watcher import watching
 from .config import get_settings
 from .credentials import router as credentials_router
 from .db import create_client, ensure_schema
@@ -42,7 +43,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.db = db
     logger.info("startup complete")
     try:
-        yield
+        async with watching(services.compute, services.chats, settings.simulation_watch_s):
+            yield
     finally:
         logger.info("shutting down")
         await services.close()

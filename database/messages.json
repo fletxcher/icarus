@@ -36,7 +36,8 @@
           "bsonType": "string",
           "enum": [
             "user",
-            "assistant"
+            "assistant",
+            "notice"
           ]
         },
         "content": {

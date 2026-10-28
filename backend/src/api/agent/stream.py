@@ -82,8 +82,18 @@ def to_langchain(
     """
     history: list[BaseMessage] = []
     for message in messages:
-        if message.role == "user":
-            history.append(HumanMessage(with_attachments(message, file_texts, file_max_chars)))
+        if message.role in ("user", "notice"):
+            text = (
+                with_attachments(message, file_texts, file_max_chars)
+                if message.role == "user"
+                else f"[Automatic notice, not written by the user]\n{message.content}"
+            )
+            # Providers want the roles to alternate, so a notice and the user's next message
+            # (or two notices) are read as one message.
+            if history and isinstance(history[-1], HumanMessage):
+                history[-1] = HumanMessage(f"{history[-1].content}\n\n{text}")
+            else:
+                history.append(HumanMessage(text))
         elif message.content:
             history.append(AIMessage(message.content))
     return history
@@ -205,6 +215,7 @@ async def stream_turn(
     thread_id: str,
     model: str,
     language: Language | None = None,
+    situation: str | None = None,
 ) -> AsyncIterator[ServerSentEvent]:
     settings = get_settings()
     messages = await chats.list_messages(thread_id)
@@ -226,7 +237,12 @@ async def stream_turn(
     status: MessageStatus = "error"
     error_message: str | None = None
     config: RunnableConfig = {
-        "configurable": {"thread_id": thread_id, "model": model, "language": language},
+        "configurable": {
+            "thread_id": thread_id,
+            "model": model,
+            "language": language,
+            "situation": situation,
+        },
         "callbacks": [AgentLoggingHandler(payload_max_chars=settings.log_body_max_chars)],
     }
 

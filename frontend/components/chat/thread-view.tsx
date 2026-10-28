@@ -8,6 +8,7 @@ import type { Message } from "@/lib/chat/types";
 import { useChatStore } from "@/stores/chat-store";
 import { AssistantMessage } from "./assistant-message";
 import { Composer } from "./composer";
+import { NoticeMessage } from "./notice-message";
 import { UserMessage } from "./user-message";
 
 const STICK_THRESHOLD_PX = 80;
@@ -78,7 +79,14 @@ export function ThreadView({ threadId }: { threadId: string }) {
 function MessageList({ threadId, messages }: { threadId: string; messages: Message[] }) {
   const lastMessage = messages.at(-1);
   return messages.map((message) =>
-    message.role === "user" ? (
+    message.role === "notice" ? (
+      <NoticeMessage
+        key={message.id}
+        threadId={threadId}
+        message={message}
+        isLast={message === lastMessage}
+      />
+    ) : message.role === "user" ? (
       <UserMessage key={message.id} threadId={threadId} message={message} />
     ) : (
       <AssistantMessage

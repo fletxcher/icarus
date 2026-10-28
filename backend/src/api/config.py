@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     # on the public internet, where those addresses are the server's own network.
     allow_private_workstations: bool = True
 
+    # How often (seconds) the backend checks the work station for finished simulations, to tell
+    # their chats; 0 turns the check off.
+    simulation_watch_s: float = 10.0
+
     # XFOIL: run on this server ("local") or on the simulation work station ("ws")
     xfoil_runner: Literal["local", "ws"] = "ws"
     xfoil_path: str = "xfoil"

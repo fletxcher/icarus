@@ -96,6 +96,8 @@ def anon_client(mongo_db_name: str, monkeypatch: pytest.MonkeyPatch) -> Iterator
     # A key of its own, so tests never use (or write with) the developer's.
     monkeypatch.setenv("CREDENTIALS_KEY", Fernet.generate_key().decode())
     monkeypatch.delenv("WS_HOST", raising=False)
+    # No background watcher in tests: they call `watch_once` themselves.
+    monkeypatch.setenv("SIMULATION_WATCH_S", "0")
     get_settings.cache_clear()
 
     from api.app import create_app
