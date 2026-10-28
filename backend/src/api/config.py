@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     ws_ssh_key_path: str | None = None
     ws_known_hosts_path: str | None = None
     ws_workdir: str = "/home/ubuntu/icarus"
-    ws_cfd_script: str = "/home/ubuntu/icarus/bin/run_case.sh"
+    ws_cfd_script: str = "/home/ubuntu/icarus/bin/run_openfoam.sh"
     # Whether a user may connect their own work station at a loopback, private-network or
     # link-local address (their own computer, a VM on their network). Turn it off for a server
     # on the public internet, where those addresses are the server's own network.

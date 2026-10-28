@@ -110,7 +110,7 @@ backend/src/api/
     simulations.py    CFD job submission and polling
     router.py         /api/simulations
 workstation/setup.sh             Prepares (or cleans up) a fresh simulation work station
-workstation/run_case.sh          Placeholder CFD entrypoint, installed on the work station by setup.sh
+workstation/run_openfoam.sh          Placeholder CFD entrypoint, installed on the work station by setup.sh
 ```
 
 ### API
@@ -353,7 +353,7 @@ host key must be in `~/.ssh/known_hosts` (or `WS_KNOWN_HOSTS_PATH`).
    `{"status": "running" | "completed" | "failed", "result": {...}, "error": "..."}`.
 4. `get_simulation_status` / `GET /api/simulations/{id}` read it back into Mongo.
 
-`workstation/run_case.sh` implements that contract: gmsh meshes the case (one cell thick,
+`workstation/run_openfoam.sh` implements that contract: gmsh meshes the case (one cell thick,
 boundary layer resolved to y+ ~ 1), `gmshToFoam` converts it, and OpenFOAM solves it on
 up to 4 cores with the k-omega SST model (laminar below Re 1000). `workstation/cfd_case.py` writes
 the mesh script and the OpenFOAM dictionaries from `case.json` and reads the results

@@ -6,7 +6,7 @@
 #   ./setup.sh --uninstall    remove what --install added (asks before deleting job data)
 #
 # Layout under ICARUS_HOME (default ~/icarus), matching the backend's defaults:
-#   bin/run_case.sh   CFD entrypoint (WS_CFD_SCRIPT)
+#   bin/run_openfoam.sh  CFD entrypoint (WS_CFD_SCRIPT)
 #   bin/run_calculix.sh  runs a CalculiX (ccx) input deck in a job directory
 #   jobs/             one directory per CFD job (WS_WORKDIR/jobs)
 #
@@ -179,11 +179,11 @@ do_install() {
     log "Packages already installed: ${PACKAGES[*]}"
   fi
 
-  install -m 755 "$SCRIPT_DIR/run_case.sh" "$ICARUS_HOME/bin/run_case.sh"
+  install -m 755 "$SCRIPT_DIR/run_openfoam.sh" "$ICARUS_HOME/bin/run_openfoam.sh"
   install -m 755 "$SCRIPT_DIR/cfd_case.py" "$ICARUS_HOME/bin/cfd_case.py"
   install -m 755 "$SCRIPT_DIR/run_calculix.sh" "$ICARUS_HOME/bin/run_calculix.sh"
   install -m 755 "$SCRIPT_DIR/render_video.py" "$ICARUS_HOME/bin/render_video.py"
-  log "Installed CFD runner at $ICARUS_HOME/bin/run_case.sh (and cfd_case.py) and run_calculix.sh"
+  log "Installed CFD runner at $ICARUS_HOME/bin/run_openfoam.sh (and cfd_case.py) and run_calculix.sh"
 
   check_xfoil
   check_openfoam
@@ -196,7 +196,7 @@ Done. Backend settings for this work station (in the repo-root .env):
   WS_HOST=<this work station's address>
   WS_USER=$(id -un)
   WS_WORKDIR=$ICARUS_HOME
-  WS_CFD_SCRIPT=$ICARUS_HOME/bin/run_case.sh
+  WS_CFD_SCRIPT=$ICARUS_HOME/bin/run_openfoam.sh
   XFOIL_RUNNER=ws      # to run XFOIL here
 EOF
 }

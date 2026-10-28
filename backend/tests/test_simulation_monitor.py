@@ -61,7 +61,7 @@ class FakeWorkStation:
 def service_for(client, station):
     """The signed-in user's simulations on the fake work station (also kept on `client`)."""
     compute = client.app.state.services.compute
-    compute.set_shared(Workstation(station, "/w", "/w/bin/run_case.sh", "shared"))
+    compute.set_shared(Workstation(station, "/w", "/w/bin/run_openfoam.sh", "shared"))
     user_id = client.get("/api/auth/me").json()["id"]
     client.simulations = client.portal.call(compute.simulations_for, user_id)
     return client.simulations

@@ -19,7 +19,7 @@ HOST_KEY_TIMEOUT_S = 10.0
 COMMAND_TIMEOUT_S = 30.0
 # The runner scripts shipped in the repository, put on the machine at connection time.
 WS_SOURCE = Path(__file__).resolve().parents[4] / "workstation"
-SCRIPTS = ["run_case.sh", "cfd_case.py", "render_video.py", "run_calculix.sh"]
+SCRIPTS = ["run_openfoam.sh", "cfd_case.py", "render_video.py", "run_calculix.sh"]
 SETUP_SCRIPT = "setup.sh"
 
 TOOLS_SCRIPT = r"""
@@ -147,7 +147,7 @@ async def inspect(
     public_key = public_key_line(target.own_key)
     try:
         workdir = requested_workdir or f"{await home_directory(target)}/icarus"
-        ready = replace(target, workdir=workdir, cfd_script=f"{workdir}/bin/run_case.sh")
+        ready = replace(target, workdir=workdir, cfd_script=f"{workdir}/bin/run_openfoam.sh")
         runner = SSHRunner(ready)
         try:
             return ready, await run_checks(runner)

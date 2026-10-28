@@ -78,7 +78,7 @@ def target_for(stored: StoredWorkstation) -> WorkstationTarget:
         port=details.port,
         username=details.username,
         workdir=details.workdir,
-        cfd_script=f"{details.workdir}/bin/run_case.sh",
+        cfd_script=f"{details.workdir}/bin/run_openfoam.sh",
         own_key=asyncssh.import_private_key(stored.private_key.get_secret_value()),
         host_keys=asyncssh.import_known_hosts(f"{host_entry} {details.host_key}\n"),
     )

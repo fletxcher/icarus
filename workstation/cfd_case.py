@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Builds, and reads back, one OpenFOAM 2D case. Called by run_case.sh.
+"""Builds, and reads back, one OpenFOAM 2D case. Called by run_openfoam.sh.
 
 Standard library only, so it runs on a fresh work station.
 
@@ -864,7 +864,7 @@ def build_results(job_dir: Path) -> dict:
 
 # --- live monitoring --------------------------------------------------------
 
-# The steps run_case.sh logs to log.<step>, in the order it runs them.
+# The steps run_openfoam.sh logs to log.<step>, in the order it runs them.
 STAGES = [
     "geo", "gmsh", "foam", "gmshToFoam", "boundary", "checkMesh", "decomposePar",
     "solver", "reconstruct", "vtk", "render", "results",

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs one CFD case on the simulation work station. Install at WS_CFD_SCRIPT.
 #
-# Usage: run_case.sh <job_dir>
+# Usage: run_openfoam.sh <job_dir>
 #   <job_dir>/case.json    inputs written by the backend (see CfdCase)
 #   <job_dir>/status.json  kept up to date here; the backend polls it
 #

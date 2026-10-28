@@ -3,7 +3,7 @@
 CFD runs take minutes to hours, so jobs are fire-and-poll rather than awaited:
 
 1. The backend creates `{WS_WORKDIR}/jobs/{job_id}/case.json` on the work station.
-2. It launches `{WS_CFD_SCRIPT} {job_dir}` detached (see `workstation/run_case.sh`).
+2. It launches `{WS_CFD_SCRIPT} {job_dir}` detached (see `workstation/run_openfoam.sh`).
 3. That script keeps `{job_dir}/status.json` up to date:
    `{"status": "running" | "completed" | "failed", "result": {...}, "error": "..."}`.
 4. Status checks read `status.json` and mirror it into the `simulations` collection.
@@ -243,11 +243,11 @@ class SimulationService:
         if not SAFE_JOB_ID.match(job_id):
             logger.warning("not removing the files of cfd job %r: unusual id", job_id)
             return
-        # run_case.sh leads its own process group (setsid at launch), so one signal to the
+        # run_openfoam.sh leads its own process group (setsid at launch), so one signal to the
         # group stops the solver and everything else the job started. The [r] keeps pgrep
         # from matching this very command.
         command = (
-            f"pid=$(pgrep -f '[r]un_case.sh .*{job_id}' | head -n 1); "
+            f"pid=$(pgrep -f '[r]un_openfoam.sh .*{job_id}' | head -n 1); "
             'if [ -n "$pid" ]; then kill -TERM -- "-$pid"; sleep 2; fi; '
             f"rm -rf -- {shlex.quote(self._job_dir(job_id))}"
         )
