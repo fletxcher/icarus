@@ -61,6 +61,8 @@ class CommandRunner(Protocol):
 
     async def write_file(self, path: str, content: str) -> None: ...
 
+    async def write_bytes(self, path: str, content: bytes) -> None: ...
+
     async def read_file(self, path: str) -> str:
         """Raises FileNotFoundError if the file doesn't exist."""
         ...
@@ -101,6 +103,9 @@ class LocalRunner:
 
     async def write_file(self, path: str, content: str) -> None:
         await asyncio.to_thread(Path(path).write_text, content)
+
+    async def write_bytes(self, path: str, content: bytes) -> None:
+        await asyncio.to_thread(Path(path).write_bytes, content)
 
     async def read_file(self, path: str) -> str:
         return await asyncio.to_thread(Path(path).read_text)
@@ -218,6 +223,11 @@ class SSHRunner:
     async def write_file(self, path: str, content: str) -> None:
         connection = await self._connect()
         async with connection.start_sftp_client() as sftp, sftp.open(path, "w") as file:
+            await file.write(content)
+
+    async def write_bytes(self, path: str, content: bytes) -> None:
+        connection = await self._connect()
+        async with connection.start_sftp_client() as sftp, sftp.open(path, "wb") as file:
             await file.write(content)
 
     async def read_file(self, path: str) -> str:

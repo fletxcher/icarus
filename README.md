@@ -111,6 +111,7 @@ backend/src/api/
     router.py         /api/simulations
 workstation/setup.sh             Prepares (or cleans up) a fresh simulation work station
 workstation/run_openfoam.sh          Placeholder CFD entrypoint, installed on the work station by setup.sh
+workstation/run_fea.sh, fea_case.py  FEA entrypoint and its case builder (mesh, CalculiX deck, results)
 ```
 
 ### API
@@ -232,12 +233,52 @@ Tools are only given to the model when they can actually run, checked at startup
 |---|---|
 | `create_plot` | always |
 | `run_xfoil_polar`, `search_naca4_airfoils` | `XFOIL_RUNNER=local` with `xfoil` (and `xvfb-run` unless `XFOIL_DISPLAY=none`) installed, or `XFOIL_RUNNER=ws` with a work station |
-| `submit_cfd_simulation`, `get_simulation_status` | a work station is configured (`WS_HOST`) |
+| `submit_cfd_simulation`, `submit_fea_simulation`, `get_simulation_status` | a work station is configured (`WS_HOST`, or the user's own) |
 
 The system prompt lists the available tools and names each missing capability with the
 reason, and tells the model to say plainly when something isn't available instead of
 attempting it or inventing tools. The startup log shows which tools are active and why
 others aren't. A call to a tool that doesn't exist comes back to the model as an error.
+
+### FEA on an uploaded solid
+
+`submit_fea_simulation` analyses an STL the user attached (the model takes the file's id from
+the attachment, which is shown to it with the file's summary; only the user's own files work).
+The job is `case.json` plus `geometry.stl` on the work station, run by `run_fea.sh`:
+
+1. **Mesh** (`fea_case.py mesh`): repairs the surface (zero-area and doubled triangles go; open or
+   non-manifold edges are reported) and meshes it with [fTetWild](https://github.com/wildmeshing/fTetWild),
+   which copes with the self-intersections common in 3D-print STLs that gmsh and TetGen reject.
+   The tetrahedra become second-order (C3D10) elements. The mesh is coarsened until it fits the
+   solver (`ICARUS_FEA_MAX_ELEMENTS`, default 70,000), and says so.
+2. **Deck** (`fea_case.py deck`): the part is clamped on its lowest or highest face along an axis;
+   loads are rotation (`CENTRIF`), a uniform surface pressure and, with a gas temperature, convection
+   on the whole surface (a steady coupled temperature and stress analysis). Materials (Inconel 718,
+   Ti-6Al-4V, aluminium 7075, steel 4340) have typical handbook properties that vary with temperature.
+3. **Solve** with CalculiX (`run_calculix.sh`), plus a second run for natural frequencies if asked
+   (stiffened by the rotation).
+4. **Results** into `status.json`: displacement, peak and typical von Mises stress, safety factor on
+   yield (with the temperature-dependent yield strength), temperatures, frequencies against engine
+   orders, mass, and warnings (service temperature, yielding, resonance, a coarse mesh).
+
+**3D views.** `fea_case.py results` also writes `view.json`: the part's outside (triangles of the
+mesh's corner nodes, wound outward) with the von Mises stress (averaged to the nodes), displacement
+vectors and, with a gas temperature, the temperature on it, as base64 float32 arrays. The job's page
+draws it with three.js (`components/chat/model-viewer.tsx`): drag to turn, scroll to zoom, choose the
+field and colour palette, exaggerate the deformation, and switch between a colour range that
+leaves out the top 2% (a clamp's stress spike would otherwise set the scale) and the full one. While
+a job runs, the page shows the uploaded STL itself, and any attached `.stl` has a 3D button that opens
+it (`GET /api/files/{id}/original` serves the bytes back to their owner). CFD jobs keep their rendered
+images and flow video.
+
+The support is the solid's own extreme face along the chosen axis, taken from the STL rather than
+the mesh (the mesher may move the surface by a fraction of a millimetre), and a job is refused if
+no flat face lies there. A displacement over a quarter of the part's size is flagged as not believable.
+
+Stress at the clamp is an artefact of clamping, so results are reported both anywhere and away from it
+(more than 10% of the part's length from the support). Creep, fatigue, contact and a real support
+(a dovetail, say) aren't modelled. The mesher needs numpy, pyvista and pytetwild, which `setup.sh`
+puts in `~/icarus/venv`. FEA jobs appear in the simulations list and have their own page.
 
 ### Plots
 
@@ -272,11 +313,22 @@ title. It costs one extra model request per new chat; `AUTO_TITLE=false` turns i
 ### Attachments
 
 The **+** button in the composer (or dropping files onto it) uploads files right away;
-they're sent with the next message. Only text files are accepted for now (airfoil
-`.dat` coordinates, `.csv`, `.txt`, `.json`, ...), up to `FILE_MAX_BYTES` (1 MB) each and
-10 per message. Their contents are added to the user's message in the model's context,
-cut at `FILE_CONTEXT_MAX_CHARS` (20,000) characters per file. Files are stored in the
-`files` collection and deleted with their chat.
+they're sent with the next message, 10 at most. What reaches the model depends on the file:
+
+| File | The model gets | Limit |
+|---|---|---|
+| Text: airfoil `.dat`, `.csv`, `.txt`, `.json`, ... | The contents (a `.csv` also gets a one-line summary of its rows and columns) | `FILE_MAX_BYTES` (1 MB) |
+| `.stl` (binary or ASCII) | A measured summary: triangles, vertices, bounding box, surface area, volume, whether it's watertight | `FILE_MAX_BINARY_BYTES` (15 MB) |
+| `.obj` | Vertex, face and triangle counts, bounding box, object and material names | same |
+| `.step`, `.stp` | Name, schema, creating program, products, face and solid counts, length unit, approximate bounding box | same |
+| `.pdf` | The extracted text of the first 60 pages (a scanned PDF has none, which the model is told) | same |
+
+Geometry files aren't pasted into the prompt (a mesh is far too large to read); the summary says
+so, and the original bytes are stored with the file. Units aren't stored in STL and OBJ files, so the
+summary says that too. Files are checked by content as well as by name (a `.stl` that isn't an STL,
+or a password-protected PDF, is refused with the reason). Text is cut at `FILE_CONTEXT_MAX_CHARS`
+(20,000) characters per file in the model's context. The 15 MB limit comes from MongoDB's 16 MB
+document size. Files are stored in the `files` collection and deleted with their chat.
 
 ### Models and reasoning
 

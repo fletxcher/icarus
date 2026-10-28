@@ -19,7 +19,14 @@ HOST_KEY_TIMEOUT_S = 10.0
 COMMAND_TIMEOUT_S = 30.0
 # The runner scripts shipped in the repository, put on the machine at connection time.
 WS_SOURCE = Path(__file__).resolve().parents[4] / "workstation"
-SCRIPTS = ["run_openfoam.sh", "cfd_case.py", "render_video.py", "run_calculix.sh"]
+SCRIPTS = [
+    "run_openfoam.sh",
+    "cfd_case.py",
+    "render_video.py",
+    "run_calculix.sh",
+    "run_fea.sh",
+    "fea_case.py",
+]
 SETUP_SCRIPT = "setup.sh"
 
 TOOLS_SCRIPT = r"""
@@ -198,7 +205,12 @@ async def run_checks(runner: SSHRunner) -> list[Check]:
     target = runner.target
     await install_scripts(runner, target.workdir)
     result = await runner.run(f"bash -c {shlex.quote(TOOLS_SCRIPT)}", timeout_s=COMMAND_TIMEOUT_S)
-    present: dict[str, bool] = {}
+    # The Python environment the FEA mesher runs in (setup.sh makes it next to bin/).
+    mesher = await runner.run(
+        f"{shlex.quote(target.workdir)}/venv/bin/python -c 'import numpy, pyvista, pytetwild'",
+        timeout_s=COMMAND_TIMEOUT_S,
+    )
+    present: dict[str, bool] = {"fea_mesher": mesher.ok}
     for line in result.stdout.split():
         name, _, value = line.partition("=")
         present[name] = value == "1"
@@ -222,7 +234,7 @@ async def run_checks(runner: SSHRunner) -> list[Check]:
     for check_id, label, names in [
         ("xfoil", "XFOIL", ("xfoil", "xvfb-run")),
         ("cfd", "OpenFOAM and gmsh", ("openfoam", "gmsh", "python3")),
-        ("fea", "CalculiX", ("ccx",)),
+        ("fea", "CalculiX and the FEA mesher", ("ccx", "fea_mesher")),
         ("video", "Flow videos (ParaView, ffmpeg)", ("pvbatch", "ffmpeg", "xvfb-run")),
     ]:
         ok, detail = tools(*names)

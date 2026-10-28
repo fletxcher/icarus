@@ -1,12 +1,16 @@
-"""CFD jobs on the simulation work station.
+"""CFD and FEA jobs on the simulation work station.
 
-CFD runs take minutes to hours, so jobs are fire-and-poll rather than awaited:
+Simulations take minutes to hours, so jobs are fire-and-poll rather than awaited:
 
-1. The backend creates `{WS_WORKDIR}/jobs/{job_id}/case.json` on the work station.
-2. It launches `{WS_CFD_SCRIPT} {job_dir}` detached (see `workstation/run_openfoam.sh`).
+1. The backend creates `{WS_WORKDIR}/jobs/{job_id}/case.json` on the work station (for an FEA
+   job also `geometry.stl`, the uploaded solid).
+2. It launches `{WS_CFD_SCRIPT} {job_dir}` detached (see `workstation/run_openfoam.sh`), or
+   `run_fea.sh` next to it for FEA.
 3. That script keeps `{job_dir}/status.json` up to date:
    `{"status": "running" | "completed" | "failed", "result": {...}, "error": "..."}`.
 4. Status checks read `status.json` and mirror it into the `simulations` collection.
+
+`cfd_case.py` and `fea_case.py` next to the run scripts answer the monitor's questions.
 """
 
 import json
@@ -22,8 +26,17 @@ from pymongo import ReturnDocument
 from pymongo.asynchronous.database import AsyncDatabase
 
 from ..catalog import SIMULATIONS
+from ..files.repository import FileRepository
 from .runner import CommandRunner
-from .schemas import TERMINAL_STATUSES, CfdCase, Simulation, SimulationSummary, Usage, UsagePeriod
+from .schemas import (
+    TERMINAL_STATUSES,
+    CfdCase,
+    FeaCase,
+    Simulation,
+    SimulationSummary,
+    Usage,
+    UsagePeriod,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +44,14 @@ LAUNCH_TIMEOUT_S = 30.0
 MONITOR_TIMEOUT_S = 20.0
 MAX_LISTED = 50  # running jobs in the list
 RECENT_FINISHED = 10  # finished jobs kept in the list
-# Files a finished job can serve (made by workstation/render_video.py), with their media types.
+# Files a finished job can serve (made by workstation/render_video.py and fea_case.py), with
+# their media types.
 JOB_FILES = {
     "flow.mp4": "video/mp4",
     "velocity.png": "image/png",
     "pressure.png": "image/png",
+    # An FEA job's surface with the stress, displacement and temperature on it (fea_case.py).
+    "view.json": "application/json",
 }
 
 
@@ -47,8 +63,12 @@ class MonitorError(Exception):
     """The work station couldn't report on a job (unreachable, or the job's files are gone)."""
 
 
+class GeometryUnavailable(Exception):
+    """The file an FEA job names isn't one of the user's uploaded STL files."""
+
+
 class SimulationService:
-    """One user's CFD jobs, run on the work station `runner` reaches."""
+    """One user's CFD and FEA jobs, run on the work station `runner` reaches."""
 
     def __init__(
         self,
@@ -58,17 +78,47 @@ class SimulationService:
         user_id: str,
         workdir: str,
         script: str,
+        files: FileRepository | None = None,
     ):
         self._collection = db[SIMULATIONS]
         self._user_id = user_id
         self._runner = runner
         self._workdir = workdir
         self._script = script
+        self._files = files
+
+    def _tool(self, kind: str, name: str) -> str:
+        """Path of a script that is installed next to the CFD run script."""
+        prefix = "fea" if kind == "fea" else "cfd"
+        return posixpath.join(posixpath.dirname(self._script), name.format(kind=prefix))
 
     def _job_dir(self, job_id: str) -> str:
         return f"{self._workdir}/jobs/{job_id}"
 
-    async def submit(self, case: CfdCase, *, thread_id: str | None = None) -> Simulation:
+    async def _geometry(self, case: FeaCase) -> tuple[FeaCase, bytes]:
+        """The uploaded solid an FEA case names, and the case with the file's name filled in."""
+        found = (
+            await self._files.original(case.geometry_file_id, self._user_id)
+            if self._files
+            else None
+        )
+        if found is None:
+            raise GeometryUnavailable(
+                f"no uploaded geometry has the id {case.geometry_file_id!r}; use the id shown "
+                "with the attached file"
+            )
+        stored, data = found
+        if stored.kind != "stl":
+            raise GeometryUnavailable(
+                f"{stored.name} is a {stored.kind.upper()} file; FEA needs an STL of a closed solid"
+            )
+        return case.model_copy(update={"geometry_name": stored.name}), data
+
+    async def submit(self, case: CfdCase | FeaCase, *, thread_id: str | None = None) -> Simulation:
+        """Starts a job. Raises GeometryUnavailable for an FEA case whose file isn't usable."""
+        geometry = None
+        if isinstance(case, FeaCase):
+            case, geometry = await self._geometry(case)
         now = datetime.now(UTC)
         doc = {
             "_id": str(uuid4()),
@@ -80,32 +130,36 @@ class SimulationService:
             "updated_at": now,
         }
         await self._collection.insert_one(doc)
-        logger.info("cfd job %s queued: %s", doc["_id"], case.model_dump())
+        logger.info("%s job %s queued: %s", case.kind, doc["_id"], case.model_dump())
 
         job_dir = self._job_dir(doc["_id"])
+        script = self._tool("fea", "run_{kind}.sh") if case.kind == "fea" else self._script
         try:
             await self._runner.run(f"mkdir -p {shlex.quote(job_dir)}")
             await self._runner.write_file(f"{job_dir}/case.json", case.model_dump_json(indent=2))
+            if geometry is not None:
+                await self._runner.write_bytes(f"{job_dir}/geometry.stl", geometry)
             # The job must be detached from this command: the command returns when its output
             # streams close, so anything still holding them (a backgrounded `cd && ...` list,
             # say) would keep the submission waiting until the whole simulation is done.
             launch = await self._runner.run(
-                f"cd {shlex.quote(job_dir)} && {{ setsid nohup {shlex.quote(self._script)} "
+                f"cd {shlex.quote(job_dir)} && {{ setsid nohup {shlex.quote(script)} "
                 f"{shlex.quote(job_dir)} > run.log 2>&1 < /dev/null & }}",
                 timeout_s=LAUNCH_TIMEOUT_S,
             )
             if not launch.ok:
                 raise RuntimeError(launch.stderr.strip() or "launch failed")
         except Exception as error:
-            logger.exception("cfd job %s failed to launch", doc["_id"])
+            logger.exception("%s job %s failed to launch", case.kind, doc["_id"])
             return await self._update(doc["_id"], status="failed", error=f"submit failed: {error}")
 
-        logger.info("cfd job %s launched on work station in %s", doc["_id"], job_dir)
+        logger.info("%s job %s launched on work station in %s", case.kind, doc["_id"], job_dir)
         return await self._update(doc["_id"], status="running")
 
-    async def _monitor(self, *args: str) -> dict[str, Any]:
-        """Runs workstation/cfd_case.py (installed next to the run script) and returns its JSON."""
-        tool = posixpath.join(posixpath.dirname(self._script), "cfd_case.py")
+    async def _monitor(self, *args: str, kind: str = "cfd") -> dict[str, Any]:
+        """Runs workstation/cfd_case.py or fea_case.py (installed next to the run scripts) and
+        returns its JSON."""
+        tool = self._tool(kind, "{kind}_case.py")
         command = " ".join(["python3", *map(shlex.quote, (tool, *args))])
         try:
             result = await self._runner.run(command, timeout_s=MONITOR_TIMEOUT_S)
@@ -120,16 +174,16 @@ class SimulationService:
         except ValueError as error:
             raise MonitorError(f"unreadable monitor output: {error}") from error
 
-    async def info(self, job_id: str) -> dict[str, Any]:
+    async def info(self, job_id: str, kind: str = "cfd") -> dict[str, Any]:
         """Static facts about the job: case, solver, mesh quality, dictionaries."""
-        return await self._monitor("info", self._job_dir(job_id))
+        return await self._monitor("info", self._job_dir(job_id), kind=kind)
 
     async def progress(
-        self, job_id: str, *, log_offset: int, coeff_offset: int, final: bool
+        self, job_id: str, *, log_offset: int, coeff_offset: int, final: bool, kind: str = "cfd"
     ) -> dict[str, Any]:
         """What the run did since the given offsets (residuals, coefficients, stage, ETA)."""
         args = ["progress", self._job_dir(job_id), str(log_offset), str(coeff_offset)]
-        return await self._monitor(*args, *(["final"] if final else []))
+        return await self._monitor(*args, *(["final"] if final else []), kind=kind)
 
     async def list_summaries(self, finished: int = RECENT_FINISHED) -> list[SimulationSummary]:
         """Running jobs with their progress, then the most recently finished ones."""
@@ -145,13 +199,14 @@ class SimulationService:
             .to_list(MAX_LISTED)
         )
         progress: dict[str, dict[str, Any]] = {}
-        if active_docs:
+        for kind in ("cfd", "fea"):
+            ids = [doc["_id"] for doc in active_docs if doc["case"].get("kind", "cfd") == kind]
+            if not ids:
+                continue
             try:
-                progress = await self._monitor(
-                    "summary", f"{self._workdir}/jobs", *(doc["_id"] for doc in active_docs)
-                )
+                progress |= await self._monitor("summary", f"{self._workdir}/jobs", *ids, kind=kind)
             except MonitorError as error:
-                logger.warning("job list: no progress from the work station (%s)", error)
+                logger.warning("job list: no %s progress from the work station (%s)", kind, error)
         for doc in active_docs:
             # A job that ended since the last look: record its result before listing it.
             if progress.get(doc["_id"], {}).get("status") in TERMINAL_STATUSES:
@@ -199,10 +254,18 @@ class SimulationService:
             "month": (now - timedelta(days=30), UsagePeriod()),
             "all_time": (None, UsagePeriod()),
         }
-        projection = {"case.shape": 1, "status": 1, "created_at": 1, "updated_at": 1}
+        projection = {
+            "case.shape": 1,
+            "case.kind": 1,
+            "status": 1,
+            "created_at": 1,
+            "updated_at": 1,
+        }
         async for doc in self._collection.find({"user_id": self._user_id}, projection):
             created = doc["created_at"].replace(tzinfo=UTC)
-            shape = doc.get("case", {}).get("shape") or "airfoil"
+            case = doc.get("case", {})
+            # Older jobs have no shape and are all airfoils; an FEA job is counted as "fea".
+            shape = "fea" if case.get("kind") == "fea" else case.get("shape") or "airfoil"
             for since, period in periods.values():
                 if since is not None and created < since:
                     continue
@@ -247,7 +310,7 @@ class SimulationService:
         # group stops the solver and everything else the job started. The [r] keeps pgrep
         # from matching this very command.
         command = (
-            f"pid=$(pgrep -f '[r]un_openfoam.sh .*{job_id}' | head -n 1); "
+            f"pid=$(pgrep -f '[r]un_(openfoam|fea).sh .*{job_id}' | head -n 1); "
             'if [ -n "$pid" ]; then kill -TERM -- "-$pid"; sleep 2; fi; '
             f"rm -rf -- {shlex.quote(self._job_dir(job_id))}"
         )

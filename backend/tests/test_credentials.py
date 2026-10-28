@@ -239,7 +239,13 @@ def test_a_work_station_is_connected_checked_and_saved(client: TestClient, stati
     assert "setup.sh --install" in checks["install"]["detail"]
     # The runner scripts and the setup script were put on the machine.
     setup = station.root / ssh_station.HOME.lstrip("/") / "icarus" / "setup"
-    assert {path.name for path in setup.iterdir()} >= {"run_openfoam.sh", "cfd_case.py", "setup.sh"}
+    assert {path.name for path in setup.iterdir()} >= {
+        "run_openfoam.sh",
+        "cfd_case.py",
+        "run_fea.sh",
+        "fea_case.py",
+        "setup.sh",
+    }
 
 
 def test_the_private_key_is_stored_encrypted_and_never_returned(client: TestClient, station):

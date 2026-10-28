@@ -5,7 +5,7 @@ import shutil
 from ..config import Settings
 
 XFOIL_CAPABILITY = "XFOIL airfoil analysis and airfoil search"
-CFD_CAPABILITY = "CFD simulations"
+CFD_CAPABILITY = "CFD and FEA simulations"
 
 NO_WORKSTATION = "no simulation work station is set up (the user can add one in Settings)"
 

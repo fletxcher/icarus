@@ -8,8 +8,8 @@ from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, BeforeValidator, Field
 
 from ..compute.plots import describe_figure, validate_figure
-from ..compute.schemas import CfdCase, Simulation
-from ..compute.simulations import SimulationService
+from ..compute.schemas import CfdCase, FeaCase, Simulation
+from ..compute.simulations import GeometryUnavailable, SimulationService
 from ..compute.xfoil import Polar, PolarRequest, XfoilService
 
 TOP_CANDIDATES = 5
@@ -141,6 +141,21 @@ def simulation_tools(simulations: SimulationService) -> list[BaseTool]:
             )
         return text
 
+    async def submit_fea_simulation(config: RunnableConfig, **fields) -> str:
+        thread_id = config.get("configurable", {}).get("thread_id")
+        try:
+            simulation = await simulations.submit(FeaCase(**fields), thread_id=thread_id)
+        except GeometryUnavailable as problem:
+            return f"Not started: {problem}."
+        text = _format_simulation(simulation)
+        if simulation.status == "running":
+            text += (
+                "\n\nThe analysis is now running in the background (meshing the solid, then "
+                "solving). Tell the user the job id and what was submitted, then end your turn: "
+                "do not wait for it or call get_simulation_status again until the user asks."
+            )
+        return text
+
     async def get_simulation_status(job_id: str) -> str:
         simulation = await simulations.get(job_id)
         return _format_simulation(simulation) if simulation else f"No job with id {job_id}."
@@ -162,11 +177,30 @@ def simulation_tools(simulations: SimulationService) -> list[BaseTool]:
             args_schema=CfdCase,
         ),
         StructuredTool.from_function(
+            coroutine=submit_fea_simulation,
+            name="submit_fea_simulation",
+            description=(
+                "Start a finite-element (CalculiX) analysis of a solid the user uploaded as an "
+                "STL file: stress, deflection and optionally natural frequencies of the part, "
+                "under rotation (centrifugal load), pressure and, if a gas temperature is given, "
+                "heating (a coupled thermal-stress analysis). The part is meshed with tetrahedra "
+                "and clamped on one end; materials: Inconel 718, Ti-6Al-4V, aluminium 7075 and "
+                "steel 4340. Take geometry_file_id from the id shown with the attached file, and "
+                "ask the user for anything that matters and isn't clear (which end is fixed, the "
+                "STL's units, the rotation axis, temperatures). Runs for minutes; returns a job "
+                "id to check with get_simulation_status. Results include peak and typical von "
+                "Mises stress (judge the part by the values away from the support: stress at the "
+                "clamp is an artefact), safety factor against yield, and warnings that must be "
+                "passed on to the user."
+            ),
+            args_schema=FeaCase,
+        ),
+        StructuredTool.from_function(
             coroutine=get_simulation_status,
             name="get_simulation_status",
             description=(
-                "Check the status and results of a CFD simulation job once, when the user asks "
-                "about it. Never call it repeatedly to wait for a job to finish."
+                "Check the status and results of a CFD or FEA simulation job once, when the user "
+                "asks about it. Never call it repeatedly to wait for a job to finish."
             ),
             args_schema=SimulationLookup,
         ),

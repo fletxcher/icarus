@@ -31,108 +31,233 @@
           "bsonType": "bool"
         },
         "case": {
-          "bsonType": "object",
-          "additionalProperties": false,
-          "required": [
-            "reynolds",
-            "mach",
-            "mesh"
-          ],
-          "properties": {
-            "shape": {
-              "bsonType": "string",
-              "enum": [
-                "airfoil",
-                "cylinder",
-                "ellipse",
-                "wedge",
-                "rectangle"
-              ]
-            },
-            "naca": {
-              "bsonType": [
-                "string",
-                "null"
+          "anyOf": [
+            {
+              "bsonType": "object",
+              "additionalProperties": false,
+              "required": [
+                "reynolds",
+                "mach",
+                "mesh"
               ],
-              "pattern": "^\\d{4,5}$"
+              "properties": {
+                "kind": {
+                  "bsonType": "string",
+                  "enum": [
+                    "cfd"
+                  ]
+                },
+                "shape": {
+                  "bsonType": "string",
+                  "enum": [
+                    "airfoil",
+                    "cylinder",
+                    "ellipse",
+                    "wedge",
+                    "rectangle"
+                  ]
+                },
+                "naca": {
+                  "bsonType": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^\\d{4,5}$"
+                },
+                "aspect_ratio": {
+                  "bsonType": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 1,
+                  "maximum": 20
+                },
+                "half_angle": {
+                  "bsonType": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 5,
+                  "maximum": 60
+                },
+                "alpha": {
+                  "bsonType": "number",
+                  "minimum": -30,
+                  "maximum": 30
+                },
+                "reynolds": {
+                  "bsonType": "number",
+                  "minimum": 0,
+                  "exclusiveMinimum": true
+                },
+                "mach": {
+                  "bsonType": "number",
+                  "minimum": 0,
+                  "maximum": 5,
+                  "exclusiveMaximum": true
+                },
+                "mesh": {
+                  "bsonType": "string",
+                  "enum": [
+                    "coarse",
+                    "medium",
+                    "fine"
+                  ]
+                },
+                "wall_type": {
+                  "bsonType": "string",
+                  "enum": [
+                    "no_slip",
+                    "slip",
+                    "moving",
+                    "rotating"
+                  ]
+                },
+                "wall_velocity_x": {
+                  "bsonType": "number"
+                },
+                "wall_velocity_y": {
+                  "bsonType": "number"
+                },
+                "spin_ratio": {
+                  "bsonType": "number",
+                  "minimum": -10,
+                  "maximum": 10
+                },
+                "roughness_height": {
+                  "bsonType": "number",
+                  "minimum": 0,
+                  "maximum": 0.05
+                },
+                "regime": {
+                  "bsonType": "string",
+                  "enum": [
+                    "auto",
+                    "steady",
+                    "transient"
+                  ]
+                },
+                "video": {
+                  "bsonType": "bool"
+                }
+              }
             },
-            "aspect_ratio": {
-              "bsonType": [
-                "number",
-                "null"
+            {
+              "bsonType": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "geometry_file_id",
+                "support_axis",
+                "support_side"
               ],
-              "minimum": 1,
-              "maximum": 20
-            },
-            "half_angle": {
-              "bsonType": [
-                "number",
-                "null"
-              ],
-              "minimum": 5,
-              "maximum": 60
-            },
-            "alpha": {
-              "bsonType": "number",
-              "minimum": -30,
-              "maximum": 30
-            },
-            "reynolds": {
-              "bsonType": "number",
-              "minimum": 0,
-              "exclusiveMinimum": true
-            },
-            "mach": {
-              "bsonType": "number",
-              "minimum": 0,
-              "maximum": 5,
-              "exclusiveMaximum": true
-            },
-            "mesh": {
-              "bsonType": "string",
-              "enum": [
-                "coarse",
-                "medium",
-                "fine"
-              ]
-            },
-            "wall_type": {
-              "bsonType": "string",
-              "enum": [
-                "no_slip",
-                "slip",
-                "moving",
-                "rotating"
-              ]
-            },
-            "wall_velocity_x": {
-              "bsonType": "number"
-            },
-            "wall_velocity_y": {
-              "bsonType": "number"
-            },
-            "spin_ratio": {
-              "bsonType": "number",
-              "minimum": -10,
-              "maximum": 10
-            },
-            "roughness_height": {
-              "bsonType": "number",
-              "minimum": 0,
-              "maximum": 0.05
-            },
-            "regime": {
-              "bsonType": "string",
-              "enum": [
-                "auto",
-                "steady",
-                "transient"
-              ]
-            },
-            "video": {
-              "bsonType": "bool"
+              "properties": {
+                "kind": {
+                  "bsonType": "string",
+                  "enum": [
+                    "fea"
+                  ]
+                },
+                "geometry_file_id": {
+                  "bsonType": "string"
+                },
+                "geometry_name": {
+                  "bsonType": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "units": {
+                  "bsonType": "string",
+                  "enum": [
+                    "mm",
+                    "m",
+                    "in"
+                  ]
+                },
+                "material": {
+                  "bsonType": "string",
+                  "enum": [
+                    "inconel718",
+                    "ti6al4v",
+                    "aluminium7075",
+                    "steel4340"
+                  ]
+                },
+                "mesh": {
+                  "bsonType": "string",
+                  "enum": [
+                    "coarse",
+                    "medium",
+                    "fine"
+                  ]
+                },
+                "support_axis": {
+                  "bsonType": "string",
+                  "enum": [
+                    "x",
+                    "y",
+                    "z"
+                  ]
+                },
+                "support_side": {
+                  "bsonType": "string",
+                  "enum": [
+                    "min",
+                    "max"
+                  ]
+                },
+                "spin_rpm": {
+                  "bsonType": "number",
+                  "minimum": 0,
+                  "maximum": 200000
+                },
+                "spin_axis_origin": {
+                  "bsonType": "array",
+                  "items": {
+                    "bsonType": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                "spin_axis_direction": {
+                  "bsonType": "array",
+                  "items": {
+                    "bsonType": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                "pressure_mpa": {
+                  "bsonType": "number",
+                  "minimum": -100,
+                  "maximum": 100
+                },
+                "gas_temperature_c": {
+                  "bsonType": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": -50,
+                  "maximum": 1500
+                },
+                "htc_w_m2k": {
+                  "bsonType": "number",
+                  "minimum": 0,
+                  "exclusiveMinimum": true,
+                  "maximum": 50000
+                },
+                "base_temperature_c": {
+                  "bsonType": "number",
+                  "minimum": -50,
+                  "maximum": 1500
+                },
+                "modal": {
+                  "bsonType": "bool"
+                }
+              }
             }
-          }
+          ]
         },
         "status": {
           "bsonType": "string",

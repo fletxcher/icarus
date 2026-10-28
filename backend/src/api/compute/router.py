@@ -57,9 +57,9 @@ async def update_simulation(
 @router.get("/{job_id}/info")
 async def get_simulation_info(job_id: str, simulations: Simulations) -> dict[str, Any]:
     """Static facts for the monitor: case, solver, mesh quality and the OpenFOAM dictionaries."""
-    await get_simulation(job_id, simulations)
+    simulation = await get_simulation(job_id, simulations)
     try:
-        return await simulations.info(job_id)
+        return await simulations.info(job_id, kind=simulation.case.kind)
     except MonitorError as error:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(error)) from error
 
@@ -79,6 +79,7 @@ async def get_simulation_progress(
             log_offset=log_offset,
             coeff_offset=coeff_offset,
             final=simulation.status in TERMINAL_STATUSES,
+            kind=simulation.case.kind,
         )
     except MonitorError as error:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(error)) from error

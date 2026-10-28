@@ -12,7 +12,9 @@
 #
 # CFD runs OpenFOAM (ESI release, OPENFOAM_PACKAGE) with gmsh meshes. If the work station
 # doesn't have the OpenFOAM apt repository yet, --install adds the official one.
-# CalculiX (https://www.calculix.de) comes from the distribution's calculix-ccx package.
+# CalculiX (https://www.calculix.de) comes from the distribution's calculix-ccx package. Meshing
+# an uploaded solid for CalculiX needs Python packages (numpy, pyvista, pytetwild) that --install
+# puts in a virtual environment, $ICARUS_HOME/venv, so the system Python stays untouched.
 # Assumes a Debian/Ubuntu work station.
 #
 # Both actions check before they act: --install skips every tool that is already there (as an
@@ -26,11 +28,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Packages installed by --install, so --uninstall removes only those.
 MANIFEST="$ICARUS_HOME/.setup-packages"
 OPENFOAM_PACKAGE="${OPENFOAM_PACKAGE:-openfoam2512}"
-PACKAGES=(xfoil xvfb xauth gmsh calculix-ccx paraview ffmpeg "$OPENFOAM_PACKAGE")
+PACKAGES=(xfoil xvfb xauth gmsh calculix-ccx paraview ffmpeg python3-venv "$OPENFOAM_PACKAGE")
+VENV="$ICARUS_HOME/venv"
+PYTHON_PACKAGES=(numpy pyvista pytetwild)
 # The command each package provides: a tool already on the PATH needs no package.
 declare -A PROVIDES=([xfoil]=xfoil [xvfb]=xvfb-run [xauth]=xauth [gmsh]=gmsh [calculix-ccx]=ccx [paraview]=pvbatch [ffmpeg]=ffmpeg)
+# python3-venv has no command; it's there once a virtual environment can be made.
+venv_possible() { python3 -c "import ensurepip, venv" 2> /dev/null; }
 # Files this script puts in $ICARUS_HOME/bin (and the name an earlier version used).
-RUNNER_FILES=(run_openfoam.sh cfd_case.py run_calculix.sh render_video.py)
+RUNNER_FILES=(run_openfoam.sh cfd_case.py run_calculix.sh render_video.py run_fea.sh fea_case.py)
 STALE_FILES=(run_case.sh)
 
 usage() {
@@ -68,6 +74,10 @@ openfoam_bashrc() {
 # Whether a package's job is already done: it's installed, or its command is on the PATH.
 already_provided() {
   local package="$1"
+  if [[ "$package" == "python3-venv" ]]; then
+    is_installed "$package" || venv_possible
+    return
+  fi
   if [[ "$package" == "$OPENFOAM_PACKAGE" ]]; then
     is_installed "$package" || [[ -n "$(openfoam_bashrc)" ]]
     return
@@ -195,6 +205,35 @@ check_openfoam() {
   log "OpenFOAM check passed ($(basename "$(dirname "$(dirname "$bashrc")")"), $bashrc)"
 }
 
+# The Python packages the FEA mesher needs, in a virtual environment of their own. Only what's
+# missing is installed, so running this again changes nothing.
+ensure_python_environment() {
+  if [[ ! -x "$VENV/bin/python" ]]; then
+    log "Creating the Python environment $VENV"
+    python3 -m venv "$VENV"
+    echo "$VENV" >> "$MANIFEST.venv"
+  fi
+  local missing=() package
+  for package in "${PYTHON_PACKAGES[@]}"; do
+    "$VENV/bin/python" -c "import ${package}" 2> /dev/null || missing+=("$package")
+  done
+  if ((${#missing[@]})); then
+    log "Installing into the Python environment: ${missing[*]}"
+    "$VENV/bin/pip" install -q "${missing[@]}"
+  else
+    log "Python environment already has: ${PYTHON_PACKAGES[*]}"
+  fi
+}
+
+check_fea() {
+  if "$VENV/bin/python" -c "import numpy, pyvista, pytetwild" 2> /dev/null; then
+    log "FEA mesher check passed (numpy, pyvista, pytetwild in $VENV)"
+  else
+    log "FEA mesher check FAILED: the Python environment $VENV is missing numpy, pyvista or pytetwild"
+    return 1
+  fi
+}
+
 do_install() {
   if ! command -v apt-get > /dev/null; then
     echo "This script supports Debian/Ubuntu (apt) only." >&2
@@ -224,6 +263,7 @@ do_install() {
   for file in "${RUNNER_FILES[@]}"; do
     install_file "$SCRIPT_DIR/$file" "$ICARUS_HOME/bin/$file"
   done
+  ensure_python_environment
   for file in "${STALE_FILES[@]}"; do
     if [[ -f "$ICARUS_HOME/bin/$file" ]]; then
       rm -f "$ICARUS_HOME/bin/$file"
@@ -234,6 +274,7 @@ do_install() {
   check_xfoil
   check_openfoam
   check_calculix
+  check_fea
   check_video
 
   cat <<EOF
@@ -259,6 +300,15 @@ do_uninstall() {
   ((removed)) && log "Removed $removed runner file(s) from $ICARUS_HOME/bin"
   rm -rf "$ICARUS_HOME/bin/__pycache__"
   [[ -d "$ICARUS_HOME/bin" ]] && rmdir "$ICARUS_HOME/bin" 2> /dev/null && log "Removed the empty $ICARUS_HOME/bin"
+
+  # The Python environment, if this script made it.
+  if [[ -f "$MANIFEST.venv" ]]; then
+    if [[ -d "$VENV" ]]; then
+      rm -rf "$VENV"
+      log "Removed the Python environment $VENV"
+    fi
+    rm -f "$MANIFEST.venv"
+  fi
 
   # Job data is the user's: only deleted when they say so.
   if [[ -d "$ICARUS_HOME/jobs" ]]; then

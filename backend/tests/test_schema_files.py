@@ -15,13 +15,15 @@ from api.agent.tools import plot_tools
 from api.auth.schemas import Identity, Preferences
 from api.catalog import COLLECTIONS, SESSIONS, SIMULATIONS, THREADS, USERS
 from api.compute.runner import CommandResult
-from api.compute.schemas import CfdCase
+from api.compute.schemas import CfdCase, FeaCase
 from api.compute.simulations import SimulationService
 from api.credentials.schemas import WorkstationDetails
+from api.files.repository import FileRepository
 from api.schema_export import DATABASE_DIR, collection_document, stale_files
 from tests.conftest import MONGODB_URI, ScriptedModel, use_agent
 from tests.test_auth_schema import make_session, make_user
 from tests.test_chats_api import create_thread, read_events
+from tests.test_file_kinds import binary_stl, cube_triangles
 from tests.test_files import AIRFOIL, upload
 from tests.test_plots import POLAR
 
@@ -97,17 +99,29 @@ def _run_app_flows(client: TestClient) -> None:
         async def write_file(self, path, content):
             return None
 
+        async def write_bytes(self, path, content):
+            return None
+
     user_id = client.get("/api/auth/me").json()["id"]
 
     def simulations(fail: bool) -> SimulationService:
         return SimulationService(
-            db, Runner(fail), user_id=user_id, workdir="/w", script="/w/run.sh"
+            db,
+            Runner(fail),
+            user_id=user_id,
+            workdir="/w",
+            script="/w/run.sh",
+            files=FileRepository(db),
         )
 
     case = CfdCase(naca="2412", alpha=4, reynolds=3e6)
     for fail in (False, True):
         client.portal.call(partial(simulations(fail).submit, case, thread_id=thread_id))
     client.portal.call(simulations(False).submit, case)  # not tied to a chat
+    # An FEA job on an uploaded solid.
+    solid = upload(client, "cube.stl", binary_stl(cube_triangles())).json()
+    fea = FeaCase(geometry_file_id=solid["id"], support_axis="z", support_side="min", spin_rpm=1000)
+    client.portal.call(partial(simulations(False).submit, fea, thread_id=thread_id))
 
     # The user's own model key and work station, sealed.
     credentials = client.app.state.services.credentials

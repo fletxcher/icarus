@@ -15,6 +15,7 @@ from pymongo.asynchronous.database import AsyncDatabase
 
 from ..config import Settings
 from ..credentials.repository import CredentialRepository, StoredWorkstation
+from ..files.repository import FileRepository
 from .runner import CommandResult, CommandRunner, LocalRunner, SSHRunner, WorkstationTarget
 from .simulations import SimulationService
 from .xfoil import XfoilService
@@ -41,6 +42,9 @@ class UnconfiguredRunner:
         self._fail()
 
     async def write_file(self, path: str, content: str) -> None:
+        self._fail()
+
+    async def write_bytes(self, path: str, content: bytes) -> None:
         self._fail()
 
     async def read_file(self, path: str) -> str:
@@ -147,6 +151,7 @@ class ComputePool:
             user_id=user_id,
             workdir=station.workdir,
             script=station.script,
+            files=FileRepository(self._db),
         )
 
     async def xfoil_for(self, user_id: str, station: Workstation | None = None) -> XfoilService:
