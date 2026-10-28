@@ -34,7 +34,12 @@ export function UserMessage({ threadId, message }: { threadId: string; message: 
       {message.attachments.length > 0 && (
         <div className="flex max-w-[80%] flex-wrap justify-end gap-2">
           {message.attachments.map((attachment) => (
-            <AttachmentChip key={attachment.id} name={attachment.name} size={attachment.size} />
+            <AttachmentChip
+              key={attachment.id}
+              name={attachment.name}
+              size={attachment.size}
+              fileId={attachment.id}
+            />
           ))}
         </div>
       )}

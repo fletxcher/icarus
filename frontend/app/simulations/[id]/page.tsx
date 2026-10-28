@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { SimulationPage } from "@/components/chat/simulation-detail";
+import { SimulationPage } from "@/components/chat/simulation-page";
 
 // The id is only known per request, so it is read inside Suspense: the rest of the page can
 // still be prerendered (Cache Components).

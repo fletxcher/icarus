@@ -3,7 +3,12 @@
 import Link from "next/link";
 import { CheckIcon, ChevronRightIcon, CircleXIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { formatDuration, jobName, STAGE_LABELS } from "@/lib/chat/simulation-format";
+import {
+  FEA_STAGE_LABELS,
+  formatDuration,
+  jobName,
+  STAGE_LABELS,
+} from "@/lib/chat/simulation-format";
 import type { SimulationSummary } from "@/lib/chat/simulation-types";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/stores/chat-store";
@@ -26,7 +31,9 @@ function JobRow({ job, current }: { job: SimulationSummary; current: boolean }) 
   const running = job.status === "running" || job.status === "queued";
   const detail = running
     ? [
-        job.stage ? (STAGE_LABELS[job.stage] ?? job.stage) : "Starting",
+        job.stage
+          ? ((job.case.kind === "fea" ? FEA_STAGE_LABELS : STAGE_LABELS)[job.stage] ?? job.stage)
+          : "Starting",
         job.eta_s != null ? `${formatDuration(job.eta_s)} left` : null,
       ]
         .filter(Boolean)
@@ -54,7 +61,9 @@ function JobRow({ job, current }: { job: SimulationSummary; current: boolean }) 
             ))}
           <span className="min-w-0 flex-1 truncate text-sm font-medium">{jobName(job.case)}</span>
           {running && job.fraction !== null && (
-            <span className="text-xs tabular-nums text-muted-foreground">{Math.round(job.fraction * 100)}%</span>
+            <span className="text-xs tabular-nums text-muted-foreground">
+              {Math.round(job.fraction * 100)}%
+            </span>
           )}
           <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
         </div>
@@ -69,13 +78,20 @@ function SimulationList({ currentId }: { currentId?: string }) {
   const simulations = useChatStore((state) => state.simulations);
   const closeSimulations = useChatStore((state) => state.closeSimulations);
   const running = simulations.filter((job) => job.status === "running" || job.status === "queued");
-  const finished = simulations.filter((job) => job.status === "completed" || job.status === "failed");
+  const finished = simulations.filter(
+    (job) => job.status === "completed" || job.status === "failed",
+  );
 
   return (
     <>
       <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
         <h2 className="flex-1 text-sm font-medium">Simulations</h2>
-        <Button variant="ghost" size="icon-sm" aria-label="Close simulations" onClick={closeSimulations}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Close simulations"
+          onClick={closeSimulations}
+        >
           <XIcon />
         </Button>
       </header>

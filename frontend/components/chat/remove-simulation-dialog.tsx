@@ -12,7 +12,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { jobName } from "@/lib/chat/simulation-format";
-import type { SimulationCase } from "@/lib/chat/simulation-types";
+import type { JobCase } from "@/lib/chat/simulation-types";
 import { hideSimulation } from "@/stores/chat-actions";
 
 /** Asks before taking a simulation off the list. Nothing is deleted: it stays in the chat. */
@@ -26,7 +26,7 @@ export function RemoveSimulationDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   jobId: string;
-  simulation: { case: SimulationCase; status: string } | null;
+  simulation: { case: JobCase; status: string } | null;
   onRemoved?: () => void;
 }) {
   const [removing, setRemoving] = useState(false);

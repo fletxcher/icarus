@@ -11,13 +11,13 @@ import {
   LoaderCircleIcon,
   Trash2Icon,
 } from "lucide-react";
-import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { formatDuration, jobName, STAGE_LABELS } from "@/lib/chat/simulation-format";
 import type {
   MonitorData,
   Simulation,
+  SimulationCase,
   SimulationInfo,
   SimulationProgress,
 } from "@/lib/chat/simulation-types";
@@ -58,7 +58,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Table({ rows }: { rows: [string, string][] }) {
+export function Table({ rows }: { rows: [string, string][] }) {
   return (
     <table className="w-full text-left text-sm">
       <tbody>
@@ -74,7 +74,7 @@ function Table({ rows }: { rows: [string, string][] }) {
 }
 
 /** A pill as tall as the icon buttons beside it, so they line up. */
-function StatusBadge({ status }: { status: Simulation["status"] | undefined }) {
+export function StatusBadge({ status }: { status: Simulation["status"] | undefined }) {
   const style =
     status === "completed"
       ? "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-300"
@@ -212,7 +212,8 @@ function Residuals({ data, unit }: { data: MonitorData; unit: string }) {
 }
 
 function Setup({ info, simulation }: { info: SimulationInfo | null; simulation: Simulation | null }) {
-  const testCase = info?.case ?? simulation?.case;
+  // This page only shows CFD jobs; FEA jobs have their own (fea-detail.tsx).
+  const testCase = (info?.case ?? simulation?.case) as SimulationCase | undefined;
   if (!testCase) return <p className="text-sm text-muted-foreground">Loading…</p>;
   const mesh = info?.mesh ?? {};
   const rows: [string, string][] = [
@@ -376,7 +377,7 @@ function Results({ simulation }: { simulation: Simulation | null }) {
  * Takes the job off the simulations list, after a confirmation, or puts it back. The page
  * stays: the job and its results are kept, and the chat still links here.
  */
-function ListToggle({ jobId, simulation }: { jobId: string; simulation: Simulation | null }) {
+export function ListToggle({ jobId, simulation }: { jobId: string; simulation: Simulation | null }) {
   const [confirming, setConfirming] = useState(false);
   const [hidden, setHidden] = useState<boolean | null>(null); // set once this page changes it
   const isHidden = hidden ?? simulation?.hidden ?? false;
@@ -476,16 +477,5 @@ export function SimulationDetail({ jobId, monitor }: { jobId: string; monitor: M
         {tab === "Results" && <Results simulation={simulation} />}
       </div>
     </div>
-  );
-}
-
-/** The page at /simulations/<id>: the app frame around a job's full monitor. */
-export function SimulationPage({ jobId }: { jobId: string }) {
-  const monitor = useSimulationMonitor(jobId);
-  const title = monitor.simulation ? jobName(monitor.simulation.case) : "Simulation";
-  return (
-    <AppShell title={title} simulationId={jobId}>
-      <SimulationDetail jobId={jobId} monitor={monitor} />
-    </AppShell>
   );
 }

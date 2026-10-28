@@ -25,6 +25,7 @@ const TOOLS: Record<string, { label: string; icon: LucideIcon }> = {
   run_xfoil_polar: { label: "XFOIL analysis", icon: PlaneIcon },
   search_naca4_airfoils: { label: "Airfoil search", icon: SearchIcon },
   submit_cfd_simulation: { label: "CFD simulation", icon: CpuIcon },
+  submit_fea_simulation: { label: "FEA simulation", icon: CpuIcon },
   get_simulation_status: { label: "Simulation status", icon: CpuIcon },
   create_plot: { label: "Plot", icon: ChartLineIcon },
 };
@@ -42,6 +43,9 @@ function summarizeArgs(args: Record<string, unknown>): string {
   if (typeof args.reynolds === "number") parts.push(`Re ${args.reynolds.toExponential(1)}`);
   if (typeof args.alpha === "number") parts.push(`α ${args.alpha}°`);
   if (typeof args.job_id === "string") parts.push(args.job_id.slice(0, 8));
+  if (typeof args.material === "string") parts.push(args.material);
+  if (typeof args.spin_rpm === "number" && args.spin_rpm > 0) parts.push(`${args.spin_rpm} rpm`);
+  if (typeof args.gas_temperature_c === "number") parts.push(`${args.gas_temperature_c} °C`);
   return parts.join(" · ");
 }
 
@@ -52,7 +56,7 @@ function jobIdOf(part: ToolPart): string | null {
   if (part.name === "get_simulation_status" && typeof part.args.job_id === "string") {
     return part.args.job_id;
   }
-  if (part.name === "submit_cfd_simulation" && part.result) {
+  if ((part.name === "submit_cfd_simulation" || part.name === "submit_fea_simulation") && part.result) {
     return JOB_ID.exec(part.result)?.[1] ?? null;
   }
   return null;

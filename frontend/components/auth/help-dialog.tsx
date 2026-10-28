@@ -24,6 +24,7 @@ const CAPABILITIES = [
   "Airfoil polars and pressure distributions with XFOIL",
   "NACA airfoil search and comparison",
   "2D CFD (OpenFOAM) around airfoils, cylinders, ellipses, wedges and rectangles, with wall conditions",
+  "Stress, deflection and frequencies of an uploaded STL solid (CalculiX), under spin, pressure and heat",
   "Plots, and flow images and video from finished simulations",
 ];
 

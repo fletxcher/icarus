@@ -10,8 +10,10 @@ import { useChatStore, useIsGenerating } from "@/stores/chat-store";
 import { AttachmentChip } from "./attachment-chip";
 import { ModelSelector } from "./model-selector";
 
-// Text files the backend accepts; anything else is rejected with a clear error.
-const ACCEPTED_FILES = ".dat,.txt,.csv,.tsv,.json,.md,.xml,.yaml,.yml,.log,text/*";
+// Files the backend accepts: text, meshes (STL, OBJ), CAD (STEP) and PDFs. Anything else is
+// rejected with a clear error.
+const ACCEPTED_FILES =
+  ".dat,.txt,.csv,.tsv,.json,.md,.xml,.yaml,.yml,.log,.stl,.obj,.step,.stp,.pdf,text/*";
 
 export function Composer({ placeholder = "Ask anything" }: { placeholder?: string }) {
   const draft = useChatStore((state) => state.draft);
@@ -68,6 +70,7 @@ export function Composer({ placeholder = "Ask anything" }: { placeholder?: strin
               key={file.localId}
               name={file.name}
               size={file.size}
+              fileId={file.attachment?.id}
               status={file.status}
               error={file.error}
               onRemove={() => void removeFile(file.localId)}

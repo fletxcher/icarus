@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ApiError, api } from "@/lib/api";
 import type {
+  FeaProgress,
   MonitorData,
   Simulation,
   SimulationInfo,
@@ -17,13 +18,23 @@ export type Monitor = {
   info: SimulationInfo | null;
   /** The latest progress call, minus the series (those accumulate in `data`). */
   progress: SimulationProgress | null;
+  /** An FEA job's progress (a CFD job's is in `progress` and `data`). */
+  fea: FeaProgress | null;
   data: MonitorData;
   error: string | null;
   /** The job doesn't exist (any more), e.g. it was deleted. */
   missing: boolean;
 };
 
-const EMPTY: MonitorData = { time: [], courant: [], residuals: {}, coeffTime: [], cl: [], cd: [], cm: [] };
+const EMPTY: MonitorData = {
+  time: [],
+  courant: [],
+  residuals: {},
+  coeffTime: [],
+  cl: [],
+  cd: [],
+  cm: [],
+};
 
 /** Appends the new steps and coefficient rows of a progress call to what's been collected. */
 function accumulate(data: MonitorData, progress: SimulationProgress): MonitorData {
@@ -37,7 +48,9 @@ function accumulate(data: MonitorData, progress: SimulationProgress): MonitorDat
   }
   for (const name of Object.keys(residuals)) {
     if (!(name in steps.residuals) && steps.time.length) {
-      residuals[name] = residuals[name].concat(new Array<number | null>(steps.time.length).fill(null));
+      residuals[name] = residuals[name].concat(
+        new Array<number | null>(steps.time.length).fill(null),
+      );
     }
   }
   return {
@@ -52,7 +65,7 @@ function accumulate(data: MonitorData, progress: SimulationProgress): MonitorDat
 }
 
 /**
- * Follows a CFD job: polls the backend for what the run did since the last call and keeps
+ * Follows a job: polls the backend for what the run did since the last call and keeps
  * the series. It catches up on a long log at once, polls every couple of seconds while the
  * job runs, and stops when the job has ended and everything has been read.
  */
@@ -61,6 +74,7 @@ export function useSimulationMonitor(jobId: string): Monitor {
     simulation: null,
     info: null,
     progress: null,
+    fea: null,
     data: EMPTY,
     error: null,
     missing: false,
@@ -73,7 +87,15 @@ export function useSimulationMonitor(jobId: string): Monitor {
     let coeffOffset = 0;
     let stageKey = "";
     let data = EMPTY;
-    setState({ simulation: null, info: null, progress: null, data: EMPTY, error: null, missing: false });
+    setState({
+      simulation: null,
+      info: null,
+      progress: null,
+      fea: null,
+      data: EMPTY,
+      error: null,
+      missing: false,
+    });
 
     async function tick() {
       let delay = POLL_MS;
@@ -84,6 +106,16 @@ export function useSimulationMonitor(jobId: string): Monitor {
         if (cancelled) return;
         setState((previous) => ({ ...previous, simulation, missing: false }));
 
+        if (simulation.case.kind === "fea") {
+          // An FEA job has no residual or coefficient series: just its stage and log.
+          const fea = await api.feaProgress(jobId);
+          if (cancelled) return;
+          setState((previous) => ({ ...previous, fea, error: null }));
+          if (fea.status === "completed" || fea.status === "failed") return;
+          timer = setTimeout(tick, POLL_MS);
+          return;
+        }
+
         const progress = await api.simulationProgress(jobId, logOffset, coeffOffset);
         if (cancelled) return;
         logOffset = progress.log_offset;
@@ -93,7 +125,8 @@ export function useSimulationMonitor(jobId: string): Monitor {
 
         // The setup facts (mesh quality, dictionaries) appear as the run moves on.
         const key = progress.stages.join(",");
-        const info = key !== stageKey ? await api.simulationInfo(jobId).catch(() => null) : undefined;
+        const info =
+          key !== stageKey ? await api.simulationInfo(jobId).catch(() => null) : undefined;
         if (cancelled) return;
         if (info !== undefined) stageKey = key;
         setState((previous) => ({

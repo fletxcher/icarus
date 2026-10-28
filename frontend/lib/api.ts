@@ -1,4 +1,5 @@
 import type {
+  FeaProgress,
   Simulation,
   SimulationInfo,
   SimulationProgress,
@@ -206,7 +207,7 @@ export const api = {
       body: JSON.stringify(changes),
     }),
   deleteThread: (id: string) => request<void>(`/threads/${id}`, { method: "DELETE" }),
-  /** Stores a file to send with a message; only text files are accepted for now. */
+  /** Stores a file to send with a message: text, STL, OBJ, STEP or PDF. */
   uploadFile: async (file: File): Promise<Attachment> => {
     const form = new FormData();
     form.append("file", file);
@@ -229,12 +230,17 @@ export const api = {
   getSimulation: (id: string) => request<Simulation>(`/simulations/${id}`),
   simulationInfo: (id: string) => request<SimulationInfo>(`/simulations/${id}/info`),
   /** What the run did since the given offsets (0, 0 for everything). */
+  /** An FEA job's stage and latest log lines. */
+  feaProgress: (id: string) =>
+    request<FeaProgress>(`/simulations/${id}/progress?log_offset=0&coeff_offset=0`),
   simulationProgress: (id: string, logOffset: number, coeffOffset: number) =>
     request<SimulationProgress>(
       `/simulations/${id}/progress?log_offset=${logOffset}&coeff_offset=${coeffOffset}`,
     ),
   /** URL of a file a finished job rendered (flow.mp4 / flow.png). */
   simulationFileUrl: (id: string, name: string) => `${API_URL}/api/simulations/${id}/files/${name}`,
+  /** URL of an uploaded mesh, CAD file or PDF as it was sent (what the 3D viewer draws). */
+  fileOriginalUrl: (id: string) => `${API_URL}/api/files/${id}/original`,
   /** Removes a file that hasn't been sent yet. */
   deleteFile: (id: string) => request<void>(`/files/${id}`, { method: "DELETE" }),
   /** Deletes a message and every later one (before an edit or regenerate). */

@@ -3,6 +3,8 @@
 export type SimulationStatus = "queued" | "running" | "completed" | "failed";
 
 export type SimulationCase = {
+  /** Missing on jobs from before FEA existed: those are CFD. */
+  kind?: "cfd";
   shape: string;
   naca?: string | null;
   aspect_ratio?: number | null;
@@ -20,11 +22,34 @@ export type SimulationCase = {
   video: boolean;
 };
 
+/** The inputs of an FEA job (backend FeaCase): an uploaded solid and its loads. */
+export type FeaCase = {
+  kind: "fea";
+  geometry_file_id: string;
+  geometry_name: string | null;
+  units: string;
+  material: string;
+  mesh: string;
+  support_axis: string;
+  support_side: string;
+  spin_rpm: number;
+  spin_axis_origin: number[];
+  spin_axis_direction: number[];
+  pressure_mpa: number;
+  gas_temperature_c: number | null;
+  htc_w_m2k: number;
+  base_temperature_c: number;
+  modal: boolean;
+};
+
+/** A job's inputs: CFD or FEA, told apart by `kind`. */
+export type JobCase = SimulationCase | FeaCase;
+
 /** One row of the simulations list (GET /api/simulations). */
 export type SimulationSummary = {
   id: string;
   thread_id: string | null;
-  case: SimulationCase;
+  case: JobCase;
   status: SimulationStatus;
   error: string | null;
   created_at: string;
@@ -41,6 +66,39 @@ export type SimulationMedia = {
   frames?: number;
   fps?: number;
   duration_s?: number;
+};
+
+/** What an FEA job reports (workstation/fea_case.py `build_results`). */
+export type FeaResult = {
+  material: string;
+  elements: number;
+  nodes: number;
+  volume_mm3: number;
+  mass_kg: number;
+  bounding_box_mm: number[][];
+  max_displacement_mm: number;
+  max_displacement_at_mm: number[];
+  max_von_mises_mpa: number;
+  max_von_mises_at_mm: number[];
+  max_von_mises_away_from_support_mpa: number;
+  max_von_mises_away_at_mm: number[];
+  typical_von_mises_mpa: number;
+  min_safety_factor_yield_away_from_support: number;
+  min_safety_factor_yield_anywhere: number;
+  peak_stress_note: string;
+  temperature_c?: number[];
+  natural_frequencies_hz?: number[];
+  engine_order_hz?: Record<string, number>;
+  warnings?: string[];
+};
+
+/** What the monitor gets from an FEA job while it runs. */
+export type FeaProgress = {
+  status: SimulationStatus;
+  stage: string;
+  fraction: number;
+  eta_s: number | null;
+  lines: string[];
 };
 
 export type SimulationResult = {
@@ -68,7 +126,7 @@ export type Simulation = {
   thread_id: string | null;
   /** Taken off the simulations list; the job and its results are kept. */
   hidden?: boolean;
-  case: SimulationCase;
+  case: JobCase;
   status: SimulationStatus;
   result: SimulationResult | null;
   error: string | null;
