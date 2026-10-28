@@ -40,3 +40,5 @@ __pycache__/
 # work station: install and job directories, if ~/icarus is ever copied into the repo
 bin/
 jobs/
+studies/
+models/
