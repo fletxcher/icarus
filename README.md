@@ -417,20 +417,26 @@ flow direction is rotated by `alpha`, so the farfield and mesh stay the same.
 Copy `workstation/` to a fresh Debian/Ubuntu work station and run, as the user the backend connects as:
 
 ```bash
-./setup.sh --install     # installs the tools below and creates ~/icarus/bin and ~/icarus/jobs
-./setup.sh --uninstall   # removes what --install added (asks before deleting job data)
+./setup.sh --install     # installs what's missing of the tools below, and the runner files in ~/icarus/bin
+./setup.sh --uninstall   # removes what --install added, if still there (asks before deleting job data)
 ```
 
 | Installed | Package | Notes |
 |---|---|---|
 | [XFOIL](https://web.mit.edu/drela/Public/web/xfoil/) | `xfoil`, `xvfb`, `xauth` | |
-| [OpenFOAM](https://www.openfoam.com) | `OPENFOAM_PACKAGE` (default `openfoam2512`) | About 1 GB; `--install` adds the official [apt repository](https://www.openfoam.com/download) if it's missing (needs `sudo`) |
+| [OpenFOAM](https://www.openfoam.com) | `OPENFOAM_PACKAGE` (default `openfoam2512`) | About 1 GB, and skipped when any OpenFOAM release is already installed; otherwise `--install` adds the official [apt repository](https://www.openfoam.com/download) if it's missing (needs `sudo`) |
 | [CalculiX](https://www.calculix.de) | `calculix-ccx` | `bin/run_calculix.sh <job_dir>` solves `<job_dir>/model.inp` and writes `model.dat`, `model.frd` and `log.ccx` |
 | gmsh, ParaView, ffmpeg | `gmsh`, `paraview`, `ffmpeg` | Meshing, flow images and video |
 
 `--install` then checks that XFOIL, OpenFOAM and CalculiX work (CalculiX solves a one-element
-block under load) and prints the matching `.env` values. `--uninstall` only removes
-packages that `--install` itself installed, then runs `apt-get autoremove`.
+block under load) and prints the matching `.env` values.
+
+Both actions look before they act. `--install` skips every tool that's already there (as a
+package or a command on the `PATH`), and copies a runner file only when it's missing or has
+changed. `--uninstall` removes only the packages and runner files it installed, and only those
+still present; it asks before deleting job folders and leaves anything else in `~/icarus`
+(the directory itself goes only if it ends up empty). Packages are removed with `apt-get`, then
+`apt-get autoremove`.
 
 **XFOIL** runs wherever `XFOIL_RUNNER` points (`ws` or `local`), through the same
 `CommandRunner` interface. One polar takes about a second, so CPU isn't the deciding

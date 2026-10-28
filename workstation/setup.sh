@@ -14,6 +14,11 @@
 # doesn't have the OpenFOAM apt repository yet, --install adds the official one.
 # CalculiX (https://www.calculix.de) comes from the distribution's calculix-ccx package.
 # Assumes a Debian/Ubuntu work station.
+#
+# Both actions check before they act: --install skips every tool that is already there (as an
+# apt package or on the PATH, and any OpenFOAM release counts) and copies a runner file only when
+# it's missing or differs; --uninstall removes only the packages and files it installed, and
+# only those that are still present, and leaves anything else in ICARUS_HOME alone.
 set -euo pipefail
 
 ICARUS_HOME="${ICARUS_HOME:-$HOME/icarus}"
@@ -22,15 +27,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MANIFEST="$ICARUS_HOME/.setup-packages"
 OPENFOAM_PACKAGE="${OPENFOAM_PACKAGE:-openfoam2512}"
 PACKAGES=(xfoil xvfb xauth gmsh calculix-ccx paraview ffmpeg "$OPENFOAM_PACKAGE")
+# The command each package provides: a tool already on the PATH needs no package.
+declare -A PROVIDES=([xfoil]=xfoil [xvfb]=xvfb-run [xauth]=xauth [gmsh]=gmsh [calculix-ccx]=ccx [paraview]=pvbatch [ffmpeg]=ffmpeg)
+# Files this script puts in $ICARUS_HOME/bin (and the name an earlier version used).
+RUNNER_FILES=(run_openfoam.sh cfd_case.py run_calculix.sh render_video.py)
+STALE_FILES=(run_case.sh)
 
 usage() {
   cat <<EOF
 Usage: $(basename "$0") --install | --uninstall [--yes]
 
-  --install     Install XFOIL, xvfb, xauth, gmsh, OpenFOAM ($OPENFOAM_PACKAGE), CalculiX,
-                ParaView and ffmpeg, and create $ICARUS_HOME with the CFD runner.
-  --uninstall   Remove packages this script installed and delete $ICARUS_HOME.
-  --yes         Don't ask before deleting $ICARUS_HOME (job data included).
+  --install     Install what's missing of XFOIL, xvfb, xauth, gmsh, OpenFOAM ($OPENFOAM_PACKAGE, unless
+                another release is there), CalculiX, ParaView and ffmpeg, and put the runner
+                files in $ICARUS_HOME (only those that are missing or changed).
+  --uninstall   Remove the packages and runner files this script installed, if still there.
+                Asks before deleting job folders, and leaves other files in $ICARUS_HOME.
+  --yes         Don't ask before deleting job folders.
 
 Set ICARUS_HOME to use a different directory (then match WS_WORKDIR/WS_CFD_SCRIPT).
 EOF
@@ -45,6 +57,36 @@ as_root() {
 
 is_installed() {
   dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "install ok installed"
+}
+
+# Any OpenFOAM release found on disk counts: installing a second one next to it wouldn't help.
+openfoam_bashrc() {
+  # ls exits 2 when one of the two globs matches nothing, which pipefail would turn into an abort.
+  ls /usr/lib/openfoam/openfoam*/etc/bashrc /opt/openfoam*/etc/bashrc 2> /dev/null | tail -n 1 || true
+}
+
+# Whether a package's job is already done: it's installed, or its command is on the PATH.
+already_provided() {
+  local package="$1"
+  if [[ "$package" == "$OPENFOAM_PACKAGE" ]]; then
+    is_installed "$package" || [[ -n "$(openfoam_bashrc)" ]]
+    return
+  fi
+  is_installed "$package" || { [[ -n "${PROVIDES[$package]:-}" ]] && command -v "${PROVIDES[$package]}" > /dev/null; }
+}
+
+# Copies a file into place only if it's missing or different, and says which.
+install_file() {
+  local source="$1" target="$2"
+  if [[ -f "$target" ]] && cmp -s "$source" "$target"; then
+    log "$(basename "$target") is up to date"
+  elif [[ -f "$target" ]]; then
+    install -m 755 "$source" "$target"
+    log "$(basename "$target") updated"
+  else
+    install -m 755 "$source" "$target"
+    log "$(basename "$target") installed"
+  fi
 }
 
 check_xfoil() {
@@ -134,8 +176,7 @@ check_video() {
 
 check_openfoam() {
   local bashrc
-  # ls exits 2 when one of the two globs matches nothing, which pipefail would turn into an abort.
-  bashrc="$(ls /usr/lib/openfoam/openfoam*/etc/bashrc /opt/openfoam*/etc/bashrc 2> /dev/null | tail -n 1 || true)"
+  bashrc="$(openfoam_bashrc)"
   if [[ -z "$bashrc" ]]; then
     log "OpenFOAM check FAILED: no etc/bashrc found"
     return 1
@@ -163,27 +204,32 @@ do_install() {
     log "Running as root: files go to $ICARUS_HOME; make sure WS_USER can read them."
   fi
 
-  local missing=()
+  local missing=() present=()
   for package in "${PACKAGES[@]}"; do
-    is_installed "$package" || missing+=("$package")
+    if already_provided "$package"; then present+=("$package"); else missing+=("$package"); fi
   done
+  ((${#present[@]})) && log "Already there, not installing: ${present[*]}"
 
   mkdir -p "$ICARUS_HOME/bin" "$ICARUS_HOME/jobs"
   if ((${#missing[@]})); then
-    ensure_openfoam_repo
+    [[ " ${missing[*]} " == *" $OPENFOAM_PACKAGE "* ]] && ensure_openfoam_repo
     log "Installing ${missing[*]}"
     as_root apt-get update -qq
     as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}"
     printf '%s\n' "${missing[@]}" >> "$MANIFEST"
   else
-    log "Packages already installed: ${PACKAGES[*]}"
+    log "Nothing to install"
   fi
 
-  install -m 755 "$SCRIPT_DIR/run_openfoam.sh" "$ICARUS_HOME/bin/run_openfoam.sh"
-  install -m 755 "$SCRIPT_DIR/cfd_case.py" "$ICARUS_HOME/bin/cfd_case.py"
-  install -m 755 "$SCRIPT_DIR/run_calculix.sh" "$ICARUS_HOME/bin/run_calculix.sh"
-  install -m 755 "$SCRIPT_DIR/render_video.py" "$ICARUS_HOME/bin/render_video.py"
-  log "Installed CFD runner at $ICARUS_HOME/bin/run_openfoam.sh (and cfd_case.py) and run_calculix.sh"
+  for file in "${RUNNER_FILES[@]}"; do
+    install_file "$SCRIPT_DIR/$file" "$ICARUS_HOME/bin/$file"
+  done
+  for file in "${STALE_FILES[@]}"; do
+    if [[ -f "$ICARUS_HOME/bin/$file" ]]; then
+      rm -f "$ICARUS_HOME/bin/$file"
+      log "Removed $file, which an earlier version installed"
+    fi
+  done
 
   check_xfoil
   check_openfoam
@@ -202,33 +248,69 @@ EOF
 }
 
 do_uninstall() {
-  local remove=()
-  if [[ -f "$MANIFEST" ]]; then
-    mapfile -t remove < <(sort -u "$MANIFEST")
-  fi
-
-  if [[ -d "$ICARUS_HOME" ]]; then
-    local jobs
-    jobs="$(find "$ICARUS_HOME/jobs" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
-    if [[ "${ASSUME_YES:-}" != 1 ]]; then
-      read -r -p "Delete $ICARUS_HOME, including $jobs job folder(s)? [y/N] " answer
-      [[ "$answer" =~ ^[Yy]$ ]] || { echo "Aborted; nothing changed."; exit 1; }
+  # Files this script installed, only where they are still there.
+  local removed=0
+  for file in "${RUNNER_FILES[@]}" "${STALE_FILES[@]}"; do
+    if [[ -f "$ICARUS_HOME/bin/$file" ]]; then
+      rm -f "$ICARUS_HOME/bin/$file"
+      removed=$((removed + 1))
     fi
-    rm -rf "$ICARUS_HOME"
-    log "Deleted $ICARUS_HOME"
-  else
-    log "$ICARUS_HOME not found; skipping"
+  done
+  ((removed)) && log "Removed $removed runner file(s) from $ICARUS_HOME/bin"
+  rm -rf "$ICARUS_HOME/bin/__pycache__"
+  [[ -d "$ICARUS_HOME/bin" ]] && rmdir "$ICARUS_HOME/bin" 2> /dev/null && log "Removed the empty $ICARUS_HOME/bin"
+
+  # Job data is the user's: only deleted when they say so.
+  if [[ -d "$ICARUS_HOME/jobs" ]]; then
+    local jobs
+    jobs="$(find "$ICARUS_HOME/jobs" -mindepth 1 -maxdepth 1 -type d 2> /dev/null | wc -l)"
+    if ((jobs == 0)); then
+      rmdir "$ICARUS_HOME/jobs" 2> /dev/null || true
+    else
+      local answer=n
+      if [[ "${ASSUME_YES:-}" == 1 ]]; then
+        answer=y
+      else
+        read -r -p "Delete $jobs job folder(s) in $ICARUS_HOME/jobs? [y/N] " answer || true
+      fi
+      if [[ "$answer" =~ ^[Yy]$ ]]; then
+        rm -rf "$ICARUS_HOME/jobs"
+        log "Deleted $ICARUS_HOME/jobs"
+      else
+        log "Kept $ICARUS_HOME/jobs ($jobs job folder(s))"
+      fi
+    fi
   fi
 
+  # Packages this script installed (and that are still installed).
+  local remove=() package
+  if [[ -f "$MANIFEST" ]]; then
+    while read -r package; do
+      if [[ -n "$package" ]] && is_installed "$package"; then remove+=("$package"); fi
+    done < <(sort -u "$MANIFEST")
+    rm -f "$MANIFEST"
+  fi
   if ((${#remove[@]})); then
     log "Removing packages installed by --install: ${remove[*]}"
     as_root env DEBIAN_FRONTEND=noninteractive apt-get remove -y -qq "${remove[@]}"
     as_root apt-get autoremove -y -qq
   else
-    log "No packages to remove (none were installed by --install)"
+    log "No packages to remove (none were installed by --install, or they are already gone)"
+  fi
+
+  # The directory goes only if nothing else is in it.
+  if [[ -d "$ICARUS_HOME" ]]; then
+    if rmdir "$ICARUS_HOME" 2> /dev/null; then
+      log "Removed the empty $ICARUS_HOME"
+    else
+      log "Left $ICARUS_HOME in place: it holds other files"
+    fi
   fi
   log "Uninstalled"
 }
+
+# Only run when executed, so the functions can be sourced (for tests).
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 
 action=""
 for arg in "$@"; do
