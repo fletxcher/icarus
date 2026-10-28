@@ -37,29 +37,41 @@ from ..chats.schemas import (
     ToolPart,
 )
 from ..config import get_settings
-from ..files.repository import FileRepository
+from ..files.extract import BINARY_KINDS
+from ..files.repository import FileRepository, FileText
 from ..languages import Language
 from .logging_callbacks import AgentLoggingHandler
 
 logger = logging.getLogger(__name__)
 
 
-def with_attachments(message: Message, texts: dict[str, str], max_chars: int) -> str:
-    """The user's text followed by each attached file's contents."""
+def with_attachments(message: Message, texts: dict[str, FileText], max_chars: int) -> str:
+    """The user's text followed by each attached file's contents.
+
+    A mesh, CAD file or PDF is given as a summary (see files/extract.py). Its id is shown too,
+    since tools such as the FEA one take the file by id.
+    """
     blocks = [message.content]
     for attachment in message.attachments:
-        text = texts.get(attachment.id)
-        if text is None:
+        file = texts.get(attachment.id)
+        if file is None:
             blocks.append(f"[Attached file {attachment.name} is no longer available.]")
             continue
+        text = file.text
         if len(text) > max_chars:
             text = f"{text[:max_chars]}\n[... truncated, {len(text) - max_chars} more characters]"
-        blocks.append(f"<file name={attachment.name!r}>\n{text}\n</file>")
+        if file.kind in BINARY_KINDS:
+            blocks.append(
+                f"<file name={attachment.name!r} id={attachment.id!r} kind={file.kind!r}>\n"
+                f"{text}\n</file>"
+            )
+        else:
+            blocks.append(f"<file name={attachment.name!r}>\n{text}\n</file>")
     return "\n\n".join(blocks)
 
 
 def to_langchain(
-    messages: list[Message], file_texts: dict[str, str], *, file_max_chars: int
+    messages: list[Message], file_texts: dict[str, FileText], *, file_max_chars: int
 ) -> list[BaseMessage]:
     """Rebuilds the conversation from stored messages.
 

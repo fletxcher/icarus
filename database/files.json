@@ -38,6 +38,20 @@
         "text": {
           "bsonType": "string"
         },
+        "kind": {
+          "bsonType": "string",
+          "enum": [
+            "text",
+            "csv",
+            "stl",
+            "obj",
+            "step",
+            "pdf"
+          ]
+        },
+        "data": {
+          "bsonType": "binData"
+        },
         "thread_id": {
           "bsonType": [
             "string",

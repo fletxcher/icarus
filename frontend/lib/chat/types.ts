@@ -24,7 +24,7 @@ export type ToolPart = {
 /** A reply in the order it happened: reasoning, tool calls and text, possibly interleaved. */
 export type MessagePart = TextPart | ReasoningPart | ToolPart;
 
-/** A file sent with a message (text files only for now). */
+/** A file sent with a message. */
 export type Attachment = {
   id: string;
   name: string;

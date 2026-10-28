@@ -44,8 +44,10 @@ class Settings(BaseSettings):
     # HTTP
     cors_origins: list[str] = ["http://localhost:3000"]
 
-    # Attachments (text files only for now)
+    # Attachments: text files, and meshes, CAD files and PDFs (kept whole, so they must fit in
+    # one MongoDB document, which holds up to 16 MB).
     file_max_bytes: int = 1_000_000
+    file_max_binary_bytes: int = 15_000_000
     # Each file's text is cut to this many characters in the model's context.
     file_context_max_chars: int = 20_000
 

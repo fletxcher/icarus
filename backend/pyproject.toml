@@ -15,9 +15,11 @@ dependencies = [
     "langchain-ollama>=1.1.0",
     "langchain-openrouter>=0.2.9",
     "langgraph>=1.2.16",
+    "numpy>=2.5.4",
     "plotly>=7.1.0",
     "pydantic-settings>=2.16.1",
     "pymongo>=4.19.0",
+    "pypdf>=6.21.3",
     "python-multipart>=0.0.32",
     "uvicorn[standard]>=0.54.0",
 ]

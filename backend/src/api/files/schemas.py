@@ -18,6 +18,8 @@ class StoredFile(MongoModel):
     name: str
     size: int
     content_type: str
+    # text, csv, stl, obj, step or pdf (see extract.py); files from before this was kept are text.
+    kind: str = "text"
     # Set once the file is sent with a message; the file is deleted with its thread.
     thread_id: str | None = None
     created_at: datetime
