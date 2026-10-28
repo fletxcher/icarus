@@ -2,6 +2,7 @@ import Link from "next/link";
 import { FeatherIcon } from "lucide-react";
 
 import { FluidCanvas } from "./fluid-canvas";
+import { PaletteMenu } from "./palette-menu";
 
 /** The frame of the login and signup pages: the form on the left, a fluid to stir on the right. */
 export function AuthLayout({ children }: { children: React.ReactNode }) {
@@ -22,6 +23,9 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
       </div>
       <div className="relative hidden overflow-hidden bg-neutral-950 lg:block">
         <FluidCanvas className="absolute inset-0 size-full" />
+        <div className="absolute top-4 right-4 z-10">
+          <PaletteMenu />
+        </div>
         <p className="pointer-events-none absolute inset-x-0 bottom-8 text-center text-sm text-neutral-500 select-none">
           Move your mouse through the flow
         </p>

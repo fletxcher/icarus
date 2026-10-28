@@ -3,11 +3,13 @@
  *
  * Each frame the velocity is advected by itself, given some vorticity back, made divergence-free
  * by a pressure solve (Jacobi iterations). Tracer particles ride the velocity field and are drawn
- * as fading streaks coloured by speed with the viridis map, the same one the CFD plots use.
+ * as fading streaks coloured by speed with a colour map (viridis, the CFD plots' own, by default).
  * Fields live in float textures, so it needs WebGL2 with EXT_color_buffer_float;
  * `FluidSimulation.create` returns null where that is missing and the page just shows its plain
  * background.
  */
+
+import { PALETTES, PALETTE_STOPS, type PaletteName } from "@/lib/palettes";
 
 const SIM_RESOLUTION = 128; // velocity grid cells along the short side
 const PRESSURE_ITERATIONS = 20;
@@ -137,17 +139,13 @@ void main() {
   outColor = vec4(v, 0.0, 1.0);
 }`;
 
-const VIRIDIS = `
-vec3 viridis(float t) {
-  const vec3 c0 = vec3(0.2777273272234177, 0.005407344544966578, 0.3340998053353061);
-  const vec3 c1 = vec3(0.1050930431085774, 1.404613529898575, 1.384590162594685);
-  const vec3 c2 = vec3(-0.3308618287255563, 0.214847559468213, 0.09509516302823659);
-  const vec3 c3 = vec3(-4.634230498983486, -5.799100973351585, -19.33244095627987);
-  const vec3 c4 = vec3(6.228269936347081, 14.17993336680509, 56.69055260068105);
-  const vec3 c5 = vec3(4.776384997670288, -13.74514537774601, -65.35303263337234);
-  const vec3 c6 = vec3(-5.435455855934631, 4.645852612178535, 26.3124352495832);
-  t = clamp(t, 0.0, 1.0);
-  return c0 + t * (c1 + t * (c2 + t * (c3 + t * (c4 + t * (c5 + t * c6)))));
+// The colour map as evenly spaced stops (a uniform array), interpolated by speed.
+const PALETTE = `
+uniform vec3 uPalette[${PALETTE_STOPS}];
+vec3 palette(float t) {
+  float x = clamp(t, 0.0, 1.0) * float(${PALETTE_STOPS - 1});
+  int i = int(min(floor(x), float(${PALETTE_STOPS - 2})));
+  return mix(uPalette[i], uPalette[i + 1], x - float(i));
 }`;
 
 // One texel per particle: x, y (0..1 in the view), age and lifetime in seconds.
@@ -185,13 +183,13 @@ uniform float uSize;
 uniform float uSpeedScale;
 uniform float uGain;
 out vec3 vColour;
-${VIRIDIS}
+${PALETTE}
 void main() {
   vec4 p = texelFetch(uParticles, ivec2(gl_VertexID % uSide, gl_VertexID / uSide), 0);
   float speed = 1.0 - exp(-length(texture(uVelocity, p.xy).xy) / uSpeedScale);
   // Fade in and out over a particle's life so respawning never pops.
   float life = smoothstep(0.0, 0.3, p.z) * smoothstep(0.0, 0.3, p.w - p.z);
-  vColour = viridis(0.05 + 0.95 * speed) * (0.25 + 0.75 * speed) * life * uGain;
+  vColour = palette(0.05 + 0.95 * speed) * (0.25 + 0.75 * speed) * life * uGain;
   gl_Position = vec4(p.xy * 2.0 - 1.0, 0.0, 1.0);
   gl_PointSize = uSize;
 }`;
@@ -285,6 +283,10 @@ function link(
   return { program, uniforms };
 }
 
+function paletteData(palette: PaletteName): Float32Array {
+  return new Float32Array(PALETTES[palette].flat());
+}
+
 function gridSize(resolution: number, aspect: number): [number, number] {
   return aspect >= 1
     ? [Math.round(resolution * aspect), resolution]
@@ -325,11 +327,14 @@ export class FluidSimulation {
   private width = 0;
   private height = 0;
   private disposed = false;
+  private paletteData: Float32Array;
 
   private constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly gl: WebGL2RenderingContext,
+    palette: PaletteName,
   ) {
+    this.paletteData = paletteData(palette);
     const vertex = compile(gl, gl.VERTEX_SHADER, VERTEX);
     this.programs = {
       advect: link(gl, vertex, ADVECT),
@@ -352,8 +357,21 @@ export class FluidSimulation {
     this.resize();
   }
 
+  /**
+   * Colours the streaks with another colour map from the next frame on. The fluid is given a
+   * few new swirls too: streaks are coloured by speed, so a calm panel would show nothing of
+   * the new colours until the pointer stirred it.
+   */
+  setPalette(palette: PaletteName): void {
+    this.paletteData = paletteData(palette);
+    this.seed();
+  }
+
   /** The simulation drawing into the canvas, or null if this browser can't run it. */
-  static create(canvas: HTMLCanvasElement): FluidSimulation | null {
+  static create(
+    canvas: HTMLCanvasElement,
+    palette: PaletteName = "viridis",
+  ): FluidSimulation | null {
     const gl = canvas.getContext("webgl2", {
       alpha: true,
       premultipliedAlpha: true,
@@ -363,7 +381,7 @@ export class FluidSimulation {
     });
     if (!gl || !gl.getExtension("EXT_color_buffer_float")) return null;
     try {
-      return new FluidSimulation(canvas, gl);
+      return new FluidSimulation(canvas, gl, palette);
     } catch (error) {
       console.warn("fluid simulation unavailable:", error);
       return null;
@@ -653,6 +671,8 @@ export class FluidSimulation {
     );
     gl.uniform1f(u.uSpeedScale, SPEED_SCALE);
     gl.uniform1f(u.uGain, GAIN * dt);
+    // An array uniform is reported by its first element's name.
+    gl.uniform3fv(u["uPalette[0]"] ?? u.uPalette, this.paletteData);
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.trail.write.framebuffer);
     gl.viewport(0, 0, this.trail.write.width, this.trail.write.height);
     gl.enable(gl.BLEND);
