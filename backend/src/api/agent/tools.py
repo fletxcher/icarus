@@ -9,7 +9,7 @@ from pydantic import BaseModel, BeforeValidator, Field
 
 from ..compute.describe import format_simulation
 from ..compute.plots import describe_figure, validate_figure
-from ..compute.schemas import CfdCase, FeaCase
+from ..compute.schemas import Cfd3dCase, CfdCase, FeaCase
 from ..compute.simulations import GeometryUnavailable, SimulationService
 from ..compute.xfoil import Polar, PolarRequest, XfoilService
 
@@ -136,6 +136,22 @@ def simulation_tools(simulations: SimulationService) -> list[BaseTool]:
             )
         return text
 
+    async def submit_cfd3d_simulation(config: RunnableConfig, **fields) -> str:
+        thread_id = config.get("configurable", {}).get("thread_id")
+        try:
+            simulation = await simulations.submit(Cfd3dCase(**fields), thread_id=thread_id)
+        except GeometryUnavailable as problem:
+            return f"Not started: {problem}."
+        text = format_simulation(simulation)
+        if simulation.status == "running":
+            text += (
+                "\n\nThe 3D simulation is now running in the background (meshing, then solving; "
+                "this takes tens of minutes). Tell the user the job id and what was submitted, "
+                "then end your turn. You will be told in this chat when it finishes, so never "
+                "call get_simulation_status to wait for it."
+            )
+        return text
+
     async def get_simulation_status(job_id: str) -> str:
         simulation = await simulations.get(job_id)
         return format_simulation(simulation) if simulation else f"No job with id {job_id}."
@@ -174,6 +190,26 @@ def simulation_tools(simulations: SimulationService) -> list[BaseTool]:
                 "passed on to the user."
             ),
             args_schema=FeaCase,
+        ),
+        StructuredTool.from_function(
+            coroutine=submit_cfd3d_simulation,
+            name="submit_cfd3d_simulation",
+            description=(
+                "Start a 3D CFD analysis (OpenFOAM, steady incompressible RANS) of a solid the "
+                "user uploaded as an STL file. domain='external': the solid in open flow, giving "
+                "drag, cross force and surface pressure. domain='passage': one blade of a "
+                "cascade, periodic in the pitch direction, giving total-pressure loss and flow "
+                "turning. domain='rotating': a propeller, fan or rotor (frozen-rotor), giving "
+                "thrust, torque, power and efficiency. Take geometry_file_id from the id shown "
+                "with the attached file, and ask the user for what isn't given and matters: the "
+                "STL's units, the flow speed and direction in the file's axes, the pitch, or the "
+                "spin axis and speed. The part's small holes and cavities are filled by default. "
+                "Reliable up to about Mach 0.3 (the result warns above that). A job meshes the "
+                "solid (a too fine mesh is coarsened to fit the work station), then solves; it "
+                "takes tens of minutes. Returns a job id; results come with warnings that must be "
+                "passed on to the user."
+            ),
+            args_schema=Cfd3dCase,
         ),
         StructuredTool.from_function(
             coroutine=get_simulation_status,

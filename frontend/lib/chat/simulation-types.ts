@@ -42,8 +42,31 @@ export type FeaCase = {
   modal: boolean;
 };
 
-/** A job's inputs: CFD or FEA, told apart by `kind`. */
-export type JobCase = SimulationCase | FeaCase;
+/** The inputs of a 3D CFD job (backend Cfd3dCase): flow around, or through, an uploaded solid. */
+export type Cfd3dCase = {
+  kind: "cfd3d";
+  geometry_file_id: string;
+  geometry_name: string | null;
+  units: string;
+  domain: "external" | "passage" | "rotating";
+  speed_ms: number;
+  flow_direction: number[];
+  density_kg_m3: number;
+  kinematic_viscosity_m2_s: number;
+  speed_of_sound_ms: number;
+  turbulence_intensity: number;
+  mesh: string;
+  iterations: number | null;
+  fill_cavities: boolean;
+  pitch: number | null;
+  pitch_axis: string | null;
+  spin_rpm: number;
+  spin_axis_origin: number[];
+  spin_axis_direction: number[];
+};
+
+/** A job's inputs: CFD, FEA or 3D CFD, told apart by `kind`. */
+export type JobCase = SimulationCase | FeaCase | Cfd3dCase;
 
 /** One row of the simulations list (GET /api/simulations). */
 export type SimulationSummary = {
@@ -92,7 +115,43 @@ export type FeaResult = {
   warnings?: string[];
 };
 
-/** What the monitor gets from an FEA job while it runs. */
+/** What a 3D CFD job reports (workstation/cfd3d_case.py `build_results`). */
+export type Cfd3dResult = {
+  domain: "external" | "passage" | "rotating";
+  cells: number;
+  mesh_level: string;
+  iterations: number;
+  converged: boolean;
+  reference_length_m: number;
+  reference_area_m2: number;
+  dynamic_pressure_pa: number;
+  force_n: number[];
+  drag_n: number;
+  cross_force_n: number;
+  drag_coefficient: number | null;
+  cross_force_coefficient: number | null;
+  force_variation: number;
+  moment_nm?: number[];
+  y_plus?: { min: number; max: number; average: number };
+  total_pressure_loss_coefficient?: number;
+  inlet_flow_angle_deg?: number;
+  exit_flow_angle_deg?: number;
+  flow_turning_deg?: number;
+  mass_balance_error?: number;
+  blade_force_per_span_n_per_m?: number;
+  spin_rpm?: number;
+  thrust_n?: number;
+  torque_nm?: number;
+  shaft_power_w?: number;
+  diameter_m?: number;
+  thrust_coefficient?: number;
+  power_coefficient?: number;
+  advance_ratio?: number;
+  propulsive_efficiency?: number;
+  warnings?: string[];
+};
+
+/** What the monitor gets from an FEA or 3D CFD job while it runs. */
 export type FeaProgress = {
   status: SimulationStatus;
   stage: string;

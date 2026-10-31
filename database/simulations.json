@@ -262,6 +262,144 @@
                   "bsonType": "bool"
                 }
               }
+            },
+            {
+              "bsonType": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "geometry_file_id",
+                "domain",
+                "speed_ms"
+              ],
+              "properties": {
+                "kind": {
+                  "bsonType": "string",
+                  "enum": [
+                    "cfd3d"
+                  ]
+                },
+                "geometry_file_id": {
+                  "bsonType": "string"
+                },
+                "geometry_name": {
+                  "bsonType": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "units": {
+                  "bsonType": "string",
+                  "enum": [
+                    "mm",
+                    "m",
+                    "in"
+                  ]
+                },
+                "domain": {
+                  "bsonType": "string",
+                  "enum": [
+                    "external",
+                    "passage",
+                    "rotating"
+                  ]
+                },
+                "speed_ms": {
+                  "bsonType": "number",
+                  "minimum": 0,
+                  "exclusiveMinimum": true,
+                  "maximum": 400
+                },
+                "flow_direction": {
+                  "bsonType": "array",
+                  "items": {
+                    "bsonType": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                "density_kg_m3": {
+                  "bsonType": "number",
+                  "minimum": 0,
+                  "exclusiveMinimum": true
+                },
+                "kinematic_viscosity_m2_s": {
+                  "bsonType": "number",
+                  "minimum": 0,
+                  "exclusiveMinimum": true
+                },
+                "speed_of_sound_ms": {
+                  "bsonType": "number",
+                  "minimum": 0,
+                  "exclusiveMinimum": true
+                },
+                "turbulence_intensity": {
+                  "bsonType": "number",
+                  "minimum": 0.001,
+                  "maximum": 0.3
+                },
+                "mesh": {
+                  "bsonType": "string",
+                  "enum": [
+                    "coarse",
+                    "medium",
+                    "fine"
+                  ]
+                },
+                "iterations": {
+                  "bsonType": [
+                    "int",
+                    "long",
+                    "null"
+                  ],
+                  "minimum": 50,
+                  "maximum": 5000
+                },
+                "fill_cavities": {
+                  "bsonType": "bool"
+                },
+                "pitch": {
+                  "bsonType": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "exclusiveMinimum": true
+                },
+                "pitch_axis": {
+                  "bsonType": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "x",
+                    "y",
+                    "z",
+                    null
+                  ]
+                },
+                "spin_rpm": {
+                  "bsonType": "number",
+                  "minimum": 0,
+                  "maximum": 200000
+                },
+                "spin_axis_origin": {
+                  "bsonType": "array",
+                  "items": {
+                    "bsonType": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                "spin_axis_direction": {
+                  "bsonType": "array",
+                  "items": {
+                    "bsonType": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3
+                }
+              }
             }
           ]
         },

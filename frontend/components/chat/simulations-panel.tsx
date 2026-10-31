@@ -4,6 +4,7 @@ import Link from "next/link";
 import { CheckIcon, ChevronRightIcon, CircleXIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
+  CFD3D_STAGE_LABELS,
   FEA_STAGE_LABELS,
   formatDuration,
   jobName,
@@ -27,12 +28,18 @@ function ProgressBar({ fraction }: { fraction: number | null }) {
   );
 }
 
+function stageLabels(kind: string | undefined): Record<string, string> {
+  if (kind === "fea") return FEA_STAGE_LABELS;
+  if (kind === "cfd3d") return CFD3D_STAGE_LABELS;
+  return STAGE_LABELS;
+}
+
 function JobRow({ job, current }: { job: SimulationSummary; current: boolean }) {
   const running = job.status === "running" || job.status === "queued";
   const detail = running
     ? [
         job.stage
-          ? ((job.case.kind === "fea" ? FEA_STAGE_LABELS : STAGE_LABELS)[job.stage] ?? job.stage)
+          ? (stageLabels(job.case.kind)[job.stage] ?? job.stage)
           : "Starting",
         job.eta_s != null ? `${formatDuration(job.eta_s)} left` : null,
       ]

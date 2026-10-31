@@ -26,6 +26,7 @@ const TOOLS: Record<string, { label: string; icon: LucideIcon }> = {
   search_naca4_airfoils: { label: "Airfoil search", icon: SearchIcon },
   submit_cfd_simulation: { label: "CFD simulation", icon: CpuIcon },
   submit_fea_simulation: { label: "FEA simulation", icon: CpuIcon },
+  submit_cfd3d_simulation: { label: "3D CFD simulation", icon: CpuIcon },
   get_simulation_status: { label: "Simulation status", icon: CpuIcon },
   create_plot: { label: "Plot", icon: ChartLineIcon },
 };
@@ -56,7 +57,10 @@ function jobIdOf(part: ToolPart): string | null {
   if (part.name === "get_simulation_status" && typeof part.args.job_id === "string") {
     return part.args.job_id;
   }
-  if ((part.name === "submit_cfd_simulation" || part.name === "submit_fea_simulation") && part.result) {
+  if ((part.name === "submit_cfd_simulation" ||
+      part.name === "submit_fea_simulation" ||
+      part.name === "submit_cfd3d_simulation") &&
+    part.result) {
     return JOB_ID.exec(part.result)?.[1] ?? null;
   }
   return null;

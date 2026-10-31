@@ -7,6 +7,7 @@ const SHAPE_NAMES: Record<string, string> = {
   wedge: "Wedge",
   rectangle: "Rectangle",
   fea: "FEA",
+  cfd3d: "3D CFD",
 };
 
 export const MATERIAL_NAMES: Record<string, string> = {
@@ -14,6 +15,12 @@ export const MATERIAL_NAMES: Record<string, string> = {
   ti6al4v: "Ti-6Al-4V",
   aluminium7075: "Aluminium 7075",
   steel4340: "Steel 4340",
+};
+
+export const DOMAIN_NAMES: Record<string, string> = {
+  external: "external flow",
+  passage: "blade passage",
+  rotating: "rotating",
 };
 
 export function shapeName(shape: string): string {
@@ -25,6 +32,10 @@ export function jobName(simulation: JobCase): string {
   if (simulation.kind === "fea") {
     const part = simulation.geometry_name?.replace(/\.[^.]+$/, "") ?? "solid";
     return `FEA · ${part} · ${MATERIAL_NAMES[simulation.material] ?? simulation.material}`;
+  }
+  if (simulation.kind === "cfd3d") {
+    const part = simulation.geometry_name?.replace(/\.[^.]+$/, "") ?? "solid";
+    return `3D CFD · ${part} · ${DOMAIN_NAMES[simulation.domain] ?? simulation.domain}`;
   }
   const body =
     simulation.shape === "airfoil" && simulation.naca
@@ -50,6 +61,13 @@ export const FEA_STAGE_LABELS: Record<string, string> = {
   deck: "Setup",
   solve: "Solve",
   modal: "Frequencies",
+  results: "Results",
+};
+
+/** The stages of a 3D CFD job (workstation/run_cfd3d.sh), as shown in the list. */
+export const CFD3D_STAGE_LABELS: Record<string, string> = {
+  mesh: "Mesh",
+  solve: "Solve",
   results: "Results",
 };
 

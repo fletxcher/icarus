@@ -25,6 +25,7 @@ const CAPABILITIES = [
   "NACA airfoil search and comparison",
   "2D CFD (OpenFOAM) around airfoils, cylinders, ellipses, wedges and rectangles, with wall conditions",
   "Stress, deflection and frequencies of an uploaded STL solid (CalculiX), under spin, pressure and heat",
+  "3D CFD (OpenFOAM) of an uploaded STL solid: external flow, blade passages and rotating blades, with forces and surface pressure",
   "Plots, and flow images and video from finished simulations",
 ];
 

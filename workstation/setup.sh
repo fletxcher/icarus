@@ -13,7 +13,7 @@
 # CFD runs OpenFOAM (ESI release, OPENFOAM_PACKAGE) with gmsh meshes. If the work station
 # doesn't have the OpenFOAM apt repository yet, --install adds the official one.
 # CalculiX (https://www.calculix.de) comes from the distribution's calculix-ccx package. Meshing
-# an uploaded solid for CalculiX needs Python packages (numpy, pyvista, pytetwild) that --install
+# an uploaded solid for CalculiX needs Python packages (numpy, scipy, pyvista, pytetwild) that --install
 # puts in a virtual environment, $ICARUS_HOME/venv, so the system Python stays untouched.
 # Assumes a Debian/Ubuntu work station.
 #
@@ -30,13 +30,13 @@ MANIFEST="$ICARUS_HOME/.setup-packages"
 OPENFOAM_PACKAGE="${OPENFOAM_PACKAGE:-openfoam2512}"
 PACKAGES=(xfoil xvfb xauth gmsh calculix-ccx paraview ffmpeg python3-venv "$OPENFOAM_PACKAGE")
 VENV="$ICARUS_HOME/venv"
-PYTHON_PACKAGES=(numpy pyvista pytetwild)
+PYTHON_PACKAGES=(numpy scipy pyvista pytetwild)
 # The command each package provides: a tool already on the PATH needs no package.
 declare -A PROVIDES=([xfoil]=xfoil [xvfb]=xvfb-run [xauth]=xauth [gmsh]=gmsh [calculix-ccx]=ccx [paraview]=pvbatch [ffmpeg]=ffmpeg)
 # python3-venv has no command; it's there once a virtual environment can be made.
 venv_possible() { python3 -c "import ensurepip, venv" 2> /dev/null; }
 # Files this script puts in $ICARUS_HOME/bin (and the name an earlier version used).
-RUNNER_FILES=(run_openfoam.sh cfd_case.py run_calculix.sh render_video.py run_fea.sh fea_case.py)
+RUNNER_FILES=(run_openfoam.sh cfd_case.py run_calculix.sh render_video.py run_fea.sh fea_case.py run_cfd3d.sh cfd3d_case.py)
 STALE_FILES=(run_case.sh)
 
 usage() {
@@ -226,10 +226,10 @@ ensure_python_environment() {
 }
 
 check_fea() {
-  if "$VENV/bin/python" -c "import numpy, pyvista, pytetwild" 2> /dev/null; then
-    log "FEA mesher check passed (numpy, pyvista, pytetwild in $VENV)"
+  if "$VENV/bin/python" -c "import numpy, scipy, pyvista, pytetwild" 2> /dev/null; then
+    log "FEA mesher check passed (numpy, scipy, pyvista, pytetwild in $VENV)"
   else
-    log "FEA mesher check FAILED: the Python environment $VENV is missing numpy, pyvista or pytetwild"
+    log "FEA mesher check FAILED: the Python environment $VENV is missing numpy, scipy, pyvista or pytetwild"
     return 1
   fi
 }

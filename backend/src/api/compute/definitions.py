@@ -43,6 +43,48 @@ CFD_CASE: dict[str, Any] = {
     },
 }
 
+CFD3D_CASE: dict[str, Any] = {
+    "bsonType": "object",
+    "additionalProperties": False,
+    "required": ["kind", "geometry_file_id", "domain", "speed_ms"],
+    "properties": {
+        "kind": {"bsonType": "string", "enum": ["cfd3d"]},
+        "geometry_file_id": {"bsonType": "string"},
+        "geometry_name": {"bsonType": NULLABLE_STRING},
+        "units": {"bsonType": "string", "enum": ["mm", "m", "in"]},
+        "domain": {"bsonType": "string", "enum": ["external", "passage", "rotating"]},
+        "speed_ms": {"bsonType": "number", "minimum": 0, "exclusiveMinimum": True, "maximum": 400},
+        "flow_direction": {
+            "bsonType": "array",
+            "items": {"bsonType": "number"},
+            "minItems": 3,
+            "maxItems": 3,
+        },
+        "density_kg_m3": {"bsonType": "number", "minimum": 0, "exclusiveMinimum": True},
+        "kinematic_viscosity_m2_s": {"bsonType": "number", "minimum": 0, "exclusiveMinimum": True},
+        "speed_of_sound_ms": {"bsonType": "number", "minimum": 0, "exclusiveMinimum": True},
+        "turbulence_intensity": {"bsonType": "number", "minimum": 0.001, "maximum": 0.3},
+        "mesh": {"bsonType": "string", "enum": ["coarse", "medium", "fine"]},
+        "iterations": {"bsonType": ["int", "long", "null"], "minimum": 50, "maximum": 5000},
+        "fill_cavities": {"bsonType": "bool"},
+        "pitch": {"bsonType": ["number", "null"], "minimum": 0, "exclusiveMinimum": True},
+        "pitch_axis": {"bsonType": ["string", "null"], "enum": ["x", "y", "z", None]},
+        "spin_rpm": {"bsonType": "number", "minimum": 0, "maximum": 200000},
+        "spin_axis_origin": {
+            "bsonType": "array",
+            "items": {"bsonType": "number"},
+            "minItems": 3,
+            "maxItems": 3,
+        },
+        "spin_axis_direction": {
+            "bsonType": "array",
+            "items": {"bsonType": "number"},
+            "minItems": 3,
+            "maxItems": 3,
+        },
+    },
+}
+
 FEA_CASE: dict[str, Any] = {
     "bsonType": "object",
     "additionalProperties": False,
@@ -99,7 +141,7 @@ SIMULATIONS_VALIDATOR: dict[str, Any] = {
             "notified_at": {"bsonType": ["date", "null"]},
             # Inputs, as given to the work station in case.json: a CfdCase or a FeaCase, told
             # apart by `kind` (older CFD jobs have none).
-            "case": {"anyOf": [CFD_CASE, FEA_CASE]},
+            "case": {"anyOf": [CFD_CASE, FEA_CASE, CFD3D_CASE]},
             "status": {"bsonType": "string", "enum": list(get_args(SimulationStatus))},
             # Written by the work station's run_openfoam.sh (status.json): cl, cd, cm, history,
             # warnings and so on.

@@ -5,12 +5,13 @@ Simulations take minutes to hours, so jobs are fire-and-poll rather than awaited
 1. The backend creates `{WS_WORKDIR}/jobs/{job_id}/case.json` on the work station (for an FEA
    job also `geometry.stl`, the uploaded solid).
 2. It launches `{WS_CFD_SCRIPT} {job_dir}` detached (see `workstation/run_openfoam.sh`), or
-   `run_fea.sh` next to it for FEA.
+   `run_fea.sh` or `run_cfd3d.sh` next to it for FEA and 3D CFD (which also get `geometry.stl`).
 3. That script keeps `{job_dir}/status.json` up to date:
    `{"status": "running" | "completed" | "failed", "result": {...}, "error": "..."}`.
 4. Status checks read `status.json` and mirror it into the `simulations` collection.
 
-`cfd_case.py` and `fea_case.py` next to the run scripts answer the monitor's questions.
+`cfd_case.py`, `fea_case.py` and `cfd3d_case.py` next to the run scripts answer the monitor's
+questions.
 """
 
 import json
@@ -30,6 +31,7 @@ from ..files.repository import FileRepository
 from .runner import CommandRunner
 from .schemas import (
     TERMINAL_STATUSES,
+    Cfd3dCase,
     CfdCase,
     FeaCase,
     Simulation,
@@ -50,7 +52,7 @@ JOB_FILES = {
     "flow.mp4": "video/mp4",
     "velocity.png": "image/png",
     "pressure.png": "image/png",
-    # An FEA job's surface with the stress, displacement and temperature on it (fea_case.py).
+    # An FEA or 3D CFD job's surface with its results on it (fea_case.py, cfd3d_case.py).
     "view.json": "application/json",
 }
 
@@ -89,13 +91,12 @@ class SimulationService:
 
     def _tool(self, kind: str, name: str) -> str:
         """Path of a script that is installed next to the CFD run script."""
-        prefix = "fea" if kind == "fea" else "cfd"
-        return posixpath.join(posixpath.dirname(self._script), name.format(kind=prefix))
+        return posixpath.join(posixpath.dirname(self._script), name.format(kind=kind))
 
     def _job_dir(self, job_id: str) -> str:
         return f"{self._workdir}/jobs/{job_id}"
 
-    async def _geometry(self, case: FeaCase) -> tuple[FeaCase, bytes]:
+    async def _geometry(self, case: FeaCase | Cfd3dCase) -> tuple[FeaCase | Cfd3dCase, bytes]:
         """The uploaded solid an FEA case names, and the case with the file's name filled in."""
         found = (
             await self._files.original(case.geometry_file_id, self._user_id)
@@ -110,14 +111,16 @@ class SimulationService:
         stored, data = found
         if stored.kind != "stl":
             raise GeometryUnavailable(
-                f"{stored.name} is a {stored.kind.upper()} file; FEA needs an STL of a closed solid"
+                f"{stored.name} is a {stored.kind.upper()} file; an STL of a closed solid is needed"
             )
         return case.model_copy(update={"geometry_name": stored.name}), data
 
-    async def submit(self, case: CfdCase | FeaCase, *, thread_id: str | None = None) -> Simulation:
+    async def submit(
+        self, case: CfdCase | FeaCase | Cfd3dCase, *, thread_id: str | None = None
+    ) -> Simulation:
         """Starts a job. Raises GeometryUnavailable for an FEA case whose file isn't usable."""
         geometry = None
-        if isinstance(case, FeaCase):
+        if isinstance(case, FeaCase | Cfd3dCase):
             case, geometry = await self._geometry(case)
         now = datetime.now(UTC)
         doc = {
@@ -136,7 +139,7 @@ class SimulationService:
         logger.info("%s job %s queued: %s", case.kind, doc["_id"], case.model_dump())
 
         job_dir = self._job_dir(doc["_id"])
-        script = self._tool("fea", "run_{kind}.sh") if case.kind == "fea" else self._script
+        script = self._script if case.kind == "cfd" else self._tool(case.kind, "run_{kind}.sh")
         try:
             await self._runner.run(f"mkdir -p {shlex.quote(job_dir)}")
             await self._runner.write_file(f"{job_dir}/case.json", case.model_dump_json(indent=2))
@@ -160,7 +163,7 @@ class SimulationService:
         return await self._update(doc["_id"], status="running")
 
     async def _monitor(self, *args: str, kind: str = "cfd") -> dict[str, Any]:
-        """Runs workstation/cfd_case.py or fea_case.py (installed next to the run scripts) and
+        """Runs workstation/cfd_case.py, fea_case.py or cfd3d_case.py (next to the run scripts) and
         returns its JSON."""
         tool = self._tool(kind, "{kind}_case.py")
         command = " ".join(["python3", *map(shlex.quote, (tool, *args))])
@@ -244,7 +247,7 @@ class SimulationService:
             .to_list(MAX_LISTED)
         )
         progress: dict[str, dict[str, Any]] = {}
-        for kind in ("cfd", "fea"):
+        for kind in ("cfd", "fea", "cfd3d"):
             ids = [doc["_id"] for doc in active_docs if doc["case"].get("kind", "cfd") == kind]
             if not ids:
                 continue
@@ -310,7 +313,8 @@ class SimulationService:
             created = doc["created_at"].replace(tzinfo=UTC)
             case = doc.get("case", {})
             # Older jobs have no shape and are all airfoils; an FEA job is counted as "fea".
-            shape = "fea" if case.get("kind") == "fea" else case.get("shape") or "airfoil"
+            kind = case.get("kind")
+            shape = kind if kind in ("fea", "cfd3d") else case.get("shape") or "airfoil"
             for since, period in periods.values():
                 if since is not None and created < since:
                     continue

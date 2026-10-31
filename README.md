@@ -37,6 +37,18 @@ The frontend talks to the backend at `NEXT_PUBLIC_API_URL` (default
 reply as it streams: the model's reasoning, every tool call with its arguments, status
 and result, then the answer.
 
+**Where you land.** `frontend/proxy.ts` runs before any page is sent: a browser holding the
+session cookie goes straight to the app (opening on a new chat, not the last one) and is taken
+off `/login` and `/signup`; one without goes to `/login`. It only checks that the cookie is
+there. If the session behind it has expired, the app finds out when it asks the API (401),
+signs the stale cookie out and returns to the login page, and if the API can't be reached it says
+so with a "Try again" button instead of treating that as being signed out (which would bounce
+between the pages). Cookies are shared by every port of a host, so this works with the API on
+`localhost:8000` and with the API on the same domain; with `NEXT_PUBLIC_API_URL` pointing at
+another site the proxy stands aside and the pages do the same check by asking the API. Moving
+between the chat and a simulation's page keeps the chat you were in; a page load or signing
+in opens a new one.
+
 ## Backend
 
 ```bash
@@ -112,6 +124,7 @@ backend/src/api/
 workstation/setup.sh             Prepares (or cleans up) a fresh simulation work station
 workstation/run_openfoam.sh          Placeholder CFD entrypoint, installed on the work station by setup.sh
 workstation/run_fea.sh, fea_case.py  FEA entrypoint and its case builder (mesh, CalculiX deck, results)
+workstation/run_cfd3d.sh, cfd3d_case.py  3D CFD entrypoint and its case builder (snappyHexMesh, simpleFoam, results)
 ```
 
 ### API
@@ -233,7 +246,7 @@ Tools are only given to the model when they can actually run, checked at startup
 |---|---|
 | `create_plot` | always |
 | `run_xfoil_polar`, `search_naca4_airfoils` | `XFOIL_RUNNER=local` with `xfoil` (and `xvfb-run` unless `XFOIL_DISPLAY=none`) installed, or `XFOIL_RUNNER=ws` with a work station |
-| `submit_cfd_simulation`, `submit_fea_simulation`, `get_simulation_status` | a work station is configured (`WS_HOST`, or the user's own) |
+| `submit_cfd_simulation`, `submit_fea_simulation`, `submit_cfd3d_simulation`, `get_simulation_status` | a work station is configured (`WS_HOST`, or the user's own) |
 
 The system prompt lists the available tools and names each missing capability with the
 reason, and tells the model to say plainly when something isn't available instead of
@@ -295,8 +308,34 @@ no flat face lies there. A displacement over a quarter of the part's size is fla
 
 Stress at the clamp is an artefact of clamping, so results are reported both anywhere and away from it
 (more than 10% of the part's length from the support). Creep, fatigue, contact and a real support
-(a dovetail, say) aren't modelled. The mesher needs numpy, pyvista and pytetwild, which `setup.sh`
+(a dovetail, say) aren't modelled. The mesher needs numpy, scipy, pyvista and pytetwild, which `setup.sh`
 puts in `~/icarus/venv`. FEA jobs appear in the simulations list and have their own page.
+
+### 3D CFD on an uploaded solid
+
+`submit_cfd3d_simulation` runs steady incompressible RANS (`simpleFoam`, k-omega SST with wall
+functions) around, or through, an uploaded STL. The job is `case.json` plus `geometry.stl`, run by
+`run_cfd3d.sh`: **mesh** (`cfd3d_case.py mesh`: a `blockMesh` box, then `snappyHexMesh` with surface
+and distance refinement), **solve** (`decomposePar`, `mpirun simpleFoam`), **results**
+(`foamToVTK` of the surfaces, then `cfd3d_case.py results`). Three domains:
+
+| Domain | Box and boundaries | Reports |
+|---|---|---|
+| `external` | 3 lengths upstream, 7 downstream, 2.5 to the sides; freestream far field | drag, cross force, moments, pressure and wall shear on the solid |
+| `passage` | one blade pitch wide, `cyclic` across it, slip at the ends of the span | the above plus total-pressure loss, flow turning and inlet/exit angles, mass balance |
+| `rotating` | a cylindrical MRF zone (`rotatingZone`) around the solid at `spin_rpm` | thrust, torque, shaft power, CT, CP, advance ratio, propulsive efficiency |
+
+Cavities and holes in the STL are filled into one outer envelope (`fill_cavities`), since the flow
+can't reach them. The mesh level (coarse, medium, fine) sets the refinement and the iteration count;
+each level has a cell budget (about 450k, 1M and 1.6M), and if the mesh overshoots it the mesher
+falls back to the next coarser level and says so; `ICARUS_NPROC` caps the solver's processes (4). `results` writes `view.json` like FEA's,
+with the surface pressure, pressure coefficient and wall shear stress for the job's 3D viewer.
+
+Limits, all repeated in the results' warnings: the solver is incompressible, so it warns above
+Mach 0.3; wall functions want y+ between 30 and 300; rotating cases are frozen-rotor (MRF), not
+unsteady; the pitch of a passage must be larger than the solid's own width in that direction (blades
+that overlap, such as a root block wider than the pitch, are refused); and a job needs numpy, scipy,
+pyvista and the OpenFOAM `snappyHexMesh` and `foamToVTK`.
 
 ### Plots
 

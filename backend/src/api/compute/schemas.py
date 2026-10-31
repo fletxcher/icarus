@@ -210,6 +210,102 @@ class FeaCase(BaseModel):
         return self
 
 
+class Cfd3dCase(BaseModel):
+    """Inputs for a 3D CFD analysis of an uploaded solid in a steady, incompressible stream.
+
+    The solid is meshed with hexahedra (snappyHexMesh) and solved with k-omega SST and wall
+    functions. Dimensions are in the file's units (`units`); flow quantities are SI. Directions
+    are in the STL file's axes. Reliable up to about Mach 0.3.
+    """
+
+    kind: Literal["cfd3d"] = "cfd3d"
+    geometry_file_id: str = Field(
+        description="Id of an uploaded STL file, as shown in the attachment (id='...')"
+    )
+    geometry_name: str | None = Field(default=None, description="Set automatically")
+    units: Literal["mm", "m", "in"] = Field(
+        default="mm", description="The units the STL's coordinates are in (an STL doesn't say)"
+    )
+    domain: Literal["external", "passage", "rotating"] = Field(
+        description=(
+            "'external': the solid in open flow (drag, lift, surface pressure). 'passage': one "
+            "blade of a cascade, periodic in the pitch direction (needs pitch and pitch_axis; "
+            "gives loss and flow turning). 'rotating': a propeller, fan or rotor in a stream "
+            "(needs spin_rpm and the spin axis; gives thrust, torque and power; frozen-rotor)."
+        )
+    )
+    speed_ms: float = Field(gt=0, le=400, description="Inflow speed in m/s")
+    flow_direction: list[float] = Field(
+        default_factory=lambda: [1.0, 0.0, 0.0],
+        min_length=3,
+        max_length=3,
+        description="Direction the flow travels, in the STL's axes (e.g. [0, -1, 0])",
+    )
+    density_kg_m3: float = Field(default=1.225, gt=0, description="Fluid density (air at 15 C)")
+    kinematic_viscosity_m2_s: float = Field(
+        default=1.5e-5, gt=0, description="Fluid kinematic viscosity (air at 15 C)"
+    )
+    speed_of_sound_ms: float = Field(
+        default=340.0,
+        gt=0,
+        description="Only used to warn when the flow is too fast to be incompressible",
+    )
+    turbulence_intensity: float = Field(default=0.05, ge=0.001, le=0.3)
+    mesh: Literal["coarse", "medium", "fine"] = Field(
+        default="medium",
+        description="Mesh fineness; a level too big for the work station is coarsened",
+    )
+    iterations: int | None = Field(
+        default=None,
+        ge=50,
+        le=5000,
+        description="SIMPLE iterations to run at most; default by mesh",
+    )
+    fill_cavities: bool = Field(
+        default=True,
+        description=(
+            "Plug small holes and internal cavities so the flow sees only the outside of the "
+            "part (cooling holes would otherwise be meshed as tiny internal flow passages)"
+        ),
+    )
+    pitch: float | None = Field(
+        default=None, gt=0, description="Passage only: blade spacing, in the file's units"
+    )
+    pitch_axis: Literal["x", "y", "z"] | None = Field(
+        default=None, description="Passage only: the axis the next blade lies along"
+    )
+    spin_rpm: float = Field(default=0.0, ge=0, le=200_000, description="Rotating only: speed")
+    spin_axis_origin: list[float] = Field(
+        default_factory=lambda: [0.0, 0.0, 0.0],
+        min_length=3,
+        max_length=3,
+        description="Rotating only: a point on the axis, in the file's units",
+    )
+    spin_axis_direction: list[float] = Field(
+        default_factory=lambda: [0.0, 0.0, 1.0],
+        min_length=3,
+        max_length=3,
+        description="Rotating only: direction of the axis",
+    )
+
+    @model_validator(mode="after")
+    def _check(self) -> "Cfd3dCase":
+        if not any(self.flow_direction):
+            raise ValueError("flow_direction can't be all zeros")
+        if self.domain == "passage":
+            if self.pitch is None or self.pitch_axis is None:
+                raise ValueError("a passage needs pitch and pitch_axis")
+            flow_axis = max(range(3), key=lambda i: abs(self.flow_direction[i]))
+            if "xyz"[flow_axis] == self.pitch_axis:
+                raise ValueError("the pitch axis must differ from the main flow direction")
+        if self.domain == "rotating":
+            if not self.spin_rpm:
+                raise ValueError("a rotating case needs spin_rpm")
+            if not any(self.spin_axis_direction):
+                raise ValueError("spin_axis_direction can't be all zeros")
+        return self
+
+
 def _default_kind(value: Any) -> Any:
     """Jobs stored before FEA existed have no `kind`: they are all CFD."""
     if isinstance(value, dict) and "kind" not in value:
@@ -218,7 +314,9 @@ def _default_kind(value: Any) -> Any:
 
 
 # A job's inputs: CFD or FEA, told apart by `kind`.
-JobCase = Annotated[CfdCase | FeaCase, Field(discriminator="kind"), BeforeValidator(_default_kind)]
+JobCase = Annotated[
+    CfdCase | FeaCase | Cfd3dCase, Field(discriminator="kind"), BeforeValidator(_default_kind)
+]
 
 
 class SimulationSummary(BaseModel):

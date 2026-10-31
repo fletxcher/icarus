@@ -100,7 +100,7 @@ def test_the_solid_has_to_be_the_users_own_stl(client, station):
     with pytest.raises(GeometryUnavailable, match="no uploaded geometry"):
         submit(text["id"])  # plain text files keep no original bytes
     obj = upload(client, "cube.obj", b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").json()
-    with pytest.raises(GeometryUnavailable, match="OBJ file; FEA needs an STL"):
+    with pytest.raises(GeometryUnavailable, match="OBJ file; an STL of a closed solid"):
         submit(obj["id"])
     assert not any("run_fea.sh" in command for command in station.commands)
 

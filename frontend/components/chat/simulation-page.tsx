@@ -3,6 +3,7 @@
 import { AppShell } from "@/components/app-shell";
 import { useSimulationMonitor } from "@/hooks/use-simulation-monitor";
 import { jobName } from "@/lib/chat/simulation-format";
+import { Cfd3dDetail } from "./cfd3d-detail";
 import { FeaDetail } from "./fea-detail";
 import { SimulationDetail } from "./simulation-detail";
 
@@ -14,6 +15,8 @@ export function SimulationPage({ jobId }: { jobId: string }) {
     <AppShell title={title} simulationId={jobId}>
       {monitor.simulation?.case.kind === "fea" ? (
         <FeaDetail jobId={jobId} monitor={monitor} />
+      ) : monitor.simulation?.case.kind === "cfd3d" ? (
+        <Cfd3dDetail jobId={jobId} monitor={monitor} />
       ) : (
         <SimulationDetail jobId={jobId} monitor={monitor} />
       )}

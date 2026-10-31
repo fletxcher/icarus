@@ -15,7 +15,7 @@ from api.agent.tools import plot_tools
 from api.auth.schemas import Identity, Preferences
 from api.catalog import COLLECTIONS, SESSIONS, SIMULATIONS, THREADS, USERS
 from api.compute.runner import CommandResult
-from api.compute.schemas import CfdCase, FeaCase
+from api.compute.schemas import Cfd3dCase, CfdCase, FeaCase
 from api.compute.simulations import SimulationService
 from api.credentials.schemas import WorkstationDetails
 from api.files.repository import FileRepository
@@ -122,6 +122,10 @@ def _run_app_flows(client: TestClient) -> None:
     solid = upload(client, "cube.stl", binary_stl(cube_triangles())).json()
     fea = FeaCase(geometry_file_id=solid["id"], support_axis="z", support_side="min", spin_rpm=1000)
     client.portal.call(partial(simulations(False).submit, fea, thread_id=thread_id))
+    cfd3d = Cfd3dCase(
+        geometry_file_id=solid["id"], domain="external", speed_ms=20, flow_direction=[0, -1, 0]
+    )
+    client.portal.call(partial(simulations(False).submit, cfd3d, thread_id=thread_id))
 
     # The user's own model key and work station, sealed.
     credentials = client.app.state.services.credentials

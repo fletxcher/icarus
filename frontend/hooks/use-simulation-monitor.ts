@@ -106,8 +106,8 @@ export function useSimulationMonitor(jobId: string): Monitor {
         if (cancelled) return;
         setState((previous) => ({ ...previous, simulation, missing: false }));
 
-        if (simulation.case.kind === "fea") {
-          // An FEA job has no residual or coefficient series: just its stage and log.
+        if (simulation.case.kind === "fea" || simulation.case.kind === "cfd3d") {
+          // An FEA or 3D CFD job has no residual or coefficient series: just its stage and log.
           const fea = await api.feaProgress(jobId);
           if (cancelled) return;
           setState((previous) => ({ ...previous, fea, error: null }));

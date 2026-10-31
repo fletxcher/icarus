@@ -26,6 +26,9 @@ const FIELD_LABELS: Record<string, string> = {
   von_mises: "von Mises stress",
   displacement: "Displacement",
   temperature: "Temperature",
+  pressure: "Pressure",
+  pressure_coefficient: "Pressure coefficient",
+  wall_shear: "Wall shear stress",
 };
 
 type Three = typeof import("three");
@@ -179,6 +182,7 @@ export function ModelViewer({ source, className }: { source: ModelSource; classN
           scene.current = null;
         };
         setPart({ size, maxDisplacement });
+        if (loaded && !loaded.fields.von_mises) setField(Object.keys(loaded.fields)[0] ?? "");
         setView(loaded);
         setStatus("ready");
       } catch (error) {
@@ -305,20 +309,22 @@ export function ModelViewer({ source, className }: { source: ModelSource; classN
               ))}
             </SelectContent>
           </Select>
-          <label className="flex items-center gap-2 text-muted-foreground">
-            Deformation
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={deformation}
-              onChange={(event) => setDeformation(Number(event.target.value))}
-              aria-label="Deformation"
-              className="w-28"
-            />
-            <span className="w-14 tabular-nums">{factor ? `×${format(factor)}` : "off"}</span>
-          </label>
+          {part.maxDisplacement > 0 && (
+            <label className="flex items-center gap-2 text-muted-foreground">
+              Deformation
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={deformation}
+                onChange={(event) => setDeformation(Number(event.target.value))}
+                aria-label="Deformation"
+                className="w-28"
+              />
+              <span className="w-14 tabular-nums">{factor ? `×${format(factor)}` : "off"}</span>
+            </label>
+          )}
           <label className="flex items-center gap-2 text-muted-foreground">
             <input
               type="checkbox"
