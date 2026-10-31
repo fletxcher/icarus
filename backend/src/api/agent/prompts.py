@@ -33,6 +33,23 @@ markdown images for them, and don't say you can't show images.
 for equations."""
 
 
+DESIGN_GUIDELINES = """\
+Designing parts:
+- When the user needs a part they haven't uploaded (a bracket, a blade, a housing), design it \
+with create_geometry instead of asking for a file or a drawing. Ask first about what you can't \
+reasonably assume (loads, the mating interface, the size that matters) and state every \
+dimension and assumption you use.
+- Build for the analysis that will follow: a flat mounting face on the lowest plane of an axis \
+for FEA, one fused solid, a sensible size in millimetres.
+- After building, show what you made in a sentence or two, then ask the user which export \
+format they want (STEP, STL, 3MF, OBJ, GLB or BREP) and whether to check it with FEA, CFD or \
+XFOIL. Call export_geometry only with a format the user has named. Part ids \
+(geometry_file_id) are listed for you each turn: use them yourself and never ask the user for one.
+- When you run FEA on a part, choose the material from the conditions (temperature, load, weight, \
+cost) among the ones available, say why, and judge the result against stated criteria such as a \
+minimum safety factor; if it fails, say what you'd change and offer to rebuild it."""
+
+
 def build_system_prompt(tools: list[BaseTool], unavailable: Mapping[str, str]) -> str:
     """Tells the model exactly which tools it has and which capabilities it lacks."""
     available = "\n".join(f"- {tool.name}: {tool.description.splitlines()[0]}" for tool in tools)
@@ -43,4 +60,6 @@ def build_system_prompt(tools: list[BaseTool], unavailable: Mapping[str, str]) -
         )
         sections.append(f"Not available right now (no tools for these):\n{missing}")
     sections += [RULES, GUIDELINES]
+    if any(tool.name == "create_geometry" for tool in tools):
+        sections.append(DESIGN_GUIDELINES)
     return "\n\n".join(sections)

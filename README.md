@@ -124,6 +124,7 @@ backend/src/api/
 workstation/setup.sh             Prepares (or cleans up) a fresh simulation work station
 workstation/run_openfoam.sh          Placeholder CFD entrypoint, installed on the work station by setup.sh
 workstation/run_fea.sh, fea_case.py  FEA entrypoint and its case builder (mesh, CalculiX deck, results)
+workstation/cad_build.py  Runs the agent's build123d code and writes the part (STL) and its report
 workstation/run_cfd3d.sh, cfd3d_case.py  3D CFD entrypoint and its case builder (snappyHexMesh, simpleFoam, results)
 ```
 
@@ -246,6 +247,7 @@ Tools are only given to the model when they can actually run, checked at startup
 |---|---|
 | `create_plot` | always |
 | `run_xfoil_polar`, `search_naca4_airfoils` | `XFOIL_RUNNER=local` with `xfoil` (and `xvfb-run` unless `XFOIL_DISPLAY=none`) installed, or `XFOIL_RUNNER=ws` with a work station |
+| `create_geometry`, `export_geometry` | a work station is configured, with `build123d` in its Python environment (`setup.sh --install` adds it) |
 | `submit_cfd_simulation`, `submit_fea_simulation`, `submit_cfd3d_simulation`, `get_simulation_status` | a work station is configured (`WS_HOST`, or the user's own) |
 
 The system prompt lists the available tools and names each missing capability with the
@@ -310,6 +312,27 @@ Stress at the clamp is an artefact of clamping, so results are reported both any
 (more than 10% of the part's length from the support). Creep, fatigue, contact and a real support
 (a dovetail, say) aren't modelled. The mesher needs numpy, scipy, pyvista and pytetwild, which `setup.sh`
 puts in `~/icarus/venv`. FEA jobs appear in the simulations list and have their own page.
+
+### Designing parts
+
+`create_geometry` takes build123d Python code from the model, builds it on the work station
+(`workstation/cad_build.py`, in the same Python environment as the FEA mesher) and keeps the part
+as an ordinary STL file in the chat, together with the code. The FEA and 3D CFD tools take its id as
+`geometry_file_id` like an upload, so "design a bracket, then check it" needs no hand-off. The chat shows
+the part in 3D (the same viewer as uploads), the code, and a format menu with a download button.
+
+**Export formats** are STEP, STL, 3MF, OBJ, GLB and BREP. The agent is told to ask which one the user
+wants before calling `export_geometry`, and never to pick one itself; the card's menu works regardless.
+STL downloads are the stored file; the other formats are built again from the code on the work
+station (`GET /api/designs/{id}/export?format=`), so they take a few seconds and need it reachable.
+
+**What the code can do.** `cad_build.py` refuses code that imports anything but build123d, math,
+numpy and a few standard modules, or that uses `open`, `eval`, `getattr` or dunder attributes, then runs
+it with CPU, memory and file-size limits (and no network, when the kernel allows an unprivileged
+network namespace; the report says whether it did). That check is hygiene against mistakes,
+not a security boundary: the work station is the user's own machine, and the design code runs
+as that user. A failed build returns the error with the line of the model's code, for it to fix.
+Units are millimetres, and a part must be one fused solid to be analysed (the report warns otherwise).
 
 ### 3D CFD on an uploaded solid
 

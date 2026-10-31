@@ -4,6 +4,7 @@ from langchain_core.messages import AIMessage
 
 from api.agent.capabilities import (
     CFD_CAPABILITY,
+    DESIGN_CAPABILITY,
     NO_WORKSTATION,
     XFOIL_CAPABILITY,
     unavailable_capabilities,
@@ -26,13 +27,17 @@ def test_capabilities_follow_the_setup(monkeypatch: pytest.MonkeyPatch):
 
     # Local XFOIL with xvfb, no work station: only CFD is missing.
     local = settings(xfoil_runner="local")
-    assert unavailable_capabilities(local, workstation=False) == {CFD_CAPABILITY: NO_WORKSTATION}
+    assert unavailable_capabilities(local, workstation=False) == {
+        CFD_CAPABILITY: NO_WORKSTATION,
+        DESIGN_CAPABILITY: NO_WORKSTATION,
+    }
     # A work station makes both available.
     assert unavailable_capabilities(settings(xfoil_runner="ws"), workstation=True) == {}
     # XFOIL on the work station without a work station: neither.
     assert set(unavailable_capabilities(settings(xfoil_runner="ws"), workstation=False)) == {
         XFOIL_CAPABILITY,
         CFD_CAPABILITY,
+        DESIGN_CAPABILITY,
     }
 
     installed.discard("xvfb-run")

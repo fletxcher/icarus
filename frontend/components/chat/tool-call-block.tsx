@@ -3,11 +3,13 @@
 import Link from "next/link";
 import {
   ActivityIcon,
+  BoxIcon,
   ChartLineIcon,
   ChevronRightIcon,
   CircleCheckIcon,
   CircleXIcon,
   CpuIcon,
+  DownloadIcon,
   LoaderCircleIcon,
   PlaneIcon,
   SearchIcon,
@@ -15,6 +17,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { DesignCard, designDownloadUrl } from "./design-card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import type { ToolPart } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
@@ -27,6 +30,8 @@ const TOOLS: Record<string, { label: string; icon: LucideIcon }> = {
   submit_cfd_simulation: { label: "CFD simulation", icon: CpuIcon },
   submit_fea_simulation: { label: "FEA simulation", icon: CpuIcon },
   submit_cfd3d_simulation: { label: "3D CFD simulation", icon: CpuIcon },
+  create_geometry: { label: "CAD design", icon: BoxIcon },
+  export_geometry: { label: "Export geometry", icon: BoxIcon },
   get_simulation_status: { label: "Simulation status", icon: CpuIcon },
   create_plot: { label: "Plot", icon: ChartLineIcon },
 };
@@ -66,12 +71,37 @@ function jobIdOf(part: ToolPart): string | null {
   return null;
 }
 
+const FILE_ID = /File id: ([0-9a-f-]{36})/i;
+
 export function ToolCallBlock({ part }: { part: ToolPart }) {
   const jobId = jobIdOf(part);
+  const designId =
+    part.name === "create_geometry" && part.result ? FILE_ID.exec(part.result)?.[1] : null;
+  const exported =
+    part.name === "export_geometry" &&
+    part.result?.startsWith("Exported") &&
+    typeof part.args.geometry_file_id === "string" &&
+    typeof part.args.format === "string"
+      ? { id: part.args.geometry_file_id, format: part.args.format }
+      : null;
 
   return (
     <div className="flex flex-col gap-1.5">
       <ToolCallCard part={part} />
+      {designId && (
+        <DesignCard
+          fileId={designId}
+          code={typeof part.args.code === "string" ? part.args.code : undefined}
+        />
+      )}
+      {exported && (
+        <Button variant="outline" size="sm" className="self-start" asChild>
+          <a href={designDownloadUrl(exported.id, exported.format)} download>
+            <DownloadIcon />
+            Download {exported.format.toUpperCase()}
+          </a>
+        </Button>
+      )}
       {jobId && (
         <Button variant="outline" size="sm" className="self-start" asChild>
           <Link href={`/simulations/${jobId}`}>

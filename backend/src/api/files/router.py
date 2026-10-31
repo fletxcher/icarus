@@ -63,9 +63,11 @@ MEDIA_TYPES = {
 
 
 @router.get("/{file_id}/original")
-async def download_original(file_id: str, services: ServicesDep, user: CurrentUser) -> Response:
+async def download_original(
+    file_id: str, services: ServicesDep, user: CurrentUser, download: bool = False
+) -> Response:
     """The file as it was uploaded (meshes, CAD files and PDFs keep their original bytes), for
-    the browser to draw."""
+    the browser to draw, or with `download` to save."""
     found = await services.files.original(file_id, user.id)
     if found is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No original is kept for this file")
@@ -73,5 +75,12 @@ async def download_original(file_id: str, services: ServicesDep, user: CurrentUs
     return Response(
         data,
         media_type=MEDIA_TYPES.get(stored.kind, "application/octet-stream"),
-        headers={"Cache-Control": "private, max-age=3600"},
+        headers={
+            "Cache-Control": "private, max-age=3600",
+            **(
+                {"Content-Disposition": f'attachment; filename="{stored.name.replace('"', "")}"'}
+                if download
+                else {}
+            ),
+        },
     )

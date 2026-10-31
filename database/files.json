@@ -52,6 +52,9 @@
         "data": {
           "bsonType": "binData"
         },
+        "design_code": {
+          "bsonType": "string"
+        },
         "thread_id": {
           "bsonType": [
             "string",

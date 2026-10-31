@@ -36,9 +36,12 @@ class FileRepository:
         *,
         kind: str = "text",
         data: bytes | None = None,
+        thread_id: str | None = None,
+        design_code: str | None = None,
     ) -> StoredFile:
         """`text` is what the model reads; `data` is the original, kept for files that are
-        summarized rather than pasted (meshes, CAD, PDFs)."""
+        summarized rather than pasted (meshes, CAD, PDFs). A part the agent designed is in a chat
+        from the start (`thread_id`) and keeps the build123d code that made it (`design_code`)."""
         doc = {
             "_id": str(uuid4()),
             "user_id": user_id,
@@ -47,11 +50,15 @@ class FileRepository:
             "content_type": content_type,
             "text": text,
             "kind": kind,
-            "thread_id": None,
+            "thread_id": thread_id,
             "created_at": datetime.now(UTC),
         }
         await self._files.insert_one(
-            {**doc, **({"data": Binary(data)} if data is not None else {})}
+            {
+                **doc,
+                **({"data": Binary(data)} if data is not None else {}),
+                **({"design_code": design_code} if design_code is not None else {}),
+            }
         )
         return StoredFile.model_validate(doc)
 
@@ -71,6 +78,22 @@ class FileRepository:
         if doc is None or "data" not in doc:
             return None
         return StoredFile.model_validate(doc), bytes(doc["data"])
+
+    async def design_code(self, file_id: str, user_id: str) -> str | None:
+        """The build123d code of a part the user's agent designed, or None for any other file."""
+        doc = await self._files.find_one(
+            {"_id": file_id, "user_id": user_id, "design_code": {"$exists": True}},
+            {"design_code": True},
+        )
+        return doc["design_code"] if doc else None
+
+    async def designs_in_thread(self, thread_id: str, user_id: str) -> list[StoredFile]:
+        """The parts the agent designed in this chat, oldest first."""
+        cursor = self._files.find(
+            {"user_id": user_id, "thread_id": thread_id, "design_code": {"$exists": True}},
+            METADATA,
+        ).sort("created_at", 1)
+        return [StoredFile.model_validate(doc) async for doc in cursor]
 
     async def attach(self, file_ids: list[str], thread_id: str, user_id: str) -> None:
         await self._files.update_many(

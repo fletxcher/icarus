@@ -11,6 +11,7 @@ from ..agent.stream import stream_turn, title_first
 from ..auth.router import CurrentUser
 from ..compute.describe import running_note
 from ..dependencies import ServicesDep
+from ..design.service import designs_note
 from ..languages import Language
 from .schemas import (
     MessageCreate,
@@ -89,7 +90,8 @@ class Turn:
     agent: CompiledStateGraph
     model: str
     language: Language | None = None
-    # What the agent is told about this chat's running simulations (see compute/describe.py).
+    # What the agent is told about this chat's running simulations and designed parts (see
+    # compute/describe.py and design/service.py).
     situation: str | None = None
     # Running when this turn starts a chat that still has a placeholder title.
     title: asyncio.Task[str | None] | None = None
@@ -140,7 +142,11 @@ async def start_turn(
             status.HTTP_409_CONFLICT, "Nothing to regenerate: the last message isn't a user's"
         )
     simulations = await services.compute.simulations_for(user.id)
-    situation = running_note(await simulations.running_in_thread(thread_id))
+    notes = [
+        running_note(await simulations.running_in_thread(thread_id)),
+        designs_note(await services.files.designs_in_thread(thread_id, user.id)),
+    ]
+    situation = "\n\n".join(note for note in notes if note) or None
 
     # Name the chat from its first message, alongside the reply.
     title = None

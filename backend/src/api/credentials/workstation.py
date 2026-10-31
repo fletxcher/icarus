@@ -28,6 +28,7 @@ SCRIPTS = [
     "fea_case.py",
     "run_cfd3d.sh",
     "cfd3d_case.py",
+    "cad_build.py",
 ]
 SETUP_SCRIPT = "setup.sh"
 
@@ -210,7 +211,7 @@ async def run_checks(runner: SSHRunner) -> list[Check]:
     # The Python environment the FEA mesher runs in (setup.sh makes it next to bin/).
     mesher = await runner.run(
         f"{shlex.quote(target.workdir)}/venv/bin/python "
-        "-c 'import numpy, pyvista, pytetwild, scipy'",
+        "-c 'import numpy, pyvista, pytetwild, scipy, build123d'",
         timeout_s=COMMAND_TIMEOUT_S,
     )
     present: dict[str, bool] = {"fea_mesher": mesher.ok}
@@ -237,7 +238,11 @@ async def run_checks(runner: SSHRunner) -> list[Check]:
     for check_id, label, names in [
         ("xfoil", "XFOIL", ("xfoil", "xvfb-run")),
         ("cfd", "OpenFOAM and gmsh", ("openfoam", "gmsh", "python3")),
-        ("fea", "CalculiX, and the Python mesher for FEA and 3D CFD", ("ccx", "fea_mesher")),
+        (
+            "fea",
+            "CalculiX, and the Python mesher and CAD builder for FEA, 3D CFD and design",
+            ("ccx", "fea_mesher"),
+        ),
         ("video", "Flow videos (ParaView, ffmpeg)", ("pvbatch", "ffmpeg", "xvfb-run")),
     ]:
         ok, detail = tools(*names)

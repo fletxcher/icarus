@@ -241,6 +241,11 @@ export const api = {
   simulationFileUrl: (id: string, name: string) => `${API_URL}/api/simulations/${id}/files/${name}`,
   /** URL of an uploaded mesh, CAD file or PDF as it was sent (what the 3D viewer draws). */
   fileOriginalUrl: (id: string) => `${API_URL}/api/files/${id}/original`,
+  /** A designed part saved as a file (the STL it was built as). */
+  fileDownloadUrl: (id: string) => `${API_URL}/api/files/${id}/original?download=true`,
+  /** A designed part built again in another format (STEP, 3MF, BREP, OBJ, GLB), to download. */
+  designExportUrl: (id: string, format: string) =>
+    `${API_URL}/api/designs/${id}/export?format=${format}`,
   /** Removes a file that hasn't been sent yet. */
   deleteFile: (id: string) => request<void>(`/files/${id}`, { method: "DELETE" }),
   /** Deletes a message and every later one (before an edit or regenerate). */

@@ -26,6 +26,7 @@ const CAPABILITIES = [
   "2D CFD (OpenFOAM) around airfoils, cylinders, ellipses, wedges and rectangles, with wall conditions",
   "Stress, deflection and frequencies of an uploaded STL solid (CalculiX), under spin, pressure and heat",
   "3D CFD (OpenFOAM) of an uploaded STL solid: external flow, blade passages and rotating blades, with forces and surface pressure",
+  "Designing parts from a description (build123d CAD), previewed in 3D and exported as STEP, STL, 3MF, OBJ, GLB or BREP",
   "Plots, and flow images and video from finished simulations",
 ];
 

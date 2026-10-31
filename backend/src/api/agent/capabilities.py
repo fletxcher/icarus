@@ -6,6 +6,7 @@ from ..config import Settings
 
 XFOIL_CAPABILITY = "XFOIL airfoil analysis and airfoil search"
 CFD_CAPABILITY = "CFD and FEA simulations"
+DESIGN_CAPABILITY = "CAD design of parts (build123d)"
 
 NO_WORKSTATION = "no simulation work station is set up (the user can add one in Settings)"
 
@@ -27,4 +28,5 @@ def unavailable_capabilities(settings: Settings, *, workstation: bool) -> dict[s
         unavailable[XFOIL_CAPABILITY] = reason
     if not workstation:
         unavailable[CFD_CAPABILITY] = NO_WORKSTATION
+        unavailable[DESIGN_CAPABILITY] = NO_WORKSTATION
     return unavailable

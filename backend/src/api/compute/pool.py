@@ -16,6 +16,7 @@ from pymongo.asynchronous.database import AsyncDatabase
 from ..catalog import SIMULATIONS
 from ..config import Settings
 from ..credentials.repository import CredentialRepository, StoredWorkstation
+from ..design.service import DesignService
 from ..files.repository import FileRepository
 from .runner import CommandResult, CommandRunner, LocalRunner, SSHRunner, WorkstationTarget
 from .schemas import TERMINAL_STATUSES
@@ -154,6 +155,15 @@ class ComputePool:
             workdir=station.workdir,
             script=station.script,
             files=FileRepository(self._db),
+        )
+
+    async def designs_for(self, user_id: str) -> DesignService:
+        station = await self.workstation(user_id)
+        return DesignService(
+            station.runner,
+            workdir=station.workdir,
+            files=FileRepository(self._db),
+            user_id=user_id,
         )
 
     async def xfoil_for(self, user_id: str, station: Workstation | None = None) -> XfoilService:

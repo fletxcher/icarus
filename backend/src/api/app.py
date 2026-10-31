@@ -15,6 +15,7 @@ from .config import get_settings
 from .credentials import router as credentials_router
 from .db import create_client, ensure_schema
 from .dependencies import ServicesDep
+from .design import router as design_router
 from .files import router as files_router
 from .log_config import configure_logging
 from .middleware import RequestLoggingMiddleware
@@ -56,6 +57,7 @@ api.include_router(auth_router.router)
 api.include_router(chats_router.router)
 api.include_router(simulations_router.router)
 api.include_router(files_router.router)
+api.include_router(design_router.router)
 api.include_router(credentials_router.router)
 api.include_router(status_router)
 

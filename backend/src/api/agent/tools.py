@@ -1,7 +1,7 @@
 """Tools exposed to the agent. Each wraps a service and returns compact text for the LLM."""
 
 import json
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, StructuredTool
@@ -12,6 +12,7 @@ from ..compute.plots import describe_figure, validate_figure
 from ..compute.schemas import Cfd3dCase, CfdCase, FeaCase
 from ..compute.simulations import GeometryUnavailable, SimulationService
 from ..compute.xfoil import Polar, PolarRequest, XfoilService
+from ..design.service import DesignError, DesignService
 
 TOP_CANDIDATES = 5
 
@@ -27,6 +28,26 @@ class NacaSearchRequest(BaseModel):
 
 class SimulationLookup(BaseModel):
     job_id: str = Field(description="Job id returned by submit_cfd_simulation")
+
+
+class GeometryRequest(BaseModel):
+    name: str = Field(description="A short name for the part, e.g. 'mounting bracket'")
+    code: str = Field(
+        description=(
+            "build123d Python code that leaves the finished solid in a variable called `result`"
+        )
+    )
+
+
+class GeometryLookup(BaseModel):
+    geometry_file_id: str = Field(description="The id of a part you designed in this chat")
+
+
+class ExportRequest(BaseModel):
+    geometry_file_id: str = Field(description="The id create_geometry returned")
+    format: Literal["step", "stl", "3mf", "brep", "obj", "glb"] = Field(
+        description="The format the user said they want"
+    )
 
 
 def _format_polar(polar: Polar) -> str:
@@ -305,8 +326,100 @@ def plot_tools() -> list[BaseTool]:
     ]
 
 
+GEOMETRY_DESCRIPTION = """\
+Design a part by writing build123d code, which runs on the work station and returns a preview.
+The code runs as a script: `from build123d import *`, build the solid (builder mode, \
+`with BuildPart() as part: ...`, or algebra mode, `Box(...) - Cylinder(...)`), and finish with \
+`result = part.part` (or the Part itself). Rules: millimetres; put the dimensions in named \
+variables at the top; make one fused solid, not several; no files, network or other imports \
+than build123d, math and numpy. Orient it for the analysis it will get: for FEA put the \
+mounting or clamped face flat on the lowest (or highest) plane of an axis, e.g. z = 0; for \
+flow, align the flow with an axis. A failure returns the error and the line, so fix the code \
+and call again. Each call makes a new part with a new id; the part is also saved as an STL \
+the FEA and CFD tools take as geometry_file_id. It appears in the chat as a 3D view the user \
+can download in several formats. After building it, ask the user which format they want \
+before calling export_geometry."""
+
+EXPORT_DESCRIPTION = """\
+Export a part from create_geometry in a format the user has chosen. step (editable CAD, for \
+other CAD programs), stl or 3mf (3D printing), obj or glb (rendering and viewers), brep \
+(OpenCascade). \
+Ask the user which format they want first and never pick one yourself; the user can also \
+download any format from the part's card in the chat."""
+
+
+def design_tools(designs: DesignService) -> list[BaseTool]:
+    async def create_geometry(config: RunnableConfig, **fields) -> str:
+        request = GeometryRequest(**fields)
+        thread_id = config.get("configurable", {}).get("thread_id")
+        try:
+            built = await designs.build(request.name, request.code, thread_id=thread_id)
+        except DesignError as problem:
+            return f"The part wasn't built: {problem}"
+        report = built.report
+        size = " x ".join(f"{v:g}" for v in report["size_mm"])
+        lines = [
+            f"Built {built.file.name}. File id: {built.file.id}",
+            f"Size {size} mm, volume {report['volume_mm3']:,.0f} mm3, "
+            f"{report['faces']} faces, centre of mass {report['center_of_mass_mm']} mm.",
+            f"Bounding box (min, max): {report['bounding_box_mm']} mm.",
+            *[f"Warning: {note}" for note in report["notes"]],
+            "",
+            "The part is shown to the user as a 3D view with download buttons. Describe what you "
+            "built and the assumptions you made, then ask the user which export format they "
+            "want (STEP for CAD, STL or 3MF for printing, OBJ or GLB for rendering, BREP) and "
+            "whether to analyse it (FEA, or CFD) with this geometry_file_id. Don't export until "
+            "they've chosen a format.",
+        ]
+        return "\n".join(lines)
+
+    async def get_geometry(**fields) -> str:
+        found = await designs.code(GeometryLookup(**fields).geometry_file_id)
+        if found is None:
+            return "No designed part has that id."
+        name, code = found
+        return f"{name} was built with this build123d code:\n\n{code}"
+
+    async def export_geometry(**fields) -> str:
+        request = ExportRequest(**fields)
+        try:
+            exported = await designs.export(request.geometry_file_id, request.format)
+        except DesignError as problem:
+            return f"Not exported: {problem}"
+        return (
+            f"Exported {exported.name} ({len(exported.data) / 1000:.0f} kB). The user can download "
+            "it from the part's card in the chat."
+        )
+
+    return [
+        StructuredTool.from_function(
+            coroutine=create_geometry,
+            name="create_geometry",
+            description=GEOMETRY_DESCRIPTION,
+            args_schema=GeometryRequest,
+        ),
+        StructuredTool.from_function(
+            coroutine=get_geometry,
+            name="get_geometry",
+            description=(
+                "Read the build123d code of a part you designed, to change it: edit the code and "
+                "pass it to create_geometry, which makes a new part."
+            ),
+            args_schema=GeometryLookup,
+        ),
+        StructuredTool.from_function(
+            coroutine=export_geometry,
+            name="export_geometry",
+            description=EXPORT_DESCRIPTION,
+            args_schema=ExportRequest,
+        ),
+    ]
+
+
 def build_tools(
-    xfoil: XfoilService | None, simulations: SimulationService | None
+    xfoil: XfoilService | None,
+    simulations: SimulationService | None,
+    designs: DesignService | None = None,
 ) -> list[BaseTool]:
     """The tools that can actually run with the current setup."""
     tools = plot_tools()
@@ -314,4 +427,6 @@ def build_tools(
         tools += xfoil_tools(xfoil)
     if simulations is not None:
         tools += simulation_tools(simulations)
+    if designs is not None:
+        tools += design_tools(designs)
     return tools

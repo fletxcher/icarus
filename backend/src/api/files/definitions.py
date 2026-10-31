@@ -24,6 +24,9 @@ FILES_VALIDATOR: dict[str, Any] = {
             "kind": {"bsonType": "string", "enum": ["text", "csv", "stl", "obj", "step", "pdf"]},
             # The original bytes of the kinds that are summarized (stl, obj, step, pdf).
             "data": {"bsonType": "binData"},
+            # The build123d code of a part the agent designed (its STL is the file's data); the
+            # part is exported again from it in whatever format the user asks for.
+            "design_code": {"bsonType": "string"},
             # Null until the file is sent with a message; deleted along with its thread.
             "thread_id": {"bsonType": ["string", "null"]},
             "created_at": {"bsonType": "date"},
