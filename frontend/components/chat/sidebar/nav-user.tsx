@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/sidebar";
 import { languageName } from "@/lib/languages";
 import { useAuth } from "@/stores/auth-store";
+import { forgetLanding } from "@/stores/chat-actions";
 
 function initialsOf(text: string): string {
   return (
@@ -76,6 +77,7 @@ export function NavUser() {
   async function onLogout() {
     try {
       await logout();
+      forgetLanding();
       router.push("/login");
     } catch {
       toast.error("Couldn't log out. Try again.");

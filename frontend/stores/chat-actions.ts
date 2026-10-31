@@ -14,8 +14,20 @@ function errorMessage(error: unknown): string {
   return "Couldn't reach the server. Is the backend running?";
 }
 
-/** Loads models, threads and the remembered chat. Called once on mount. */
+// Whether the app has been opened in this browser tab since the page loaded or since signing
+// out. The first time it opens on a new chat; moving between pages afterwards (a simulation's
+// page and back) keeps the chat you were in.
+let landed = false;
+
+/** The next time the app opens it opens on a new chat (after signing out or in, say). */
+export function forgetLanding() {
+  landed = false;
+}
+
+/** Loads models, threads and, once the app is open, the chat you were in. Called on mount. */
 export async function bootstrap() {
+  const freshVisit = !landed;
+  landed = true;
   await useChatStore.persist.rehydrate();
   try {
     const [models, threads] = await Promise.all([api.listModels(), api.listThreads()]);
@@ -23,7 +35,7 @@ export async function bootstrap() {
     setModels(models);
     if (!models.some((option) => option.id === model) && models[0]) setModel(models[0].id);
     setThreads(threads);
-    if (activeThreadId && threads.some((thread) => thread.id === activeThreadId)) {
+    if (!freshVisit && activeThreadId && threads.some((thread) => thread.id === activeThreadId)) {
       await loadMessages(activeThreadId);
     } else {
       setActiveThread(null);

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { AppSidebar } from "@/components/chat/sidebar/app-sidebar";
+import { ServerUnreachable } from "@/components/server-unreachable";
 import { SimulationsButton } from "@/components/chat/simulations-button";
 import { SimulationsPanel } from "@/components/chat/simulations-panel";
 import { Separator } from "@/components/ui/separator";
@@ -10,7 +11,8 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/s
 import { useSimulationListPolling } from "@/hooks/use-simulation-list";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/stores/auth-store";
-import { bootstrap } from "@/stores/chat-actions";
+import { api } from "@/lib/api";
+import { bootstrap, forgetLanding } from "@/stores/chat-actions";
 import { useChatStore } from "@/stores/chat-store";
 
 /**
@@ -31,7 +33,7 @@ export function AppShell({
   const chatViewRequests = useChatStore((state) => state.chatViewRequests);
   const router = useRouter();
   const seenRequests = useRef(chatViewRequests);
-  const { user, load } = useAuth();
+  const { user, status, load } = useAuth();
   const signedIn = user !== null;
   // Whether this page has asked the server who is signed in yet (what the store remembers
   // from an earlier page may be stale, e.g. "nobody" from before logging in).
@@ -44,8 +46,15 @@ export function AppShell({
   }, [load]);
 
   useEffect(() => {
-    if (checked && !signedIn) router.replace("/login");
-  }, [checked, signedIn, router]);
+    if (!checked || signedIn || status !== "ready") return;
+    // The server said nobody is signed in. A leftover cookie (an expired session) is cleared
+    // first, or the proxy would send the login page straight back here.
+    forgetLanding();
+    void api
+      .logout()
+      .catch(() => undefined)
+      .finally(() => router.replace("/login"));
+  }, [checked, signedIn, status, router]);
 
   useEffect(() => {
     if (signedIn) void bootstrap();
@@ -61,7 +70,9 @@ export function AppShell({
   }, [chatViewRequests, router]);
 
   // Nothing of the app is shown until the server has said this person is signed in.
-  if (!signedIn) return null;
+  if (!signedIn) {
+    return status === "unreachable" ? <ServerUnreachable onRetry={() => void load()} /> : null;
+  }
 
   return (
     <SidebarProvider>

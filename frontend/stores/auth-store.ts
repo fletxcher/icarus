@@ -5,8 +5,11 @@ import { isLanguage, type LanguageCode } from "@/lib/languages";
 
 type AuthState = {
   user: CurrentUser | null;
-  /** "loading" until the first answer from the server. */
-  status: "loading" | "ready";
+  /**
+   * "loading" until the first answer from the server; "ready" once it has said who is signed in
+   * (or that nobody is); "unreachable" when it couldn't be asked, which says nothing either way.
+   */
+  status: "loading" | "ready" | "unreachable";
   /** The language replies are asked for; null leaves it to the assistant (the user's own). */
   language: LanguageCode | null;
   /** Asks the server who is signed in (nobody, if it says 401 or can't be reached). */
@@ -34,9 +37,15 @@ export const useAuth = create<AuthState>()(
             ...(isLanguage(saved) ? { language: saved } : {}),
           });
         } catch (error) {
-          if (!(error instanceof ApiError))
-            console.warn("couldn't check the session", error);
-          set({ user: null, status: "ready" });
+          if (error instanceof ApiError && error.status === 401) {
+            set({ user: null, status: "ready" });
+          } else {
+            // The server is down or erroring: that doesn't mean the session is gone. A server that
+            // can't be reached at all is said on screen (ServerUnreachable), not in the console.
+            if (error instanceof ApiError)
+              console.warn("couldn't check the session", error);
+            set({ status: "unreachable" });
+          }
         }
       },
       logout: async () => {

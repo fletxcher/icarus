@@ -2,12 +2,14 @@ import Link from "next/link";
 import { FeatherIcon } from "lucide-react";
 
 import { FluidCanvas } from "./fluid-canvas";
+import { SignedInRedirect } from "./signed-in-redirect";
 import { PaletteMenu } from "./palette-menu";
 
 /** The frame of the login and signup pages: the form on the left, a fluid to stir on the right. */
 export function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="grid min-h-svh lg:grid-cols-2">
+      <SignedInRedirect />
       <div className="flex flex-col gap-4 p-6 md:p-10">
         <div className="flex justify-center gap-2 md:justify-start">
           <Link href="/" className="flex items-center gap-2 font-medium">
