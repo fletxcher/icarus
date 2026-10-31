@@ -6,14 +6,15 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { cn } from "@/lib/utils";
 import { Markdown } from "./markdown";
 
-/** The model's thinking: open while it streams, tucked away once the answer starts. */
+/**
+ * The model's thinking, collapsed unless the user opens it. Closed, its text isn't rendered at all,
+ * so a long stream of reasoning doesn't re-parse Markdown on every update.
+ */
 export function ReasoningBlock({ text, isActive }: { text: string; isActive: boolean }) {
-  // null follows isActive until the user opens or closes it themselves.
-  const [userOpen, setUserOpen] = useState<boolean | null>(null);
-  const open = userOpen ?? isActive;
+  const [open, setOpen] = useState(false);
 
   return (
-    <Collapsible open={open} onOpenChange={setUserOpen}>
+    <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="group flex items-center gap-1.5 rounded-md py-1 text-sm text-muted-foreground transition-colors hover:text-foreground">
         <BrainIcon className="size-4" />
         <span className={cn(isActive && "animate-pulse")}>{isActive ? "Thinking…" : "Reasoning"}</span>
