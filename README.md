@@ -321,8 +321,8 @@ as an ordinary STL file in the chat, together with the code. The FEA and 3D CFD 
 `geometry_file_id` like an upload, so "design a bracket, then check it" needs no hand-off. The chat shows
 the part in 3D (the same viewer as uploads), the code, and a format menu with a download button.
 
-**Export formats** are STEP, STL, 3MF, OBJ, GLB and BREP. The agent is told to ask which one the user
-wants before calling `export_geometry`, and never to pick one itself; the card's menu works regardless.
+**Export formats** are STEP, STL, 3MF, OBJ, GLB and BREP. The part's card offers all of them, so the agent
+isn't to ask which one the user wants; it calls `export_geometry` only when the user names a format.
 STL downloads are the stored file; the other formats are built again from the code on the work
 station (`GET /api/designs/{id}/export?format=`), so they take a few seconds and need it reachable.
 

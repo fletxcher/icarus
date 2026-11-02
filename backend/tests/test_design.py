@@ -79,7 +79,7 @@ def test_a_built_part_is_kept_as_an_stl_with_its_code(client, builder):
     )
 
     assert "Built Mounting_bracket.stl. File id: " in text
-    assert "which export format" in text and "Don't export until" in text
+    assert "don't ask which format" in text and "unless they name one" in text
     file_id = text.split("File id: ")[1].split("\n")[0]
     original = client.get(f"/api/files/{file_id}/original")
     assert original.status_code == 200 and original.headers["content-type"] == "model/stl"

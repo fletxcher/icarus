@@ -15,9 +15,9 @@ import { ModelViewer } from "./model-viewer";
 
 /** The formats a designed part can be exported in (backend/src/api/design/service.py). */
 export const DESIGN_FORMATS: { id: string; label: string }[] = [
-  { id: "step", label: "STEP (CAD)" },
-  { id: "stl", label: "STL (printing)" },
-  { id: "3mf", label: "3MF (printing)" },
+  { id: "step", label: "STEP" },
+  { id: "stl", label: "STL" },
+  { id: "3mf", label: "3MF" },
   { id: "obj", label: "OBJ" },
   { id: "glb", label: "GLB" },
   { id: "brep", label: "BREP" },

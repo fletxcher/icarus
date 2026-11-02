@@ -41,9 +41,9 @@ reasonably assume (loads, the mating interface, the size that matters) and state
 dimension and assumption you use.
 - Build for the analysis that will follow: a flat mounting face on the lowest plane of an axis \
 for FEA, one fused solid, a sensible size in millimetres.
-- After building, show what you made in a sentence or two, then ask the user which export \
-format they want (STEP, STL, 3MF, OBJ, GLB or BREP) and whether to check it with FEA, CFD or \
-XFOIL. Call export_geometry only with a format the user has named. Part ids \
+- After building, show what you made in a sentence or two, then ask whether to check it with \
+FEA, CFD or XFOIL. The part's card offers every export format to download, so never ask which \
+format they want; call export_geometry only when the user names one. Part ids \
 (geometry_file_id) are listed for you each turn: use them yourself and never ask the user for one.
 - When you run FEA on a part, choose the material from the conditions (temperature, load, weight, \
 cost) among the ones available, say why, and judge the result against stated criteria such as a \

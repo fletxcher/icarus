@@ -337,15 +337,13 @@ mounting or clamped face flat on the lowest (or highest) plane of an axis, e.g. 
 flow, align the flow with an axis. A failure returns the error and the line, so fix the code \
 and call again. Each call makes a new part with a new id; the part is also saved as an STL \
 the FEA and CFD tools take as geometry_file_id. It appears in the chat as a 3D view the user \
-can download in several formats. After building it, ask the user which format they want \
-before calling export_geometry."""
+download in any format from its card, so don't ask which format they want."""
 
 EXPORT_DESCRIPTION = """\
-Export a part from create_geometry in a format the user has chosen. step (editable CAD, for \
-other CAD programs), stl or 3mf (3D printing), obj or glb (rendering and viewers), brep \
-(OpenCascade). \
-Ask the user which format they want first and never pick one yourself; the user can also \
-download any format from the part's card in the chat."""
+Export a part from create_geometry in a format the user named in their message. step (editable \
+CAD, for other CAD programs), stl or 3mf (3D printing), obj or glb (rendering and viewers), brep \
+(OpenCascade). Only call it when the user asks for a format; the part's card in the chat already \
+offers every format to download, so never ask them which one they want."""
 
 
 def design_tools(designs: DesignService) -> list[BaseTool]:
@@ -366,10 +364,9 @@ def design_tools(designs: DesignService) -> list[BaseTool]:
             *[f"Warning: {note}" for note in report["notes"]],
             "",
             "The part is shown to the user as a 3D view with download buttons. Describe what you "
-            "built and the assumptions you made, then ask the user which export format they "
-            "want (STEP for CAD, STL or 3MF for printing, OBJ or GLB for rendering, BREP) and "
-            "whether to analyse it (FEA, or CFD) with this geometry_file_id. Don't export until "
-            "they've chosen a format.",
+            "built and the assumptions you made, then ask whether to analyse it (FEA, or CFD) "
+            "with this geometry_file_id. The card already offers every export format to "
+            "download, so don't ask which format they want or export it unless they name one.",
         ]
         return "\n".join(lines)
 
