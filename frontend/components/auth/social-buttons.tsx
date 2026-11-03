@@ -1,4 +1,9 @@
-import { Button } from "@/components/ui/button";
+"use client"
+
+import { useEffect, useState } from "react"
+
+import { Button } from "@/components/ui/button"
+import { api } from "@/lib/api"
 
 function GoogleIcon() {
   return (
@@ -27,33 +32,37 @@ function GoogleIcon() {
   );
 }
 
-function AppleIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
-      <path
-        d="M16.37 1.43c0 1.14-.42 2.2-1.25 3.17-.99 1.14-2.19 1.8-3.49 1.7a3.5 3.5 0 0 1 1.3-2.9c.9-.8 2.2-1.4 3.44-1.97zM20.5 17.1c-.55 1.27-.82 1.84-1.52 2.96-.99 1.57-2.38 3.52-4.1 3.54-1.53.02-1.93-1-4.01-.99-2.08.01-2.51 1.01-4.04.99-1.72-.02-3.04-1.78-4.03-3.35C-.1 15.9-.4 10.7 1.3 8.1c1.2-1.84 3.1-2.92 4.89-2.92 1.82 0 2.96 1 4.46 1 1.46 0 2.35-1 4.45-1 1.59 0 3.28.87 4.48 2.37-3.94 2.16-3.3 7.78.92 9.55z"
-        fill="currentColor"
-      />
-    </svg>
-  );
-}
-
-/** "Continue with" buttons. Not wired to an account provider yet. */
+/** "Continue with" buttons: Google, once the server has it set up. */
 export function SocialButtons({ verb }: { verb: "Login" | "Sign up" }) {
+  // null until the server has said; the button is disabled until then and when Google isn't set up.
+  const [google, setGoogle] = useState<boolean | null>(null)
+  useEffect(() => {
+    api
+      .providers()
+      .then((providers) => setGoogle(providers.google))
+      .catch(() => setGoogle(false))
+  }, [])
+
   return (
     <div className="grid gap-2">
-      <Button variant="outline" type="button">
-        <GoogleIcon />
-        {verb} with Google
-      </Button>
-      <Button variant="outline" type="button">
-        <AppleIcon />
-        {verb} with Apple
-      </Button>
+      {google ? (
+        <Button variant="outline" asChild>
+          <a href={api.googleLoginUrl()}>
+            <GoogleIcon />
+            {verb} with Google
+          </a>
+        </Button>
+      ) : (
+        <Button
+          variant="outline"
+          type="button"
+          disabled
+          title={google === false ? "Google sign-in isn't set up on this server" : undefined}
+        >
+          <GoogleIcon />
+          {verb} with Google
+        </Button>
+      )}
     </div>
-  );
+  )
 }

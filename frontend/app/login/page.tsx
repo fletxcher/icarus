@@ -5,10 +5,15 @@ import { LoginForm } from "@/components/login-form"
 
 export const metadata: Metadata = { title: "Log in · Icarus" }
 
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>
+}) {
+  const { error } = await searchParams
   return (
     <AuthLayout>
-      <LoginForm />
+      <LoginForm signInError={error} />
     </AuthLayout>
   )
 }

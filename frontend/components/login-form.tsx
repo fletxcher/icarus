@@ -19,12 +19,24 @@ import { Input } from "@/components/ui/input"
 import { api } from "@/lib/api"
 import { useAuth } from "@/stores/auth-store"
 
+/** What the server tells the login page when signing in with Google didn't work (?error=). */
+const SIGN_IN_ERRORS: Record<string, string> = {
+  google_denied: "Google sign-in was cancelled.",
+  google_failed: "Couldn't sign in with Google. Try again.",
+  google_unverified: "Google says that email address isn't verified.",
+  google_disabled: "This account is disabled.",
+  google_unavailable: "Google sign-in isn't set up on this server.",
+}
+
 export function LoginForm({
   className,
+  signInError,
   ...props
-}: React.ComponentProps<"form">) {
+}: React.ComponentProps<"form"> & { signInError?: string }) {
   const router = useRouter()
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(
+    signInError ? (SIGN_IN_ERRORS[signInError] ?? "Couldn't sign in.") : null
+  )
   const [submitting, setSubmitting] = useState(false)
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {

@@ -142,6 +142,10 @@ export type StatusCheck = {
 export const api = {
   /** Who is signed in; rejects with a 401 ApiError when nobody is. */
   me: () => request<CurrentUser>("/auth/me"),
+  /** Which sign-in methods besides a password the server offers. */
+  providers: () => request<{ google: boolean }>("/auth/providers"),
+  /** Where signing in with Google starts (a full-page navigation, not a fetch). */
+  googleLoginUrl: () => `${API_URL}/api/auth/google/login`,
   /** Saves the reply language to the signed-in user's preferences. */
   setLanguage: (language: string | null) =>
     request<CurrentUser>("/auth/me/preferences", {

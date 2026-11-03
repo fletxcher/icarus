@@ -61,6 +61,34 @@ uv run uvicorn api.app:app --reload
 Every setting is in `backend/src/api/config.py`. The API starts without any model
 provider key; chat storage works and sending a message returns 503 until one is set.
 
+### Signing in with Google
+
+The login and signup pages offer "with Google", which is disabled until the server has a Google
+OAuth client. To set one up:
+
+1. In the [Google Cloud console](https://console.cloud.google.com/apis/credentials), configure the
+   OAuth consent screen (scopes `openid`, `email`, `profile`; while the app is in "Testing", add the
+   accounts allowed to sign in as test users), then create an **OAuth client ID** of type
+   **Web application**.
+2. Add the authorised redirect URI `{API_PUBLIC_URL}/api/auth/google/callback` (locally
+   `http://localhost:8000/api/auth/google/callback`) and, for the JavaScript origin, the frontend's
+   address.
+3. Put the client id and secret in `.env` as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, with
+   `API_PUBLIC_URL` and `FRONTEND_URL` set to where browsers reach the API and the frontend, and
+   restart the API.
+
+The flow is the authorization-code flow with PKCE and a random `state`, both kept in a short-lived
+`HttpOnly` cookie between leaving for Google and coming back (`GET /api/auth/google/login`, then
+`/google/callback`). The API trades the code for Google's profile itself, then signs the person in with
+the same session cookie a password login sets, and sends the browser to the app; any failure goes
+back to `/login?error=` with a message. Google's id for the person (`sub`) is stored as an
+`identities` entry, so a changed Google email still finds the account. A first sign-in with an email
+that has no account creates one without a password; one that matches an existing account **adds
+Google to that account**, on the strength of Google having verified the address. Accounts made
+with a password aren't email-verified here, so someone who registered an address they don't own
+could keep password access to the account its real owner later signs into with Google.
+Unverified Google emails are refused. `GET /api/auth/providers` says whether the button is on.
+
 ### MongoDB: local or remote
 
 `MONGODB_TARGET` is `local` (default) or `remote` and picks which connection is used:

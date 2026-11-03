@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr, model_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # The repo-root .env, so settings load no matter which directory the server starts in.
@@ -43,6 +43,24 @@ class Settings(BaseSettings):
 
     # HTTP
     cors_origins: list[str] = ["http://localhost:3000"]
+
+    # Sign in with Google (an OAuth client of type "Web application" from the Google Cloud
+    # console; its authorised redirect URI is `{api_public_url}/api/auth/google/callback`).
+    # The button is off until both are set.
+    google_client_id: str | None = None
+    google_client_secret: SecretStr | None = None
+    # Where browsers reach this API and the frontend, for the redirects Google's sign-in makes.
+    api_public_url: str = "http://localhost:8000"
+    frontend_url: str = "http://localhost:3000"
+
+    @field_validator("google_client_id", "google_client_secret", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, value: object) -> object:
+        return None if isinstance(value, str) and not value.strip() else value
+
+    @property
+    def google_enabled(self) -> bool:
+        return bool(self.google_client_id and self.google_client_secret)
 
     # Attachments: text files, and meshes, CAD files and PDFs (kept whole, so they must fit in
     # one MongoDB document, which holds up to 16 MB).

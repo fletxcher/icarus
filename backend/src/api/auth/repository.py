@@ -8,7 +8,7 @@ from pymongo.errors import DuplicateKeyError
 from ..catalog import SESSIONS, USERS
 from ..languages import Language
 from .passwords import UNMATCHED_HASH, hash_password, verify_password
-from .schemas import Email, Session, User
+from .schemas import Email, Identity, Session, User
 from .tokens import hash_token, new_token
 
 SESSION_LIFETIME = timedelta(days=30)
@@ -68,6 +68,60 @@ class UserRepository:
         now = datetime.now(UTC)
         await self._users.update_one({"_id": user.id}, {"$set": {"last_login_at": now}})
         return user.model_copy(update={"last_login_at": now})
+
+    async def sign_in_with_google(
+        self, *, subject: str, email: Email, name: str | None, avatar_url: str | None
+    ) -> User | None:
+        """The active user for a verified Google account, or None if theirs is disabled.
+
+        A returning Google user is found by Google's id for them. Otherwise an account with the
+        same email gets the Google sign-in added to it (Google has verified the address), and an
+        unknown email gets a new account with no password."""
+        now = datetime.now(UTC)
+        identity = {"provider": "google", "subject": subject}
+        for _ in range(2):  # twice, in case a simultaneous first sign-in creates the account
+            doc = await self._users.find_one({"identities": {"$elemMatch": identity}})
+            if doc is None:
+                doc = await self._users.find_one({"email": email})
+                if doc is not None:
+                    fields = {"last_login_at": now, "updated_at": now}
+                    if doc.get("email_verified_at") is None:
+                        fields["email_verified_at"] = now
+                    if not doc.get("avatar_url") and avatar_url:
+                        fields["avatar_url"] = avatar_url
+                    await self._users.update_one(
+                        {"_id": doc["_id"]},
+                        {
+                            "$set": fields,
+                            "$push": {
+                                "identities": Identity(**identity, linked_at=now).model_dump()
+                            },
+                        },
+                    )
+                    doc = await self._users.find_one({"_id": doc["_id"]})
+            else:
+                await self._users.update_one({"_id": doc["_id"]}, {"$set": {"last_login_at": now}})
+                doc["last_login_at"] = now
+            if doc is not None:
+                user = User.model_validate(doc)
+                return user if user.status == "active" else None
+            user = User(
+                id=str(uuid4()),
+                email=email,
+                email_verified_at=now,
+                name=name[:100] if name else None,
+                avatar_url=avatar_url[:2048] if avatar_url else None,
+                identities=[Identity(**identity, linked_at=now)],
+                created_at=now,
+                updated_at=now,
+                last_login_at=now,
+            )
+            try:
+                await self._users.insert_one(user.to_mongo())
+            except DuplicateKeyError:
+                continue
+            return user
+        return None
 
 
 class SessionRepository:

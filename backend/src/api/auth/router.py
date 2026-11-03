@@ -1,10 +1,16 @@
+import hmac
+import logging
 from typing import Annotated
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, StringConstraints
 
+from ..config import get_settings
 from ..dependencies import ServicesDep
 from ..languages import Language
+from . import google
 from .repository import SESSION_LIFETIME, EmailTaken
 from .schemas import Email, User, UserPublic
 
@@ -13,6 +19,12 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 MIN_PASSWORD_LENGTH = 8
 MAX_PASSWORD_LENGTH = 128  # bounds the work hashing a request can cause
 SESSION_COOKIE = "icarus_session"
+# Holds the state and PKCE verifier of a Google sign-in between leaving and coming back.
+OAUTH_COOKIE = "icarus_oauth"
+OAUTH_COOKIE_PATH = "/api/auth/google"
+OAUTH_LIFETIME_S = 600
+
+logger = logging.getLogger(__name__)
 
 
 async def current_user(request: Request, services: ServicesDep) -> User:
@@ -25,6 +37,25 @@ async def current_user(request: Request, services: ServicesDep) -> User:
 
 
 CurrentUser = Annotated[User, Depends(current_user)]
+
+
+async def start_session(
+    user: User, request: Request, response: Response, services: ServicesDep
+) -> None:
+    """Signs the user in: starts a session and sets its cookie on the response."""
+    token = await services.sessions.create(
+        user.id,
+        user_agent=request.headers.get("user-agent"),
+        ip=request.client.host if request.client else None,
+    )
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=int(SESSION_LIFETIME.total_seconds()),
+        httponly=True,
+        samesite="lax",
+        secure=request.url.scheme == "https",
+    )
 
 
 class SignupRequest(BaseModel):
@@ -61,20 +92,86 @@ async def login(
     if user is None:
         # The same answer whether the email or the password was wrong.
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Incorrect email or password")
-    token = await services.sessions.create(
-        user.id,
-        user_agent=request.headers.get("user-agent"),
-        ip=request.client.host if request.client else None,
+    await start_session(user, request, response, services)
+    return user.public()
+
+
+class Providers(BaseModel):
+    google: bool
+
+
+@router.get("/providers")
+async def providers() -> Providers:
+    """The ways to sign in besides a password that this server has set up."""
+    return Providers(google=get_settings().google_enabled)
+
+
+def _back_to_login(error: str) -> RedirectResponse:
+    """Sends the browser to the login page with what went wrong, and drops the sign-in cookie."""
+    response = RedirectResponse(
+        f"{get_settings().frontend_url.rstrip('/')}/login?{urlencode({'error': error})}"
     )
+    response.delete_cookie(OAUTH_COOKIE, path=OAUTH_COOKIE_PATH)
+    return response
+
+
+@router.get("/google/login", response_class=RedirectResponse)
+async def google_login(request: Request) -> RedirectResponse:
+    """Starts signing in with Google: sends the browser to Google's consent screen."""
+    settings = get_settings()
+    if not settings.google_enabled:
+        return _back_to_login("google_unavailable")
+    state, verifier = google.new_challenge()
+    response = RedirectResponse(google.authorization_url(settings, state, verifier))
     response.set_cookie(
-        SESSION_COOKIE,
-        token,
-        max_age=int(SESSION_LIFETIME.total_seconds()),
+        OAUTH_COOKIE,
+        f"{state}.{verifier}",
+        max_age=OAUTH_LIFETIME_S,
+        path=OAUTH_COOKIE_PATH,
         httponly=True,
         samesite="lax",
         secure=request.url.scheme == "https",
     )
-    return user.public()
+    return response
+
+
+@router.get("/google/callback", response_class=RedirectResponse)
+async def google_callback(
+    request: Request,
+    services: ServicesDep,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+) -> RedirectResponse:
+    """Where Google sends the browser back: signs the person in, then opens the app."""
+    settings = get_settings()
+    if not settings.google_enabled:
+        return _back_to_login("google_unavailable")
+    if error:  # they said no, or closed the consent screen
+        return _back_to_login("google_denied")
+    saved = request.cookies.get(OAUTH_COOKIE, "")
+    expected_state, _, verifier = saved.partition(".")
+    if not (code and state and verifier and hmac.compare_digest(state, expected_state)):
+        return _back_to_login("google_failed")
+    try:
+        profile = await google.fetch_profile(settings, code, verifier)
+    except google.GoogleError:
+        logger.warning("Google sign-in failed", exc_info=True)
+        return _back_to_login("google_failed")
+    if not profile.email_verified:
+        return _back_to_login("google_unverified")
+    user = await services.users.sign_in_with_google(
+        subject=profile.subject,
+        email=profile.email.lower(),
+        name=profile.name,
+        avatar_url=profile.picture,
+    )
+    if user is None:
+        return _back_to_login("google_disabled")
+    response = RedirectResponse(settings.frontend_url.rstrip("/") + "/")
+    response.delete_cookie(OAUTH_COOKIE, path=OAUTH_COOKIE_PATH)
+    await start_session(user, request, response, services)
+    return response
 
 
 @router.get("/me")
