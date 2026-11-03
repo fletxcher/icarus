@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs one structural/thermal CalculiX case on an uploaded solid. Installed next to run_openfoam.sh.
+# Runs one structural/thermal CalculiX case on an uploaded solid. Installed next to run_cfd2d.sh.
 #
 # Usage: run_fea.sh <job_dir>
 #   <job_dir>/case.json      inputs written by the backend (see FeaCase)

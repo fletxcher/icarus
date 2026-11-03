@@ -1,4 +1,4 @@
-"""The work station's case builder (workstation/cfd_case.py), checked without gmsh or OpenFOAM."""
+"""The work station's case builder (workstation/cfd2d_case.py), checked without gmsh or OpenFOAM."""
 
 import importlib.util
 import json
@@ -11,10 +11,10 @@ from pydantic import ValidationError
 
 from api.compute.schemas import CfdCase
 
-_path = Path(__file__).resolve().parents[2] / "workstation" / "cfd_case.py"
-_spec = importlib.util.spec_from_file_location("cfd_case", _path)
-cfd_case = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(cfd_case)
+_path = Path(__file__).resolve().parents[2] / "workstation" / "cfd2d_case.py"
+_spec = importlib.util.spec_from_file_location("cfd2d_case", _path)
+cfd2d_case = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(cfd2d_case)
 
 _render_path = _path.with_name("render_video.py")
 _render_spec = importlib.util.spec_from_file_location("render_video", _render_path)
@@ -39,7 +39,7 @@ def make_job(tmp_path: Path, **case) -> Path:
 
 @pytest.mark.parametrize("code", ["0012", "2412", "4415", "23012", "25018"])
 def test_naca_surfaces_are_closed_and_ordered(code):
-    upper, lower = cfd_case.naca_surfaces(code, 60)
+    upper, lower = cfd2d_case.naca_surfaces(code, 60)
 
     assert upper[0] == lower[-1] == (1.0, 0.0)
     assert upper[-1] == lower[0] == (0.0, 0.0)
@@ -50,7 +50,7 @@ def test_naca_surfaces_are_closed_and_ordered(code):
 
 def test_naca_5_digit_camber_matches_the_design_lift():
     # 230xx: design Cl 0.3, maximum camber about 1.8% of the chord.
-    upper, lower = cfd_case.naca_surfaces("23012", 200)
+    upper, lower = cfd2d_case.naca_surfaces("23012", 200)
     camber = max((up[1] + lo[1]) / 2 for up, lo in zip(upper[::-1], lower, strict=True))
     assert camber == pytest.approx(0.0183, abs=0.001)
 
@@ -59,7 +59,7 @@ def test_reflex_5_digit_airfoil_is_rejected_by_the_schema_and_the_builder():
     with pytest.raises(ValidationError, match="non-reflex"):
         CfdCase(naca="23112", reynolds=1e6)
     with pytest.raises(ValueError, match="isn't supported"):
-        cfd_case.naca_surfaces("23112", 20)
+        cfd2d_case.naca_surfaces("23112", 20)
 
 
 @pytest.mark.parametrize(
@@ -89,7 +89,7 @@ def test_old_airfoil_jobs_still_validate():
 @pytest.mark.parametrize("name", CASES)
 def test_geo_names_the_three_patches_and_closes_the_loops(tmp_path, name):
     job = make_job(tmp_path, **CASES[name])
-    cfd_case.write_geo(job)
+    cfd2d_case.write_geo(job)
     geo = (job / "mesh" / "body.geo").read_text()
 
     for patch in ("farfield", "body", "frontAndBack"):
@@ -104,7 +104,7 @@ def test_geo_names_the_three_patches_and_closes_the_loops(tmp_path, name):
 
 def test_slip_walls_get_no_boundary_layer(tmp_path):
     job = make_job(tmp_path, **CASES["cylinder"], wall_type="slip")
-    cfd_case.write_geo(job)
+    cfd2d_case.write_geo(job)
     assert "BoundaryLayer" not in (job / "mesh" / "body.geo").read_text()
 
 
@@ -113,22 +113,22 @@ def test_rough_walls_use_wall_functions_and_a_taller_first_cell(tmp_path):
     (tmp_path / "rough").mkdir()
     smooth = make_job(tmp_path / "smooth", **CASES["airfoil"])
     rough = make_job(tmp_path / "rough", **CASES["airfoil"], roughness_height=0.001)
-    cfd_case.write_geo(smooth)
-    cfd_case.write_geo(rough)
+    cfd2d_case.write_geo(smooth)
+    cfd2d_case.write_geo(rough)
 
     def first_cell(job):
         geo = (job / "mesh" / "body.geo").read_text()
         return float(re.search(r"hwall_n = (\S+);", geo).group(1))
 
     assert first_cell(rough) == pytest.approx(30 * first_cell(smooth), rel=1e-3)
-    cfd_case.write_foam(rough, 1)
+    cfd2d_case.write_foam(rough, 1)
     assert "nutkRoughWallFunction" in (rough / "0" / "nut").read_text()
 
 
 @pytest.mark.parametrize("name", CASES)
 def test_foam_case_is_complete(tmp_path, name):
     job = make_job(tmp_path, **CASES[name])
-    cfd_case.write_foam(job, 4)
+    cfd2d_case.write_foam(job, 4)
 
     for path in (
         "0/U",
@@ -157,7 +157,7 @@ def test_foam_case_is_complete(tmp_path, name):
 
 def test_freestream_follows_the_angle_of_attack(tmp_path):
     job = make_job(tmp_path, **CASES["airfoil"])
-    cfd_case.write_foam(job, 1)
+    cfd2d_case.write_foam(job, 1)
     alpha = math.radians(4)
 
     assert f"({math.cos(alpha):.8g} {math.sin(alpha):.8g} 0)" in (job / "0" / "U").read_text()
@@ -175,13 +175,13 @@ def test_freestream_follows_the_angle_of_attack(tmp_path):
 )
 def test_wall_conditions_reach_the_velocity_field(tmp_path, fields, expected):
     job = make_job(tmp_path, **CASES["cylinder"], **fields)
-    cfd_case.write_foam(job, 1)
+    cfd2d_case.write_foam(job, 1)
     assert expected in (job / "0" / "U").read_text()
 
 
 def test_low_reynolds_runs_laminar(tmp_path):
     job = make_job(tmp_path, shape="cylinder", reynolds=100)
-    cfd_case.write_foam(job, 1)
+    cfd2d_case.write_foam(job, 1)
 
     assert "simulationType laminar;" in (job / "constant" / "turbulenceProperties").read_text()
     assert not (job / "0" / "k").exists()
@@ -197,7 +197,7 @@ def test_boundary_patches_become_wall_and_empty(tmp_path):
         + ")\n"
     )
 
-    cfd_case.fix_boundary(tmp_path)
+    cfd2d_case.fix_boundary(tmp_path)
 
     text = boundary.read_text()
     assert re.search(r"body\s*\{\s*type\s+wall;", text)
@@ -221,7 +221,7 @@ def test_steady_results_average_the_tail_and_report_convergence(tmp_path):
         "SIMPLE solution converged in 300 iterations\n"
     )
 
-    result = cfd_case.build_results(job)
+    result = cfd2d_case.build_results(job)
 
     assert result["converged"] is True
     assert result["iterations"] == 300
@@ -229,7 +229,7 @@ def test_steady_results_average_the_tail_and_report_convergence(tmp_path):
     assert result["cd"] == pytest.approx(0.02)
     assert result["final_residuals"] == {"Ux": 1e-3, "p": 2e-6}
     assert result["warnings"] == []
-    assert len(result["history"]["time"]) <= cfd_case.MAX_HISTORY_POINTS + 1
+    assert len(result["history"]["time"]) <= cfd2d_case.MAX_HISTORY_POINTS + 1
     assert result["history"]["time"][-1] == 300
 
 
@@ -238,7 +238,7 @@ def test_unconverged_steady_run_says_so(tmp_path):
     write_coefficients(job, [(i, 0.02, 0.5, -0.05) for i in range(1, 51)])
     (job / "log.solver").write_text("Solving for p, Initial residual = 0.01\n")
 
-    result = cfd_case.build_results(job)
+    result = cfd2d_case.build_results(job)
 
     assert result["converged"] is False
     assert "did not reach their targets" in result["warnings"][0]
@@ -253,7 +253,7 @@ def test_transient_results_find_the_shedding_frequency(tmp_path):
     write_coefficients(job, rows)
     (job / "log.solver").write_text("Solving for p, Initial residual = 1e-4\n")
 
-    result = cfd_case.build_results(job)
+    result = cfd2d_case.build_results(job)
 
     assert result["regime"] == "transient"
     assert result["strouhal"] == pytest.approx(strouhal, rel=0.02)
@@ -266,14 +266,14 @@ def test_steady_flow_reports_no_shedding(tmp_path):
     write_coefficients(job, [(t / 10, 1.2, 0.0, 0.0) for t in range(1, 400)])
     (job / "log.solver").write_text("")
 
-    result = cfd_case.build_results(job)
+    result = cfd2d_case.build_results(job)
 
     assert "strouhal" not in result
     assert any("No periodic vortex shedding" in warning for warning in result["warnings"])
 
 
 def test_status_is_written_atomically(tmp_path):
-    cfd_case.write_status(tmp_path, "failed", "boom")
+    cfd2d_case.write_status(tmp_path, "failed", "boom")
 
     assert json.loads((tmp_path / "status.json").read_text()) == {
         "status": "failed",
@@ -289,11 +289,11 @@ def test_video_runs_keep_every_snapshot_and_other_runs_only_the_last(tmp_path):
     without = make_job(tmp_path / "plain", **CASES["cylinder"], video=False)
     steady = make_job(tmp_path, **CASES["airfoil"])
     for job in (with_video, without, steady):
-        cfd_case.write_foam(job, 1)
+        cfd2d_case.write_foam(job, 1)
 
     control = (with_video / "system" / "controlDict").read_text()
     assert "adjustableRunTime" in control
-    assert f"writeInterval   {cfd_case.VIDEO_INTERVAL};" in control
+    assert f"writeInterval   {cfd2d_case.VIDEO_INTERVAL};" in control
     assert "purgeWrite      0;" in control
     assert "writeFormat     binary;" in control
     assert "writeInterval   80.0;" in (without / "system" / "controlDict").read_text()
@@ -310,7 +310,7 @@ def test_results_include_the_video_that_was_rendered(tmp_path):
     ]
     (job / "video.json").write_text(json.dumps({"media": media}))
 
-    result = cfd_case.build_results(job)
+    result = cfd2d_case.build_results(job)
 
     assert result["media"] == media
     assert not any("video" in warning for warning in result["warnings"])
@@ -322,7 +322,7 @@ def test_failed_video_is_a_warning_not_a_failed_job(tmp_path):
     (job / "log.solver").write_text("")
     (job / "video.failed").write_text("ParaView (pvbatch), ffmpeg or xvfb-run isn't installed")
 
-    result = cfd_case.build_results(job)
+    result = cfd2d_case.build_results(job)
 
     assert "media" not in result
     assert any("pvbatch" in warning and "unaffected" in warning for warning in result["warnings"])
@@ -333,7 +333,7 @@ def test_video_can_be_turned_off(tmp_path):
     write_coefficients(job, [(t / 10, 1.2, 0.5 * math.sin(t), 0.0) for t in range(1, 800)])
     (job / "log.solver").write_text("")
 
-    assert not any("video" in warning for warning in cfd_case.build_results(job)["warnings"])
+    assert not any("video" in warning for warning in cfd2d_case.build_results(job)["warnings"])
 
 
 def test_snapshots_are_ordered_by_time_index_not_by_name(tmp_path):
@@ -405,7 +405,7 @@ GAMG:  Solving for p, Initial residual = 0.2, Final residual = 1e-3, No Iteratio
 
 
 def test_solver_steps_are_parsed_with_the_first_residual_of_each_field():
-    steps = cfd_case.parse_steps(SOLVER_LOG)
+    steps = cfd2d_case.parse_steps(SOLVER_LOG)
 
     assert steps["time"] == [0.002, 0.005]
     assert steps["residuals"]["Ux"] == [1.0, 0.1]
@@ -419,23 +419,23 @@ def test_log_chunks_stop_before_the_step_being_written(tmp_path):
     log = tmp_path / "log.solver"
     log.write_text(SOLVER_LOG)
 
-    first, offset = cfd_case.read_chunk(log, 0, final=False)
+    first, offset = cfd2d_case.read_chunk(log, 0, final=False)
     assert "Time = 0.002" in first
     assert "Time = 0.005" not in first
     assert not first.rstrip().endswith("deltaT = 0.003")  # the pending step's preamble waits too
 
     # More output arrives; the pending step is now complete and nothing is read twice.
     log.write_text(SOLVER_LOG + "ExecutionTime = 0.2 s\n\nTime = 0.008\n")
-    second, offset = cfd_case.read_chunk(log, offset, final=False)
+    second, offset = cfd2d_case.read_chunk(log, offset, final=False)
     assert "Time = 0.005" in second
     assert "Time = 0.008" not in second
-    assert cfd_case.parse_steps(first)["time"] + cfd_case.parse_steps(second)["time"] == [
+    assert cfd2d_case.parse_steps(first)["time"] + cfd2d_case.parse_steps(second)["time"] == [
         0.002,
         0.005,
     ]
 
     # Once the run has ended, the last step is included too.
-    last, _ = cfd_case.read_chunk(log, offset, final=True)
+    last, _ = cfd2d_case.read_chunk(log, offset, final=True)
     assert "Time = 0.008" in last
 
 
@@ -446,30 +446,30 @@ def test_progress_reports_stage_fraction_and_new_coefficients(tmp_path):
     (job / "log.solver").write_text(SOLVER_LOG + "\nTime = 20\n")
     write_coefficients(job, [(0.002, 1.2, 0.01, 0.0), (0.005, 1.1, 0.02, 0.0)])
 
-    first = cfd_case.build_progress(job, 0, 0, final=False)
+    first = cfd2d_case.build_progress(job, 0, 0, final=False)
 
     assert first["stage"] == "solver"
     assert first["latest_time"] == 20
-    assert first["fraction"] == pytest.approx(20 / cfd_case.TRANSIENT_END_TIME)
+    assert first["fraction"] == pytest.approx(20 / cfd2d_case.TRANSIENT_END_TIME)
     assert first["steps"]["time"] == [0.002, 0.005]
     assert first["coefficients"]["cd"] == [1.2, 1.1]
     assert first["horizon_unit"] == "convective times"
     assert first["eta_s"] is not None
 
-    again = cfd_case.build_progress(job, first["log_offset"], first["coeff_offset"], final=False)
+    again = cfd2d_case.build_progress(job, first["log_offset"], first["coeff_offset"], final=False)
     assert again["steps"]["time"] == []
     assert again["coefficients"]["time"] == []
 
 
 def test_info_collects_the_case_the_mesh_and_the_dictionaries(tmp_path):
     job = make_job(tmp_path, **CASES["airfoil"])
-    cfd_case.write_foam(job, 4)
+    cfd2d_case.write_foam(job, 4)
     (job / "log.checkMesh").write_text(
         "    cells:            1234\n    Max aspect ratio = 12.5 OK.\n"
         "    Mesh non-orthogonality Max: 40.5 average: 3\n    Max skewness = 0.8 OK.\nMesh OK.\n"
     )
 
-    info = cfd_case.build_info(job)
+    info = cfd2d_case.build_info(job)
 
     assert info["solver"] == "simpleFoam"
     assert info["regime"] == "steady"
@@ -480,7 +480,7 @@ def test_info_collects_the_case_the_mesh_and_the_dictionaries(tmp_path):
     }  # fmt: skip
     assert "system/fvSchemes" in info["dictionaries"]
     assert not info["dictionaries"]["system/fvSchemes"].startswith("FoamFile")
-    assert info["horizon"] == cfd_case.MESHES["medium"]["iterations"]
+    assert info["horizon"] == cfd2d_case.MESHES["medium"]["iterations"]
 
 
 def test_summary_reports_each_jobs_stage_fraction_and_status(tmp_path):
@@ -490,9 +490,9 @@ def test_summary_reports_each_jobs_stage_fraction_and_status(tmp_path):
         (running / f"log.{stage}").write_text("")
     (running / "log.solver").write_text("Time = 40\n")
     done = make_job(_mkdir(jobs / "b"), **CASES["airfoil"])
-    cfd_case.write_status(done, "completed", None, {"cl": 1})
+    cfd2d_case.write_status(done, "completed", None, {"cl": 1})
 
-    summary = cfd_case.build_summary(jobs, ["a", "b", "gone"])
+    summary = cfd2d_case.build_summary(jobs, ["a", "b", "gone"])
 
     assert summary["a"]["stage"] == "solver"
     assert summary["a"]["fraction"] == pytest.approx(0.5)
@@ -513,7 +513,7 @@ def test_results_command_logs_what_it_wrote(tmp_path, capsys):
     write_coefficients(job, [(t / 10, 1.2, 0.5 * math.sin(t), 0.0) for t in range(1, 800)])
     (job / "log.solver").write_text("")
 
-    cfd_case.main(["cfd_case.py", "results", str(job)])
+    cfd2d_case.main(["cfd2d_case.py", "results", str(job)])
 
     printed = capsys.readouterr().out
     assert "transient cylinder: Cl =" in printed

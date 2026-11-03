@@ -149,11 +149,12 @@ backend/src/api/
     xfoil.py          XFOIL script builder, polar parser, XfoilService
     simulations.py    CFD job submission and polling
     router.py         /api/simulations
-workstation/setup.sh             Prepares (or cleans up) a fresh simulation work station
-workstation/run_openfoam.sh          Placeholder CFD entrypoint, installed on the work station by setup.sh
-workstation/run_fea.sh, fea_case.py  FEA entrypoint and its case builder (mesh, CalculiX deck, results)
-workstation/cad_build.py  Runs the agent's build123d code and writes the part (STL) and its report
+workstation/setup.sh     Prepares (or cleans up) a fresh simulation work station
+workstation/run_cfd2d.sh, cfd2d_case.py  2D CFD entrypoint and its case builder (gmsh, simpleFoam / pimpleFoam, results)
 workstation/run_cfd3d.sh, cfd3d_case.py  3D CFD entrypoint and its case builder (snappyHexMesh, simpleFoam, results)
+workstation/run_fea.sh, fea_case.py      FEA entrypoint and its case builder (mesh, CalculiX deck, results)
+workstation/run_calculix.sh              Runs one CalculiX input deck; run_fea.sh calls it
+workstation/cad_build.py  Runs the agent's build123d code and writes the part (STL) and its report
 ```
 
 ### API
@@ -513,9 +514,9 @@ host key must be in `~/.ssh/known_hosts` (or `WS_KNOWN_HOSTS_PATH`).
    `{"status": "running" | "completed" | "failed", "result": {...}, "error": "..."}`.
 4. `get_simulation_status` / `GET /api/simulations/{id}` read it back into Mongo.
 
-`workstation/run_openfoam.sh` implements that contract: gmsh meshes the case (one cell thick,
+`workstation/run_cfd2d.sh` implements that contract: gmsh meshes the case (one cell thick,
 boundary layer resolved to y+ ~ 1), `gmshToFoam` converts it, and OpenFOAM solves it on
-up to 4 cores with the k-omega SST model (laminar below Re 1000). `workstation/cfd_case.py` writes
+up to 4 cores with the k-omega SST model (laminar below Re 1000). `workstation/cfd2d_case.py` writes
 the mesh script and the OpenFOAM dictionaries from `case.json` and reads the results
 back; each step logs to `{job_dir}/log.<step>`, and a failure puts the end of that log in
 the job's `error`. The flow is incompressible, so `mach` is ignored (and flagged above
@@ -553,7 +554,7 @@ its files on the work station. The backend serves the rest from `GET /api/simula
 list), `/api/simulations/{id}/info`, `/progress?log_offset=&coeff_offset=` (only what is
 new since the offsets the last call returned) and
 `/files/velocity.png|pressure.png|flow.mp4`; these read the work station's logs over SSH
-through `workstation/cfd_case.py`.
+through `workstation/cfd2d_case.py`.
 
 **Images and flow video.** With `video` on (the default), every run gets a
 `velocity.png` and a `pressure.png` (pressure coefficient) of the final flow field, and

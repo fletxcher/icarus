@@ -143,7 +143,7 @@ SIMULATIONS_VALIDATOR: dict[str, Any] = {
             # apart by `kind` (older CFD jobs have none).
             "case": {"anyOf": [CFD_CASE, FEA_CASE, CFD3D_CASE]},
             "status": {"bsonType": "string", "enum": list(get_args(SimulationStatus))},
-            # Written by the work station's run_openfoam.sh (status.json): cl, cd, cm, history,
+            # Written by the work station's run_cfd2d.sh (status.json): cl, cd, cm, history,
             # warnings and so on.
             "result": {"bsonType": ["object", "null"]},
             "error": {"bsonType": NULLABLE_STRING},

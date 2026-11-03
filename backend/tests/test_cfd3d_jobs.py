@@ -20,7 +20,7 @@ from tests.test_files import upload
 def station(client: TestClient) -> RecordingStation:
     fake = RecordingStation()
     client.app.state.services.compute.set_shared(
-        Workstation(fake, "/w", "/w/bin/run_openfoam.sh", "shared")
+        Workstation(fake, "/w", "/w/bin/run_cfd2d.sh", "shared")
     )
     return fake
 

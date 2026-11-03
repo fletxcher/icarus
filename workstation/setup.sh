@@ -6,8 +6,10 @@
 #   ./setup.sh --uninstall    remove what --install added (asks before deleting job data)
 #
 # Layout under ICARUS_HOME (default ~/icarus), matching the backend's defaults:
-#   bin/run_openfoam.sh  CFD entrypoint (WS_CFD_SCRIPT)
-#   bin/run_calculix.sh  runs a CalculiX (ccx) input deck in a job directory
+#   bin/run_cfd2d.sh  2D CFD entrypoint (WS_CFD_SCRIPT), OpenFOAM
+#   bin/run_cfd3d.sh  3D CFD entrypoint, OpenFOAM
+#   bin/run_fea.sh    FEA entrypoint, which calls run_calculix.sh (the bare ccx wrapper)
+#   Each entrypoint has a <job type>_case.py next to it (cfd2d_case.py, cfd3d_case.py, fea_case.py).
 #   jobs/             one directory per CFD job (WS_WORKDIR/jobs)
 #
 # CFD runs OpenFOAM (ESI release, OPENFOAM_PACKAGE) with gmsh meshes. If the work station
@@ -36,8 +38,8 @@ declare -A PROVIDES=([xfoil]=xfoil [xvfb]=xvfb-run [xauth]=xauth [gmsh]=gmsh [ca
 # python3-venv has no command; it's there once a virtual environment can be made.
 venv_possible() { python3 -c "import ensurepip, venv" 2> /dev/null; }
 # Files this script puts in $ICARUS_HOME/bin (and the name an earlier version used).
-RUNNER_FILES=(run_openfoam.sh cfd_case.py run_calculix.sh render_video.py run_fea.sh fea_case.py run_cfd3d.sh cfd3d_case.py cad_build.py)
-STALE_FILES=(run_case.sh)
+RUNNER_FILES=(run_cfd2d.sh cfd2d_case.py run_calculix.sh render_video.py run_fea.sh fea_case.py run_cfd3d.sh cfd3d_case.py cad_build.py)
+STALE_FILES=(run_case.sh run_openfoam.sh cfd_case.py)
 
 usage() {
   cat <<EOF
@@ -283,7 +285,7 @@ Done. Backend settings for this work station (in the repo-root .env):
   WS_HOST=<this work station's address>
   WS_USER=$(id -un)
   WS_WORKDIR=$ICARUS_HOME
-  WS_CFD_SCRIPT=$ICARUS_HOME/bin/run_openfoam.sh
+  WS_CFD_SCRIPT=$ICARUS_HOME/bin/run_cfd2d.sh
   XFOIL_RUNNER=ws      # to run XFOIL here
 EOF
 }

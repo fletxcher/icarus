@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Runs one CFD case on the simulation work station. Install at WS_CFD_SCRIPT.
 #
-# Usage: run_openfoam.sh <job_dir>
+# Usage: run_cfd2d.sh <job_dir>
 #   <job_dir>/case.json    inputs written by the backend (see CfdCase)
 #   <job_dir>/status.json  kept up to date here; the backend polls it
 #
 # Pipeline: gmsh mesh -> gmshToFoam -> checkMesh -> simpleFoam / pimpleFoam (parallel)
-# -> results parsed from the force coefficients. cfd_case.py (next to this script) builds
+# -> results parsed from the force coefficients. cfd2d_case.py (next to this script) builds
 # the mesh script and the OpenFOAM case; each step logs to <job_dir>/log.<step>.
 #
 # Settings (environment): OPENFOAM_BASHRC  OpenFOAM's etc/bashrc (found automatically)
@@ -16,7 +16,7 @@ set -euo pipefail
 
 job_dir="$(cd "$1" && pwd)"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-case_tool=("$here/cfd_case.py")
+case_tool=("$here/cfd2d_case.py")
 cd "$job_dir"
 
 status() { python3 "${case_tool[0]}" status "$job_dir" "$@"; }
@@ -65,8 +65,8 @@ procs="${ICARUS_NPROC:-$(nproc)}"
 
 transient="$(python3 -c "
 import sys; sys.path.insert(0, '$here')
-import cfd_case, pathlib
-print(int(cfd_case.is_transient(cfd_case.read_case(pathlib.Path('$job_dir')))))")"
+import cfd2d_case, pathlib
+print(int(cfd2d_case.is_transient(cfd2d_case.read_case(pathlib.Path('$job_dir')))))")"
 
 # --- mesh --------------------------------------------------------------------
 run geo python3 "${case_tool[0]}" geo "$job_dir"

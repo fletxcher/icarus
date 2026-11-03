@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs one 3D CFD case around an uploaded solid. Installed next to run_openfoam.sh.
+# Runs one 3D CFD case around an uploaded solid. Installed next to run_cfd2d.sh.
 #
 # Usage: run_cfd3d.sh <job_dir>
 #   <job_dir>/case.json      inputs written by the backend (see Cfd3dCase)

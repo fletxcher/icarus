@@ -54,7 +54,7 @@ class FakeBuilder:
 def builder(client: TestClient) -> FakeBuilder:
     fake = FakeBuilder()
     client.app.state.services.compute.set_shared(
-        Workstation(fake, "/w", "/w/bin/run_openfoam.sh", "shared")
+        Workstation(fake, "/w", "/w/bin/run_cfd2d.sh", "shared")
     )
     return fake
 

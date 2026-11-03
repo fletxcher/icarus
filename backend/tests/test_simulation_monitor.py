@@ -61,7 +61,7 @@ class FakeWorkStation:
 def service_for(client, station):
     """The signed-in user's simulations on the fake work station (also kept on `client`)."""
     compute = client.app.state.services.compute
-    compute.set_shared(Workstation(station, "/w", "/w/bin/run_openfoam.sh", "shared"))
+    compute.set_shared(Workstation(station, "/w", "/w/bin/run_cfd2d.sh", "shared"))
     user_id = client.get("/api/auth/me").json()["id"]
     client.simulations = client.portal.call(compute.simulations_for, user_id)
     return client.simulations
@@ -81,7 +81,7 @@ def test_info_runs_the_case_tool_next_to_the_run_script(client):
 
     assert response.status_code == 200
     assert response.json() == {"solver": "pimpleFoam"}
-    assert station.commands[-1] == f"python3 /w/bin/cfd_case.py info /w/jobs/{job_id}"
+    assert station.commands[-1] == f"python3 /w/bin/cfd2d_case.py info /w/jobs/{job_id}"
 
 
 def test_progress_passes_the_offsets_and_adds_the_job_status(client):

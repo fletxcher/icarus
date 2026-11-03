@@ -240,8 +240,8 @@ def test_a_work_station_is_connected_checked_and_saved(client: TestClient, stati
     # The runner scripts and the setup script were put on the machine.
     setup = station.root / ssh_station.HOME.lstrip("/") / "icarus" / "setup"
     assert {path.name for path in setup.iterdir()} >= {
-        "run_openfoam.sh",
-        "cfd_case.py",
+        "run_cfd2d.sh",
+        "cfd2d_case.py",
         "run_fea.sh",
         "fea_case.py",
         "setup.sh",

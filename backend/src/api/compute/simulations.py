@@ -4,13 +4,13 @@ Simulations take minutes to hours, so jobs are fire-and-poll rather than awaited
 
 1. The backend creates `{WS_WORKDIR}/jobs/{job_id}/case.json` on the work station (for an FEA
    job also `geometry.stl`, the uploaded solid).
-2. It launches `{WS_CFD_SCRIPT} {job_dir}` detached (see `workstation/run_openfoam.sh`), or
+2. It launches `{WS_CFD_SCRIPT} {job_dir}` detached (see `workstation/run_cfd2d.sh`), or
    `run_fea.sh` or `run_cfd3d.sh` next to it for FEA and 3D CFD (which also get `geometry.stl`).
 3. That script keeps `{job_dir}/status.json` up to date:
    `{"status": "running" | "completed" | "failed", "result": {...}, "error": "..."}`.
 4. Status checks read `status.json` and mirror it into the `simulations` collection.
 
-`cfd_case.py`, `fea_case.py` and `cfd3d_case.py` next to the run scripts answer the monitor's
+`cfd2d_case.py`, `fea_case.py` and `cfd3d_case.py` next to the run scripts answer the monitor's
 questions.
 """
 
@@ -163,9 +163,10 @@ class SimulationService:
         return await self._update(doc["_id"], status="running")
 
     async def _monitor(self, *args: str, kind: str = "cfd") -> dict[str, Any]:
-        """Runs workstation/cfd_case.py, fea_case.py or cfd3d_case.py (next to the run scripts) and
+        """Runs workstation/cfd2d_case.py, fea_case.py or cfd3d_case.py (next to the run scripts) and
         returns its JSON."""
-        tool = self._tool(kind, "{kind}_case.py")
+        # The 2D CFD jobs are stored with kind "cfd"; their scripts are named after the job type.
+        tool = self._tool("cfd2d" if kind == "cfd" else kind, "{kind}_case.py")
         command = " ".join(["python3", *map(shlex.quote, (tool, *args))])
         try:
             result = await self._runner.run(command, timeout_s=MONITOR_TIMEOUT_S)
@@ -355,7 +356,7 @@ class SimulationService:
         if not SAFE_JOB_ID.match(job_id):
             logger.warning("not removing the files of cfd job %r: unusual id", job_id)
             return
-        # run_openfoam.sh leads its own process group (setsid at launch), so one signal to the
+        # run_cfd2d.sh leads its own process group (setsid at launch), so one signal to the
         # group stops the solver and everything else the job started. The [r] keeps pgrep
         # from matching this very command.
         command = (
