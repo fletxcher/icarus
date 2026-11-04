@@ -460,7 +460,7 @@ export function WorkstationPanel() {
               onClick={() => setAdding(true)}
             >
               <ServerIcon />
-              Use my own machine
+              Connect a remote machine
             </Button>
           </div>
         </section>

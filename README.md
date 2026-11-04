@@ -465,9 +465,9 @@ Only providers whose thinking can stream into the chat are offered. `REASONING_E
 streams the model's thinking before its answer; `none` turns it off. Mistral sends thinking as content blocks and OpenRouter as
 `reasoning_content`; both stream as `reasoning` events.
 
-### Credentials: your own keys and machine
+### Credentials: your own keys and remote machine
 
-Users bring their own model API keys and their own simulation machine (Settings → API
+Users bring their own model API keys and their own remote simulation machine (Settings → API
 keys, Settings → Work station). Without them they use what the server provides: the keys in
 `.env` and the shared work station (`WS_*`).
 
@@ -485,16 +485,17 @@ the user falls back to the server's). To rotate, put the new key first:
 `CREDENTIALS_KEY=<new>,<old>`. Without any key the app runs, but nothing can be saved.
 Request bodies of `/api/auth/*` and `/api/credentials*` are never logged.
 
-**Their machine.** The person enters host, port and user, the backend shows the machine's
+**Their remote machine.** The person enters host, port and user, the backend shows the machine's
 SSH host key, and the person approves its fingerprint. That host key is then pinned: the
 backend connects only to a machine presenting it. They paste a private key (kept
 without its passphrase, encrypted); the connection uses only that key (no agent, no
 `~/.ssh` of the server). Saving connects, creates `~/icarus` (or the chosen directory),
 puts the runner scripts and `setup.sh` there and reports what's installed (XFOIL, OpenFOAM, CalculiX,
 gmsh, ParaView, ffmpeg); anything missing is installed by running
-`bash ~/icarus/setup/setup.sh --install` on the machine. The machine must be reachable from
-the server running the backend, so "my own computer" works when the backend runs on it
-(use `127.0.0.1`) or the machine is reachable on the network. `ALLOW_PRIVATE_WORKSTATIONS=false`
+`bash ~/icarus/setup/setup.sh --install` on the machine. The machine must be reachable over SSH from
+the server running the backend: Icarus connects to remote machines only, there's no mode that runs
+jobs on the computer the browser is on. For local development, a machine on `127.0.0.1` or the
+local network still works. `ALLOW_PRIVATE_WORKSTATIONS=false`
 refuses loopback, private and link-local addresses, which a server on the public internet
 should set. A job lives on the machine it started on; switching machines doesn't move it.
 

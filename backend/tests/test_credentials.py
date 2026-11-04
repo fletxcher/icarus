@@ -347,7 +347,7 @@ def test_the_users_work_station_is_used_for_their_work(client: TestClient, stati
     after = {c["id"]: c for c in client.get("/api/status").json()}["work_station"]
 
     assert after["ok"] is True
-    assert "Your machine" in after["detail"]
+    assert "Your remote work station" in after["detail"]
     assert "true" in station.commands
 
 

@@ -42,9 +42,9 @@ async def _work_station(station: Workstation) -> Check:
             id="work_station",
             label=label,
             ok=False,
-            detail="None set up. Add your machine in Settings, under Work station.",
+            detail="None set up. Connect a remote machine in Settings, under Work station.",
         )
-    whose = "Your machine" if station.source == "own" else "The shared work station"
+    whose = "Your remote work station" if station.source == "own" else "The shared work station"
     try:
         result = await asyncio.wait_for(
             station.runner.run("true", timeout_s=WORK_STATION_TIMEOUT_S),
