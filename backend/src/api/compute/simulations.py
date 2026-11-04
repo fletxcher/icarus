@@ -163,8 +163,8 @@ class SimulationService:
         return await self._update(doc["_id"], status="running")
 
     async def _monitor(self, *args: str, kind: str = "cfd") -> dict[str, Any]:
-        """Runs workstation/cfd2d_case.py, fea_case.py or cfd3d_case.py (next to the run scripts) and
-        returns its JSON."""
+        """Runs workstation/cfd2d_case.py, fea_case.py or cfd3d_case.py (next to the run scripts)
+        and returns its JSON."""
         # The 2D CFD jobs are stored with kind "cfd"; their scripts are named after the job type.
         tool = self._tool("cfd2d" if kind == "cfd" else kind, "{kind}_case.py")
         command = " ".join(["python3", *map(shlex.quote, (tool, *args))])
