@@ -1,7 +1,7 @@
 """What the credentials API sends and accepts. Secrets only ever go in; none come back."""
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, SecretStr, StringConstraints
 
@@ -84,9 +84,32 @@ class Check(BaseModel):
     detail: str
 
 
+class MachineInfo(BaseModel):
+    """What the machine is, read over SSH when it's connected or re-checked."""
+
+    hostname: str
+    os: str
+    arch: str
+    cpus: int | None
+    cpu_model: str | None
+    memory_gb: float | None
+    disk_free_gb: float | None
+    gpu: str | None
+    # Docker runs the solvers: "usable" by this user, "installed" but not usable (no access to
+    # the daemon), or "missing".
+    docker: Literal["usable", "installed", "missing"]
+    # How setup can get root for installing Docker: logged in as root, sudo without a
+    # password, sudo that asks for one, or no sudo at all.
+    privilege: Literal["root", "passwordless_sudo", "password_sudo", "none"]
+    # False when Icarus can't run its solvers here; `problems` says why.
+    supported: bool
+    problems: list[str]
+
+
 class WorkstationReport(BaseModel):
     workstation: WorkstationInfo
     checks: list[Check]
+    machine: MachineInfo | None = None
 
 
 class Overview(BaseModel):

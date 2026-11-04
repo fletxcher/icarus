@@ -105,9 +105,29 @@ export type WorkstationCheck = {
   detail: string;
 };
 
+/** What the machine is, read over SSH when it's connected or re-checked. */
+export type MachineInfo = {
+  hostname: string;
+  os: string;
+  arch: string;
+  cpus: number | null;
+  cpu_model: string | null;
+  memory_gb: number | null;
+  disk_free_gb: number | null;
+  gpu: string | null;
+  /** Docker runs the solvers: usable by this user, installed but not usable, or missing. */
+  docker: "usable" | "installed" | "missing";
+  /** How setup can get root: logged in as root, sudo without a password, with one, or none. */
+  privilege: "root" | "passwordless_sudo" | "password_sudo" | "none";
+  /** False when Icarus can't run its solvers here; `problems` says why. */
+  supported: boolean;
+  problems: string[];
+};
+
 export type WorkstationReport = {
   workstation: WorkstationInfo;
   checks: WorkstationCheck[];
+  machine: MachineInfo | null;
 };
 
 export type CredentialsOverview = {

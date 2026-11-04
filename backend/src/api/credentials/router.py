@@ -143,7 +143,7 @@ async def save_workstation(
             body.private_key.get_secret_value(),
             body.passphrase.get_secret_value() if body.passphrase else None,
         )
-        target, checks = await workstation.inspect(
+        target, checks, machine = await workstation.inspect(
             workstation.make_target(body.host, body.port, body.username, key, approved),
             body.workdir.rstrip("/") if body.workdir else None,
         )
@@ -165,7 +165,7 @@ async def save_workstation(
     )
     await services.compute.forget(user.id)
     logger.info("user %s saved their work station %s@%s", user.id, body.username, body.host)
-    return WorkstationReport(workstation=saved, checks=checks)
+    return WorkstationReport(workstation=saved, checks=checks, machine=machine)
 
 
 @router.post("/workstation/check")
@@ -177,12 +177,12 @@ async def check_workstation(services: ServicesDep, user: CurrentUser) -> Worksta
     details = stored.details
     target = target_for(stored)
     try:
-        _, checks = await workstation.inspect(target, details.workdir)
+        _, checks, machine = await workstation.inspect(target, details.workdir)
     except ConnectionProblem as problem:
         raise _unprocessable(str(problem)) from None
     info = await services.credentials.workstation_info(user.id)
     assert info is not None
-    return WorkstationReport(workstation=info, checks=checks)
+    return WorkstationReport(workstation=info, checks=checks, machine=machine)
 
 
 @router.delete("/workstation", status_code=status.HTTP_204_NO_CONTENT)

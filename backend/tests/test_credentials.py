@@ -8,7 +8,7 @@ from pydantic import SecretStr
 from pymongo import MongoClient
 
 from api.config import get_settings
-from api.credentials import providers
+from api.credentials import providers, workstation
 from api.credentials.vault import SealedValueRejected, Vault, VaultUnavailable
 from tests import ssh_station
 from tests.conftest import MONGODB_URI, sign_up_and_in
@@ -440,3 +440,53 @@ def test_something_that_isnt_ollama_is_not_saved(client: TestClient, monkeypatch
     assert response.status_code == 422
     assert "Ollama" in response.json()["detail"]
     assert stored_credentials(client) == []
+
+
+PROBE_OUTPUT = """hostname=bench
+kernel=Linux
+arch=x86_64
+cpus=16
+cpu_model=AMD EPYC 7763
+mem_kb=33554432
+disk_free_kb=209715200
+os_id=ubuntu
+os_name=Ubuntu 24.04.1 LTS
+gpu=NVIDIA A10
+docker=installed
+privilege=password_sudo
+"""
+
+
+def test_a_supported_machine_is_described_from_the_probe():
+    machine = workstation.parse_machine(PROBE_OUTPUT)
+
+    assert machine.supported and machine.problems == []
+    assert (machine.hostname, machine.os, machine.arch) == ("bench", "Ubuntu 24.04.1 LTS", "x86_64")
+    assert (machine.cpus, machine.memory_gb, machine.disk_free_gb) == (16, 32.0, 200.0)
+    assert machine.gpu == "NVIDIA A10" and machine.cpu_model == "AMD EPYC 7763"
+    assert (machine.docker, machine.privilege) == ("installed", "password_sudo")
+    assert "16 cores" in workstation.describe_machine(machine)
+
+
+@pytest.mark.parametrize(
+    ("changes", "problem"),
+    [
+        ({"arch": "aarch64"}, "aarch64"),
+        ({"kernel": "Darwin"}, "Darwin"),
+        ({"mem_kb": "1048576"}, "1 GB of memory"),
+        ({"disk_free_kb": "1048576"}, "1 GB of free disk"),
+    ],
+)
+def test_a_machine_that_cant_run_icarus_says_why(changes: dict[str, str], problem: str):
+    lines = dict(line.split("=", 1) for line in PROBE_OUTPUT.splitlines()) | changes
+    machine = workstation.parse_machine("\n".join(f"{k}={v}" for k, v in lines.items()))
+
+    assert not machine.supported
+    assert any(problem in text for text in machine.problems)
+
+
+def test_a_probe_that_printed_nothing_still_gives_a_machine():
+    machine = workstation.parse_machine("")
+
+    assert machine.supported and machine.docker == "missing" and machine.privilege == "none"
+    assert machine.cpus is None and machine.os == "unknown"

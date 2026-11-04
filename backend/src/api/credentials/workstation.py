@@ -11,7 +11,7 @@ from pathlib import Path
 import asyncssh
 
 from ..compute.runner import CommandRunner, SSHRunner, WorkstationTarget, connect
-from .schemas import Check, HostKey
+from .schemas import Check, HostKey, MachineInfo
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,42 @@ else
   echo openfoam=0
 fi
 """
+
+
+PROBE_SCRIPT = r"""
+echo "hostname=$(hostname 2>/dev/null)"
+echo "kernel=$(uname -s 2>/dev/null)"
+echo "arch=$(uname -m 2>/dev/null)"
+echo "cpus=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null)"
+echo "cpu_model=$(lscpu 2>/dev/null | sed -n 's/^Model name:[[:space:]]*//p' | head -n 1)"
+echo "mem_kb=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null)"
+echo "disk_free_kb=$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2 {print $4}')"
+if [ -r /etc/os-release ]; then
+  . /etc/os-release
+  echo "os_id=${ID:-}"
+  echo "os_name=${PRETTY_NAME:-}"
+fi
+echo "gpu=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n 1)"
+if command -v docker > /dev/null 2>&1; then
+  if docker info > /dev/null 2>&1; then echo docker=usable; else echo docker=installed; fi
+else
+  echo docker=missing
+fi
+if [ "$(id -u)" = 0 ]; then
+  echo privilege=root
+elif ! command -v sudo > /dev/null 2>&1; then
+  echo privilege=none
+elif sudo -n true > /dev/null 2>&1; then
+  echo privilege=passwordless_sudo
+else
+  echo privilege=password_sudo
+fi
+"""
+
+# What Icarus can run its solver image on: the OpenFOAM packages inside it are x86-64 only.
+SUPPORTED_ARCHES = ("x86_64", "amd64")
+MIN_MEMORY_GB = 4.0
+MIN_DISK_GB = 15.0
 
 
 class ConnectionProblem(Exception):
@@ -149,7 +185,7 @@ def make_target(
 
 async def inspect(
     target: WorkstationTarget, requested_workdir: str | None
-) -> tuple[WorkstationTarget, list[Check]]:
+) -> tuple[WorkstationTarget, list[Check], MachineInfo]:
     """Connects, puts the runner scripts on the machine and reports what's installed.
 
     Returns the target with its working directory set (the requested one, or `~/icarus`)."""
@@ -160,7 +196,8 @@ async def inspect(
         ready = replace(target, workdir=workdir, cfd_script=f"{workdir}/bin/run_cfd2d.sh")
         runner = SSHRunner(ready)
         try:
-            return ready, await run_checks(runner)
+            checks, machine = await run_checks(runner)
+            return ready, checks, machine
         finally:
             await runner.close()
     except (OSError, TimeoutError, asyncssh.Error) as error:
@@ -203,9 +240,79 @@ async def install_scripts(runner: CommandRunner, workdir: str) -> None:
         )
 
 
-async def run_checks(runner: SSHRunner) -> list[Check]:
-    """Installs the runner scripts, then reports which of the tools they need are present."""
+def parse_machine(output: str) -> MachineInfo:
+    """Turns the probe's `key=value` lines into what's known about the machine, and whether
+    Icarus can run here."""
+    values: dict[str, str] = {}
+    for line in output.splitlines():
+        name, _, value = line.partition("=")
+        values[name.strip()] = value.strip()
+
+    def number(name: str, scale: float = 1.0) -> float | None:
+        try:
+            return round(float(values[name]) / scale, 1)
+        except (KeyError, ValueError):
+            return None
+
+    cpus = number("cpus")
+    kernel, arch = values.get("kernel", ""), values.get("arch", "")
+    memory_gb, disk_free_gb = number("mem_kb", 1024 * 1024), number("disk_free_kb", 1024 * 1024)
+    problems: list[str] = []
+    if kernel and kernel != "Linux":
+        problems.append(f"{kernel} isn't supported; the machine must run Linux.")
+    elif arch and arch not in SUPPORTED_ARCHES:
+        problems.append(f"{arch} processors aren't supported yet; the machine must be x86-64.")
+    if memory_gb is not None and memory_gb < MIN_MEMORY_GB:
+        problems.append(
+            f"Only {memory_gb:g} GB of memory; at least {MIN_MEMORY_GB:g} GB is needed."
+        )
+    if disk_free_gb is not None and disk_free_gb < MIN_DISK_GB:
+        problems.append(
+            f"Only {disk_free_gb:g} GB of free disk space; at least {MIN_DISK_GB:g} GB is needed."
+        )
+    docker = values.get("docker", "missing")
+    privilege = values.get("privilege", "none")
+    return MachineInfo(
+        hostname=values.get("hostname") or "unknown",
+        os=values.get("os_name") or kernel or "unknown",
+        arch=arch or "unknown",
+        cpus=int(cpus) if cpus else None,
+        cpu_model=values.get("cpu_model") or None,
+        memory_gb=memory_gb,
+        disk_free_gb=disk_free_gb,
+        gpu=values.get("gpu") or None,
+        docker=docker if docker in ("usable", "installed", "missing") else "missing",
+        privilege=(
+            privilege
+            if privilege in ("root", "passwordless_sudo", "password_sudo", "none")
+            else "none"
+        ),
+        supported=not problems,
+        problems=problems,
+    )
+
+
+def describe_machine(machine: MachineInfo) -> str:
+    parts = [machine.os, machine.arch]
+    if machine.cpus:
+        parts.append(f"{machine.cpus} cores")
+    if machine.memory_gb:
+        parts.append(f"{machine.memory_gb:g} GB memory")
+    if machine.gpu:
+        parts.append(machine.gpu)
+    return ", ".join(parts)
+
+
+async def probe_machine(runner: CommandRunner) -> MachineInfo:
+    result = await runner.run(f"bash -c {shlex.quote(PROBE_SCRIPT)}", timeout_s=COMMAND_TIMEOUT_S)
+    return parse_machine(result.stdout)
+
+
+async def run_checks(runner: SSHRunner) -> tuple[list[Check], MachineInfo]:
+    """Reads what the machine is, installs the runner scripts, then reports which of the tools
+    they need are present."""
     target = runner.target
+    machine = await probe_machine(runner)
     await install_scripts(runner, target.workdir)
     result = await runner.run(f"bash -c {shlex.quote(TOOLS_SCRIPT)}", timeout_s=COMMAND_TIMEOUT_S)
     # The Python environment the FEA mesher runs in (setup.sh makes it next to bin/).
@@ -232,6 +339,12 @@ async def run_checks(runner: SSHRunner) -> list[Check]:
             detail=f"Connected as {target.username}@{target.host}",
         ),
         Check(
+            id="machine",
+            label="Machine",
+            ok=machine.supported,
+            detail=" ".join(machine.problems) or describe_machine(machine),
+        ),
+        Check(
             id="runner", label="Runner scripts", ok=True, detail=f"Installed in {target.workdir}"
         ),
     ]
@@ -256,4 +369,4 @@ async def run_checks(runner: SSHRunner) -> list[Check]:
                 detail=f"On the machine, run: {setup}",
             )
         )
-    return checks
+    return checks, machine
