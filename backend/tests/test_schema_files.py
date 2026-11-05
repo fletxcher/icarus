@@ -139,7 +139,7 @@ def _run_app_flows(client: TestClient) -> None:
         fingerprint="SHA256:abc",
         public_key="ssh-ed25519 BBBB",
     )
-    client.portal.call(credentials.set_workstation, user_id, station, "PRIVATE KEY")
+    client.portal.call(credentials.add_workstation, user_id, station, "PRIVATE KEY")
 
 
 def _documents(database: Database, name: str) -> list[dict[str, Any]]:

@@ -133,7 +133,7 @@ class ComputePool:
         if stored is None:
             await self.forget(user_id)
             return self._shared
-        version = stored.updated_at.isoformat()
+        version = f"{stored.id}:{stored.updated_at.isoformat()}"
         cached = self._own.get(user_id)
         if cached is not None and cached[0] == version:
             self._own.move_to_end(user_id)

@@ -28,6 +28,7 @@ dependencies = [
 api = "api:main"
 export-schemas = "api.schema_export:main"
 claim-data = "api.claim_data:main"
+seed-machines = "api.seed_machines:main"
 
 [build-system]
 requires = ["uv_build>=0.12.21,<0.13.0"]

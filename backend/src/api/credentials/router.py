@@ -8,7 +8,7 @@ import logging
 from urllib.parse import urlsplit
 
 import asyncssh
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import SecretStr
 
 from ..agent import ollama
@@ -18,8 +18,9 @@ from ..compute.pool import target_for
 from ..compute.runner import SSHRunner
 from ..config import get_settings
 from ..dependencies import ServicesDep
-from . import providers, provision, workstation
+from . import cleanup, providers, provision, workstation
 from .schemas import (
+    Hardware,
     HostKey,
     HostKeyRequest,
     ModelKeyIn,
@@ -31,6 +32,7 @@ from .schemas import (
     SetupProgress,
     WorkstationDetails,
     WorkstationIn,
+    WorkstationInfo,
     WorkstationReport,
 )
 from .workstation import ConnectionProblem
@@ -59,7 +61,7 @@ def _unprocessable(message: str) -> HTTPException:
 async def overview(services: ServicesDep, user: CurrentUser) -> Overview:
     return Overview(
         model_keys=await services.credentials.list_model_keys(user.id),
-        workstation=await services.credentials.workstation_info(user.id),
+        workstations=await services.credentials.list_workstations(user.id),
         default_providers=services.server_providers,
         default_workstation=services.compute.shared_available,
         storage_available=services.credentials.vault.available,
@@ -139,6 +141,8 @@ async def save_workstation(
     runner scripts there and, if that works, saves the machine."""
     if not 1 <= body.port <= 65535:
         raise _unprocessable("The port must be between 1 and 65535.")
+    if body.id and await services.credentials.workstation_info(user.id, body.id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such machine")
     try:
         await workstation.check_address(
             body.host, body.port, allow_private=get_settings().allow_private_workstations
@@ -156,6 +160,8 @@ async def save_workstation(
         raise _unprocessable(str(problem)) from None
 
     details = WorkstationDetails(
+        name=body.name or body.host,
+        hardware=hardware_of(machine),
         host=target.host,
         port=target.port,
         username=target.username,
@@ -165,8 +171,8 @@ async def save_workstation(
         public_key=workstation.public_key_line(key),
     )
     # Saved without a passphrase: the encrypted copy in the database is what protects it.
-    saved = await services.credentials.set_workstation(
-        user.id, details, key.export_private_key("openssh").decode()
+    saved = await services.credentials.add_workstation(
+        user.id, details, key.export_private_key("openssh").decode(), machine_id=body.id
     )
     await services.compute.forget(user.id)
     logger.info("user %s saved their work station %s@%s", user.id, body.username, body.host)
@@ -175,19 +181,23 @@ async def save_workstation(
 
 @router.post("/workstation/check")
 async def check_workstation(services: ServicesDep, user: CurrentUser) -> WorkstationReport:
-    """Re-checks the saved machine (and refreshes the runner scripts on it)."""
+    """Re-checks the connected machine (and refreshes the runner scripts on it)."""
     stored = await services.credentials.workstation(user.id)
     if stored is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "You haven't added a work station")
-    details = stored.details
-    target = target_for(stored)
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No machine is connected")
     try:
-        _, checks, machine = await workstation.inspect(target, details.workdir)
+        _, checks, machine = await workstation.inspect(target_for(stored), stored.details.workdir)
     except ConnectionProblem as problem:
         raise _unprocessable(str(problem)) from None
-    info = await services.credentials.workstation_info(user.id)
+    await services.credentials.set_hardware(user.id, stored.id, hardware_of(machine))
+    info = await services.credentials.workstation_info(user.id, stored.id)
     assert info is not None
     return WorkstationReport(workstation=info, checks=checks, machine=machine)
+
+
+def hardware_of(machine: workstation.MachineInfo) -> Hardware:
+    """What a machine's card shows of it."""
+    return Hardware(cpus=machine.cpus, cpu_model=machine.cpu_model, gpu=machine.gpu)
 
 
 async def _own_station(services: ServicesDep, user_id: str) -> SSHRunner:
@@ -241,9 +251,49 @@ async def setup_progress(services: ServicesDep, user: CurrentUser) -> SetupProgr
         raise _unreachable(problem, runner) from None
 
 
-@router.delete("/workstation", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_workstation(services: ServicesDep, user: CurrentUser) -> None:
-    """Forgets the user's machine; their simulations go back to the shared work station."""
-    if not await services.credentials.delete_workstation(user.id):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "You haven't added a work station")
+async def _saved(services: ServicesDep, user_id: str, machine_id: str) -> WorkstationInfo:
+    info = await services.credentials.workstation_info(user_id, machine_id)
+    if info is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such machine")
+    return info
+
+
+@router.post("/workstations/{machine_id}/connect")
+async def connect_workstation(
+    machine_id: str, services: ServicesDep, user: CurrentUser
+) -> WorkstationInfo:
+    """Makes this machine the one jobs run on, disconnecting any other."""
+    await _saved(services, user.id, machine_id)
+    if not await services.credentials.connect_workstation(user.id, machine_id):
+        raise _unprocessable("That machine is being removed.")
     await services.compute.forget(user.id)
+    return await _saved(services, user.id, machine_id)
+
+
+@router.post("/workstations/{machine_id}/disconnect", status_code=status.HTTP_204_NO_CONTENT)
+async def disconnect_workstation(machine_id: str, services: ServicesDep, user: CurrentUser) -> None:
+    """Disconnects the machine; it stays saved. Jobs already running stay on it."""
+    await _saved(services, user.id, machine_id)
+    await services.credentials.disconnect_workstations(user.id)
+    await services.compute.forget(user.id)
+
+
+@router.delete(
+    "/workstations/{machine_id}",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=WorkstationInfo | None,
+)
+async def remove_workstation(
+    machine_id: str, services: ServicesDep, user: CurrentUser, force: bool = False
+) -> WorkstationInfo | Response:
+    """Removes a machine. Its files and SSH key are cleaned off the machine in the background
+    first, and only then does it leave the database. `force` skips the cleanup and forgets the
+    machine at once, for one that can't be reached."""
+    info = await _saved(services, user.id, machine_id)
+    if force:
+        await services.credentials.delete_workstation(user.id, machine_id)
+        await services.compute.forget(user.id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if info.status != "removing":
+        await cleanup.start_removal(services, user.id, machine_id)
+    return await _saved(services, user.id, machine_id)

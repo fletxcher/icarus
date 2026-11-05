@@ -169,11 +169,13 @@ otherwise), and chats, files and simulations belong to the user who made them: a
 | GET | `/api/auth/me` | The signed-in user (from the session cookie); 401 if nobody is |
 | PATCH | `/api/auth/me/preferences` | Save the reply language `{language}` (`en`, `es`, … or null) |
 | POST | `/api/auth/logout` | End the session and clear the cookie (204, also when not signed in) |
-| GET | `/api/credentials` | The user's saved model keys (last 4 characters only) and work station, and what the server supplies by default |
+| GET | `/api/credentials` | The user's saved model keys (last 4 characters only) and machines (name, cores, CPU, GPU, whether connected), and what the server supplies by default |
 | PUT / DELETE | `/api/credentials/model-keys/{provider}` | Save `{api_key}` for `mistral` or `openrouter` (checked with the provider first), or remove it |
 | POST | `/api/credentials/workstation/host-key` | Look up a machine's SSH host key `{host, port}` so the person can approve its fingerprint |
-| PUT | `/api/credentials/workstation` | Connect `{host, port, username, private_key, passphrase?, host_key, workdir?}`, install the runner scripts and save the machine; returns what's installed there |
-| POST / DELETE | `/api/credentials/workstation/check`, `/workstation` | Re-check the saved machine, or forget it |
+| PUT | `/api/credentials/workstation` | Add a machine `{name?, host, port, username, private_key, passphrase?, host_key, workdir?}` (or replace one with `id`): install the runner scripts, save it and connect it; returns what's installed there and the machine's hardware |
+| POST | `/api/credentials/workstation/check` | Re-check the connected machine |
+| POST | `/api/credentials/workstations/{id}/connect`, `/disconnect` | Make a saved machine the one jobs run on (any other is disconnected), or disconnect it (204) |
+| DELETE | `/api/credentials/workstations/{id}` | Remove a machine: 202 and a background cleanup, then it's forgotten. `?force=true` forgets it at once (204) |
 | GET | `/api/threads` | List the user's threads, newest first |
 | POST | `/api/threads` | Create a thread `{title}` |
 | GET | `/api/threads/{id}` | Thread with messages |
@@ -485,7 +487,23 @@ the user falls back to the server's). To rotate, put the new key first:
 `CREDENTIALS_KEY=<new>,<old>`. Without any key the app runs, but nothing can be saved.
 Request bodies of `/api/auth/*` and `/api/credentials*` are never logged.
 
-**Their remote machine.** The person enters host, port and user, the backend shows the machine's
+**Their remote machines.** A person can save several machines and connect one at a time. With
+none saved, Settings shows the form for adding one; otherwise it shows a card per machine (name,
+cores, CPU, GPU if any) with a *Connect* button that turns into *Disconnect*, and *Add +* for a new
+one. Adding connects the new machine. Jobs run on the connected machine, and a job stays on the
+machine it started on.
+
+**Removing a machine** (the trash button) cleans it up in the background, then forgets it: over
+SSH with the machine's own key it runs `setup.sh --uninstall --purge --yes` (stops job containers,
+removes the solver image, the job folders, the setup copy and the Python environment; packages only
+if root is available without a password) and takes its key out of `~/.ssh/authorized_keys` (only
+lines holding that key). Only then do the record and the encrypted key leave the database. If the
+machine can't be reached the record stays with the reason, and the person can try again or
+*Remove anyway*, which skips the cleanup. For a look at the settings, `uv run seed-machines
+you@example.com` adds three made-up machines (hosts under `example.invalid`; `--remove` takes them
+away).
+
+Adding a machine: the person enters host, port and user, the backend shows the machine's
 SSH host key, and the person approves its fingerprint. That host key is then pinned: the
 backend connects only to a machine presenting it. They paste a private key (kept
 without its passphrase, encrypted); the connection uses only that key (no agent, no

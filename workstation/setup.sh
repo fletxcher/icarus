@@ -61,7 +61,7 @@ IMAGE_REPO=icarus-solvers
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") --install | --install-native | --uninstall [--yes]
+Usage: $(basename "$0") --install | --install-native | --uninstall [--yes] [--purge]
 
   --install         Docker mode: install Docker if it's missing (asks for root), build the solver
                     image (OpenFOAM $OPENFOAM_PACKAGE, CalculiX, gmsh, ParaView, ffmpeg, XFOIL) and put the
@@ -71,6 +71,7 @@ Usage: $(basename "$0") --install | --install-native | --uninstall [--yes]
   --uninstall       Remove the image, packages and runner files an install added, if still there.
                     Asks before deleting job folders, and leaves other files in $ICARUS_HOME.
   --yes             Don't ask before deleting job folders.
+  --purge           With --uninstall: also remove the setup copy, designs and the Python environment.
 
 Set ICARUS_HOME (or pass --home PATH) to use a different directory (then match WS_WORKDIR/WS_CFD_SCRIPT).
 EOF
@@ -456,8 +457,11 @@ do_uninstall() {
 
   # The Docker solver image(s) and the files that went with them.
   if command -v docker > /dev/null && docker info > /dev/null 2>&1; then
-    local images
+    local images image
     images="$(docker image ls --format '{{.Repository}}:{{.Tag}}' "$IMAGE_REPO" 2> /dev/null)"
+    for image in $images; do
+      docker ps -q --filter "ancestor=$image" | xargs -r docker kill > /dev/null 2>&1 || true
+    done
     if [[ -n "$images" ]]; then
       # shellcheck disable=SC2086
       docker rmi $images > /dev/null 2>&1 && log "Removed the solver image(s): $images"
@@ -505,11 +509,24 @@ do_uninstall() {
     rm -f "$MANIFEST"
   fi
   if ((${#remove[@]})); then
-    log "Removing packages installed by --install: ${remove[*]}"
-    as_root env DEBIAN_FRONTEND=noninteractive apt-get remove -y -qq "${remove[@]}"
-    as_root apt-get autoremove -y -qq
+    if [[ $EUID -eq 0 ]] || sudo -n true 2> /dev/null; then
+      log "Removing packages installed by --install: ${remove[*]}"
+      as_root env DEBIAN_FRONTEND=noninteractive apt-get remove -y -qq "${remove[@]}"
+      as_root apt-get autoremove -y -qq
+    else
+      # Removing them takes root, and nobody is here to type a password: leave them.
+      log "Left these packages installed, since removing them takes root: ${remove[*]}"
+    fi
   else
     log "No packages to remove (none were installed by --install, or they are already gone)"
+  fi
+
+  # --purge: everything else Icarus put in its directory (the setup copy, designs, notes about
+  # what was installed). Named one by one: the directory is the person's to choose.
+  if [[ "${PURGE:-}" == 1 && -d "$ICARUS_HOME" ]]; then
+    rm -rf "$ICARUS_HOME/setup" "$ICARUS_HOME/designs" "$ICARUS_HOME/venv" "$ICARUS_HOME/.container-home"
+    rm -f "$MANIFEST" "$MANIFEST.venv"
+    log "Purged Icarus's files from $ICARUS_HOME"
   fi
 
   # The directory goes only if nothing else is in it.
@@ -534,6 +551,7 @@ for ((i = 0; i < ${#args[@]}; i++)); do
     --install | --install-native | --install-system | --install-user | --check-tools | --uninstall)
       action="${args[i]}" ;;
     --yes) ASSUME_YES=1 ;;
+    --purge) PURGE=1 ;;
     --home) i=$((i + 1)) ;; # already read, before the variables that depend on it were set
     --user) i=$((i + 1)); TARGET_USER="${args[i]:-}" ;;
     -h | --help) usage; exit 0 ;;

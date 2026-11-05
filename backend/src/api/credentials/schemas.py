@@ -50,6 +50,10 @@ class HostKey(BaseModel):
 
 
 class WorkstationIn(BaseModel):
+    # Set to replace an already saved machine (new key, address or directory) instead of adding.
+    id: Annotated[str, StringConstraints(max_length=64)] | None = None
+    # What the person calls it; the host when left empty.
+    name: Annotated[str, StringConstraints(strip_whitespace=True, max_length=64)] = ""
     host: Host
     port: int = 22
     username: Annotated[str, StringConstraints(strip_whitespace=True, pattern=USERNAME_PATTERN)]
@@ -62,7 +66,16 @@ class WorkstationIn(BaseModel):
     )
 
 
+class Hardware(BaseModel):
+    """What a machine's card shows, remembered from when it was last checked."""
+
+    cpus: int | None = None
+    cpu_model: str | None = None
+    gpu: str | None = None
+
+
 class WorkstationDetails(BaseModel):
+    name: str = ""
     host: str
     port: int
     username: str
@@ -71,9 +84,17 @@ class WorkstationDetails(BaseModel):
     fingerprint: str
     # The public half of the saved key, to put in the machine's ~/.ssh/authorized_keys.
     public_key: str
+    hardware: Hardware = Hardware()
 
 
 class WorkstationInfo(WorkstationDetails):
+    id: str
+    # The machine jobs run on. At most one of a user's machines is connected.
+    active: bool
+    # "removing": being cleaned up in the background; "removal_failed": that stopped, see
+    # `status_message`; the machine stays saved so the person can retry or remove it anyway.
+    status: Literal["ready", "removing", "removal_failed"] = "ready"
+    status_message: str = ""
     updated_at: datetime
 
 
@@ -140,7 +161,7 @@ class WorkstationReport(BaseModel):
 
 class Overview(BaseModel):
     model_keys: list[ModelKeyInfo]
-    workstation: WorkstationInfo | None
+    workstations: list[WorkstationInfo]
     # Providers the server supplies a key for, used when the person hasn't added their own.
     default_providers: list[Provider]
     # Whether the server has a shared work station that is used until they add one.

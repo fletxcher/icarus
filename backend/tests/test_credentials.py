@@ -1,4 +1,5 @@
 import logging
+import time
 
 import asyncssh
 import pytest
@@ -78,7 +79,7 @@ def stored_credentials(client: TestClient) -> list[dict]:
 def test_credentials_need_a_signed_in_user(anon_client: TestClient):
     assert anon_client.get("/api/credentials").status_code == 401
     assert anon_client.put("/api/credentials/model-keys/mistral", json={}).status_code == 401
-    assert anon_client.delete("/api/credentials/workstation").status_code == 401
+    assert anon_client.delete("/api/credentials/workstations/any").status_code == 401
 
 
 def test_a_saved_key_is_encrypted_and_never_sent_back(client: TestClient, accepted_keys):
@@ -351,19 +352,116 @@ def test_the_users_work_station_is_used_for_their_work(client: TestClient, stati
     assert "true" in station.commands
 
 
-def test_a_work_station_can_be_rechecked_and_removed(client: TestClient, station):
+def test_a_work_station_can_be_rechecked_and_its_card_filled_in(client: TestClient, station):
     assert client.post("/api/credentials/workstation/check").status_code == 404
-    client.put("/api/credentials/workstation", json=station_body(station))
+    client.put("/api/credentials/workstation", json=station_body(station, name="Lab box"))
 
     recheck = client.post("/api/credentials/workstation/check")
     assert recheck.status_code == 200
     assert recheck.json()["workstation"]["host"] == station.host
 
-    assert client.delete("/api/credentials/workstation").status_code == 204
-    assert client.delete("/api/credentials/workstation").status_code == 404
-    assert client.get("/api/credentials").json()["workstation"] is None
-    after = {c["id"]: c for c in client.get("/api/status").json()}["work_station"]
-    assert after["ok"] is False  # back to the shared one, which tests don't have
+    [saved] = client.get("/api/credentials").json()["workstations"]
+    assert saved["name"] == "Lab box" and saved["active"] and saved["status"] == "ready"
+    assert saved["hardware"] == {"cpus": 8, "cpu_model": None, "gpu": None}
+
+
+def test_machines_default_to_their_host_as_a_name(client: TestClient, station):
+    client.put("/api/credentials/workstation", json=station_body(station))
+
+    [saved] = client.get("/api/credentials").json()["workstations"]
+    assert saved["name"] == station.host
+
+
+def test_only_one_machine_is_connected_at_a_time(client: TestClient, station, tmp_path):
+    other = ssh_station.start(tmp_path / "other")
+    try:
+        first = client.put("/api/credentials/workstation", json=station_body(station, name="A"))
+        second = client.put("/api/credentials/workstation", json=station_body(other, name="B"))
+        first_id, second_id = first.json()["workstation"]["id"], second.json()["workstation"]["id"]
+        assert first_id != second_id
+
+        def active() -> list[str]:
+            machines = client.get("/api/credentials").json()["workstations"]
+            return [m["name"] for m in machines if m["active"]]
+
+        assert active() == ["B"]  # adding connects the new one
+
+        connected = client.post(f"/api/credentials/workstations/{first_id}/connect")
+        assert connected.status_code == 200 and connected.json()["active"] is True
+        assert active() == ["A"]
+        status = {c["id"]: c for c in client.get("/api/status").json()}["work_station"]
+        assert status["ok"] is True
+
+        assert (
+            client.post(f"/api/credentials/workstations/{first_id}/disconnect").status_code == 204
+        )
+        assert active() == []
+        assert len(client.get("/api/credentials").json()["workstations"]) == 2
+        status = {c["id"]: c for c in client.get("/api/status").json()}["work_station"]
+        assert status["ok"] is False  # nothing connected, and tests have no shared one
+
+        assert client.post("/api/credentials/workstations/nope/connect").status_code == 404
+    finally:
+        other.stop()
+
+
+def _wait_until(client: TestClient, done) -> list[dict]:
+    machines: list[dict] = []
+    for _ in range(100):
+        machines = client.get("/api/credentials").json()["workstations"]
+        if done(machines):
+            return machines
+        time.sleep(0.05)
+    raise AssertionError(f"still waiting: {machines}")
+
+
+def test_removing_a_machine_cleans_it_up_then_forgets_it(client: TestClient, station):
+    saved = client.put("/api/credentials/workstation", json=station_body(station)).json()
+    machine_id, public_key = saved["workstation"]["id"], saved["workstation"]["public_key"]
+    station.commands.clear()
+
+    response = client.delete(f"/api/credentials/workstations/{machine_id}")
+
+    assert response.status_code == 202 and response.json()["status"] == "removing"
+    _wait_until(client, lambda machines: machines == [])
+    uninstall = next(c for c in station.commands if "--uninstall" in c)
+    assert "--purge --yes --home /home/tester/icarus" in uninstall
+    keys = next(c for c in station.commands if "authorized_keys" in c)
+    assert public_key.split()[1] in keys
+    # The cleanup comes before the key goes, and nothing of the machine is left in the database.
+    assert station.commands.index(uninstall) < station.commands.index(keys)
+    assert stored_credentials(client) == []
+    status = {c["id"]: c for c in client.get("/api/status").json()}["work_station"]
+    assert status["ok"] is False
+
+
+def test_a_machine_that_cant_be_reached_stays_until_removed_anyway(client: TestClient, station):
+    machine_id = client.put("/api/credentials/workstation", json=station_body(station)).json()[
+        "workstation"
+    ]["id"]
+    station.stop()
+
+    assert client.delete(f"/api/credentials/workstations/{machine_id}").status_code == 202
+    [kept] = _wait_until(client, lambda machines: machines[0]["status"] == "removal_failed")
+    assert kept["status_message"] and kept["active"] is False
+    assert len(stored_credentials(client)) == 1  # the key is still saved
+
+    forced = client.delete(f"/api/credentials/workstations/{machine_id}", params={"force": "true"})
+    assert forced.status_code == 204
+    assert client.get("/api/credentials").json()["workstations"] == []
+    assert stored_credentials(client) == []
+
+
+def test_the_cleanup_commands_only_touch_this_key_and_icarus_files():
+    from api.credentials import cleanup
+
+    command = cleanup.authorized_keys_command("ssh-ed25519 AAAAC3Nza-key-blob")
+    assert "grep -vF -- AAAAC3Nza-key-blob" in command and "AAAAC3Nza-key-blob" in command
+    assert "ssh-ed25519" not in command  # matched by the key itself, not its type or comment
+    assert "if [ -f " in cleanup.uninstall_command("/home/u/icarus")
+    assert "--uninstall --purge --yes --home /home/u/icarus" in cleanup.uninstall_command(
+        "/home/u/icarus"
+    )
 
 
 def test_another_user_cant_use_a_work_station_they_didnt_add(anon_client: TestClient, station):
@@ -372,7 +470,7 @@ def test_another_user_cant_use_a_work_station_they_didnt_add(anon_client: TestCl
     anon_client.post("/api/auth/logout")
     sign_up_and_in(anon_client, email="other@example.com")
 
-    assert anon_client.get("/api/credentials").json()["workstation"] is None
+    assert anon_client.get("/api/credentials").json()["workstations"] == []
     status = {c["id"]: c for c in anon_client.get("/api/status").json()}["work_station"]
     assert status["ok"] is False
 
