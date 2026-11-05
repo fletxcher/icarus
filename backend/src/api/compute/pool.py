@@ -18,7 +18,14 @@ from ..config import Settings
 from ..credentials.repository import CredentialRepository, StoredWorkstation
 from ..design.service import DesignService
 from ..files.repository import FileRepository
-from .runner import CommandResult, CommandRunner, LocalRunner, SSHRunner, WorkstationTarget
+from .runner import (
+    CommandResult,
+    CommandRunner,
+    LocalRunner,
+    SSHRunner,
+    WorkstationTarget,
+    via_exec,
+)
 from .schemas import TERMINAL_STATUSES
 from .simulations import SimulationService
 from .xfoil import XfoilService
@@ -169,8 +176,10 @@ class ComputePool:
     async def xfoil_for(self, user_id: str, station: Workstation | None = None) -> XfoilService:
         s = self._settings
         station = station or await self.workstation(user_id)
+        local = s.xfoil_runner == "local"
         return XfoilService(
-            LocalRunner() if s.xfoil_runner == "local" else station.runner,
+            LocalRunner() if local else station.runner,
+            command_prefix="" if local else via_exec(station.workdir),
             xfoil_path=s.xfoil_path,
             display=s.xfoil_display,
             timeout_s=s.xfoil_timeout_s,

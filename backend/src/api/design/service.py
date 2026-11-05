@@ -93,15 +93,16 @@ class DesignService:
         try:
             await self._runner.run(f"mkdir -p {shlex.quote(folder)}")
             await self._runner.write_file(f"{folder}/design.py", code)
-            command = " ".join(
+            build = " ".join(
                 shlex.quote(part)
-                for part in (
-                    f"{self._workdir}/venv/bin/python",
-                    f"{self._workdir}/bin/cad_build.py",
-                    args[0],
-                    folder,
-                    *args[1:],
-                )
+                for part in (f"{self._workdir}/bin/cad_build.py", args[0], folder, *args[1:])
+            )
+            # `python3` finds the Python environment with build123d wherever icarus-exec runs it;
+            # a machine whose runner files predate icarus-exec uses its own environment directly.
+            wrapper = shlex.quote(f"{self._workdir}/bin/icarus-exec")
+            command = (
+                f"if [ -x {wrapper} ]; then {wrapper} python3 {build}; "
+                f"else {shlex.quote(f'{self._workdir}/venv/bin/python')} {build}; fi"
             )
             result = await self._runner.run(command, timeout_s=BUILD_TIMEOUT_S)
         except Exception as error:

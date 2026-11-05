@@ -148,8 +148,11 @@ class XfoilService:
         display: XfoilDisplay,
         timeout_s: float,
         max_concurrency: int,
+        command_prefix: str = "",
     ) -> None:
         self._runner = runner
+        # In front of the command that runs XFOIL: runs it inside the work station's solver image.
+        self._prefix = command_prefix
         self._xfoil_path = xfoil_path
         self._display = display
         self._timeout_s = timeout_s
@@ -161,11 +164,13 @@ class XfoilService:
     async def _run_xfoil(self, workdir: str) -> CommandResult:
         xfoil = f"{shlex.quote(self._xfoil_path)} < {INPUT_FILE}"
         if self._display == "none":
-            return await self._runner.run(xfoil, cwd=workdir, timeout_s=self._timeout_s)
+            return await self._runner.run(
+                f"{self._prefix}{xfoil}", cwd=workdir, timeout_s=self._timeout_s
+            )
 
         # Retry once on a fresh number in case another process holds this display.
         for attempt in range(2):
-            command = f"xvfb-run --server-num={next(self._displays)} {xfoil}"
+            command = f"{self._prefix}xvfb-run --server-num={next(self._displays)} {xfoil}"
             result = await self._runner.run(command, cwd=workdir, timeout_s=self._timeout_s)
             if result.ok or XVFB_FAILED not in result.stderr:
                 break

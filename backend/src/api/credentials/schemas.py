@@ -106,6 +106,32 @@ class MachineInfo(BaseModel):
     problems: list[str]
 
 
+class SetupPlan(BaseModel):
+    """What the setup button would do to this machine, shown before the person confirms."""
+
+    installs: list[str]
+    # Root is needed to install Docker or put the user in the docker group.
+    needs_root: bool
+    # True when root comes from a sudo password the person has to type.
+    needs_password: bool
+    can_run: bool
+    # Why setup can't run here, when it can't.
+    reason: str | None
+
+
+class SetupIn(BaseModel):
+    # The machine's sudo password, when the plan says it's needed. Used once, never stored.
+    password: SecretStr | None = Field(default=None, max_length=1024)
+
+
+class SetupProgress(BaseModel):
+    state: Literal["idle", "running", "completed", "failed"]
+    stage: str
+    message: str
+    log_tail: str
+    updated: int | None = None
+
+
 class WorkstationReport(BaseModel):
     workstation: WorkstationInfo
     checks: list[Check]

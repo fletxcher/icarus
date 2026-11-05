@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Runs a command where the solvers are: inside the Icarus solver image when setup.sh made this
+# machine a Docker work station (runtime.env), otherwise directly on the machine.
+#
+# Usage: icarus-exec <command> [args...]
+#        icarus-exec --status     prints runtime=docker|native, image=<tag>, image_present=0|1
+#
+# Installed in $ICARUS_HOME/bin. In Docker mode the machine's $ICARUS_HOME and the current
+# directory are mounted at the same paths in the container, and the command runs as the calling
+# user, so job files keep their owner and every path means the same inside and out.
+set -euo pipefail
+
+home="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ICARUS_RUNTIME=native
+ICARUS_IMAGE=""
+# shellcheck disable=SC1091
+[[ -f "$home/runtime.env" ]] && source "$home/runtime.env"
+
+if [[ "${1:-}" == --status ]]; then
+  echo "runtime=$ICARUS_RUNTIME"
+  echo "image=$ICARUS_IMAGE"
+  if [[ "$ICARUS_RUNTIME" == docker ]] && docker image inspect "$ICARUS_IMAGE" > /dev/null 2>&1; then
+    echo "image_present=1"
+  else
+    echo "image_present=0"
+  fi
+  exit 0
+fi
+
+if [[ "$ICARUS_RUNTIME" != docker || -n "${ICARUS_IN_CONTAINER:-}" ]]; then
+  [[ -d "$home/venv/bin" ]] && export PATH="$home/venv/bin:$PATH"
+  exec "$@"
+fi
+
+mkdir -p "$home/.container-home"
+args=(
+  --rm -i --init
+  --user "$(id -u):$(id -g)"
+  --shm-size 2g
+  -v "$home:$home"
+  -w "$PWD"
+  -e "HOME=$home/.container-home"
+  -e ICARUS_IN_CONTAINER=1
+  # MPI's shared-memory transport needs ptrace, which containers don't have by default.
+  -e OMPI_MCA_btl_vader_single_copy_mechanism=none
+)
+[[ "$PWD" == "$home" || "$PWD" == "$home"/* ]] || args+=(-v "$PWD:$PWD")
+for name in ICARUS_NPROC ICARUS_TRANSIENT_END_TIME ICARUS_FEA_MAX_ELEMENTS OMP_NUM_THREADS; do
+  [[ -n "${!name:-}" ]] && args+=(-e "$name=${!name}")
+done
+exec docker run "${args[@]}" "$ICARUS_IMAGE" "$@"

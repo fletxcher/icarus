@@ -491,8 +491,9 @@ backend connects only to a machine presenting it. They paste a private key (kept
 without its passphrase, encrypted); the connection uses only that key (no agent, no
 `~/.ssh` of the server). Saving connects, creates `~/icarus` (or the chosen directory),
 puts the runner scripts and `setup.sh` there and reports what's installed (XFOIL, OpenFOAM, CalculiX,
-gmsh, ParaView, ffmpeg); anything missing is installed by running
-`bash ~/icarus/setup/setup.sh --install` on the machine. The machine must be reachable over SSH from
+gmsh, ParaView, ffmpeg) along with the machine's hardware (cores, memory, disk, GPU, OS) and
+refuses machines that can't run Icarus; anything missing is installed with the setup button or by
+running `bash ~/icarus/setup/setup.sh --install` on the machine. The machine must be reachable over SSH from
 the server running the backend: Icarus connects to remote machines only, there's no mode that runs
 jobs on the computer the browser is on. For local development, a machine on `127.0.0.1` or the
 local network still works. `ALLOW_PRIVATE_WORKSTATIONS=false`
@@ -576,29 +577,48 @@ flow direction is rotated by `alpha`, so the farfield and mesh stay the same.
 
 #### Setting up a work station
 
-Copy `workstation/` to a fresh Debian/Ubuntu work station and run, as the user the backend connects as:
+The solvers run in one Docker image built on the machine, so the machine only needs Docker. Copy
+`workstation/` to the machine (the app does this when a machine is connected) and run, as the user
+the backend connects as:
 
 ```bash
-./setup.sh --install     # installs what's missing of the tools below, and the runner files in ~/icarus/bin
-./setup.sh --uninstall   # removes what --install added, if still there (asks before deleting job data)
+./setup.sh --install          # Docker mode: installs Docker if it's missing (asks for root), builds the solver image
+./setup.sh --install-native   # the older way: installs the tools with apt directly, no Docker
+./setup.sh --uninstall        # removes the image, packages and runner files an install added (asks before deleting job data)
 ```
 
-| Installed | Package | Notes |
-|---|---|---|
-| [XFOIL](https://web.mit.edu/drela/Public/web/xfoil/) | `xfoil`, `xvfb`, `xauth` | |
-| [OpenFOAM](https://www.openfoam.com) | `OPENFOAM_PACKAGE` (default `openfoam2512`) | About 1 GB, and skipped when any OpenFOAM release is already installed; otherwise `--install` adds the official [apt repository](https://www.openfoam.com/download) if it's missing (needs `sudo`) |
-| [CalculiX](https://www.calculix.de) | `calculix-ccx` | `bin/run_calculix.sh <job_dir>` solves `<job_dir>/model.inp` and writes `model.dat`, `model.frd` and `log.ccx` |
-| gmsh, ParaView, ffmpeg | `gmsh`, `paraview`, `ffmpeg` | Meshing, flow images and video |
+The image (`workstation/Dockerfile`, tagged `icarus-solvers:<hash of the Dockerfile>`) holds:
 
-`--install` then checks that XFOIL, OpenFOAM and CalculiX work (CalculiX solves a one-element
-block under load) and prints the matching `.env` values.
+| Tool | Notes |
+|---|---|
+| [XFOIL](https://web.mit.edu/drela/Public/web/xfoil/), `xvfb` | Fast 2D polars; runs under a virtual display |
+| [OpenFOAM](https://www.openfoam.com) | `OPENFOAM_PACKAGE` (default `openfoam2512`) from the official [apt repository](https://www.openfoam.com/download); about 1 GB |
+| [CalculiX](https://www.calculix.de) | `bin/run_calculix.sh <job_dir>` solves `<job_dir>/model.inp` and writes `model.dat`, `model.frd` and `log.ccx` |
+| gmsh, ParaView, ffmpeg | Meshing, flow images and video |
+| Python environment | numpy, scipy, pyvista, pytetwild and build123d, for meshing uploaded solids and for design |
 
-Both actions look before they act. `--install` skips every tool that's already there (as a
-package or a command on the `PATH`), and copies a runner file only when it's missing or has
-changed. `--uninstall` removes only the packages and runner files it installed, and only those
-still present; it asks before deleting job folders and leaves anything else in `~/icarus`
-(the directory itself goes only if it ends up empty). Packages are removed with `apt-get`, then
-`apt-get autoremove`.
+Everything that runs a solver goes through `bin/icarus-exec`. In Docker mode (`runtime.env` names the
+image) it runs the command in a container as the calling user, with the work directory and the
+current directory mounted at the same paths; otherwise it runs the command directly. The job
+scripts, XFOIL and the CAD builder all start through it, so they don't know which mode they're in.
+Jobs launched through it keep running when the SSH session closes, as before. The machine must be
+Linux on x86-64 or ARM64 with at least 4 GB of memory and 15 GB of free disk.
+
+**The setup button.** After a machine is connected, *Set up this machine* in Settings shows what
+will be installed and starts setup in the background on the machine (`setup.sh --install-system`
+for Docker and the docker group, then `--install-user` for the image, which needs no root). Progress
+comes from `~/icarus/setup.status` and `setup.log`, so the person can close the page and come back.
+Root comes from nothing if the user is root or already has Docker, `sudo -n` if sudo needs no
+password, otherwise the person types their sudo password once: it's checked with `sudo -S -v`, sent
+over the SSH channel's standard input to the one `sudo` that runs the root half, and never put in a
+command line, an environment variable, the database or a log (request bodies of `/api/credentials*`
+aren't logged). If the image changes with a new Dockerfile, *Check again* reports it out of date and
+setup builds the new one.
+
+Both actions look before they act. An install skips what's already there, and copies a runner
+file only when it's missing or has changed. `--uninstall` removes only what an install added, and
+only what's still present; it asks before deleting job folders and leaves anything else in `~/icarus`
+(the directory itself goes only if it ends up empty).
 
 **XFOIL** runs wherever `XFOIL_RUNNER` points (`ws` or `local`), through the same
 `CommandRunner` interface. One polar takes about a second, so CPU isn't the deciding

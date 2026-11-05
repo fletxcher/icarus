@@ -1,31 +1,45 @@
 #!/usr/bin/env bash
 # Prepares (or cleans up) the simulation work station the Icarus backend reaches over SSH.
 #
-# Run it on the work station as the user the backend connects as (WS_USER, default "ubuntu"):
-#   ./setup.sh --install      install XFOIL, gmsh, OpenFOAM, CalculiX, ParaView and ffmpeg, and the job layout
-#   ./setup.sh --uninstall    remove what --install added (asks before deleting job data)
+# Run it on the work station as the user the backend connects as:
+#   ./setup.sh --install          Docker mode: install Docker if it's missing (needs root), build the
+#                                 solver image and put the runner files in place
+#   ./setup.sh --install-native   install XFOIL, gmsh, OpenFOAM, CalculiX, ParaView and ffmpeg directly
+#                                 with apt instead of using Docker
+#   ./setup.sh --uninstall        remove what an install added (asks before deleting job data)
+# The app's setup button runs the two halves of --install itself:
+#   --install-system  --home H --user U    the part that needs root: Docker and the docker group
+#   --install-user    --home H             everything else, as the normal user
 #
 # Layout under ICARUS_HOME (default ~/icarus), matching the backend's defaults:
+#   bin/icarus-exec   runs a command in the solver image (Docker mode) or directly (native)
 #   bin/run_cfd2d.sh  2D CFD entrypoint (WS_CFD_SCRIPT), OpenFOAM
 #   bin/run_cfd3d.sh  3D CFD entrypoint, OpenFOAM
 #   bin/run_fea.sh    FEA entrypoint, which calls run_calculix.sh (the bare ccx wrapper)
 #   Each entrypoint has a <job type>_case.py next to it (cfd2d_case.py, cfd3d_case.py, fea_case.py).
 #   jobs/             one directory per CFD job (WS_WORKDIR/jobs)
+#   runtime.env       Docker mode only: which image icarus-exec runs commands in
+#   setup.status      progress of a running install, as JSON (the app polls it)
 #
-# CFD runs OpenFOAM (ESI release, OPENFOAM_PACKAGE) with gmsh meshes. If the work station
-# doesn't have the OpenFOAM apt repository yet, --install adds the official one.
-# CalculiX (https://www.calculix.de) comes from the distribution's calculix-ccx package. Meshing
-# an uploaded solid for CalculiX needs Python packages (numpy, scipy, pyvista, pytetwild, build123d) that --install
-# puts in a virtual environment, $ICARUS_HOME/venv, so the system Python stays untouched.
-# Assumes a Debian/Ubuntu work station.
+# Docker mode puts the solvers in one image built from the Dockerfile next to this script
+# (OpenFOAM from the ESI release OPENFOAM_PACKAGE, CalculiX, gmsh, ParaView, ffmpeg, XFOIL and the
+# Python environment for meshing and CAD), so the machine only needs Docker. The image is tagged
+# with a hash of the Dockerfile, so a changed Dockerfile builds a new one.
 #
-# Both actions check before they act: --install skips every tool that is already there (as an
-# apt package or on the PATH, and any OpenFOAM release counts) and copies a runner file only when
-# it's missing or differs; --uninstall removes only the packages and files it installed, and
-# only those that are still present, and leaves anything else in ICARUS_HOME alone.
+# Native mode installs the same tools with apt (Debian/Ubuntu): it adds the official OpenFOAM
+# apt repository if it's missing, and puts the Python packages in a virtual environment,
+# $ICARUS_HOME/venv, so the system Python stays untouched.
+#
+# Both actions check before they act: an install skips what is already there and copies a runner
+# file only when it's missing or differs; --uninstall removes only what an install added, and
+# only what is still present, and leaves anything else in ICARUS_HOME alone.
 set -euo pipefail
 
 ICARUS_HOME="${ICARUS_HOME:-$HOME/icarus}"
+# --home PATH (used when run through sudo, where $HOME isn't the user's) overrides it.
+for ((i = 1; i < $#; i++)); do
+  [[ "${!i}" == --home ]] && { j=$((i + 1)); ICARUS_HOME="${!j}"; }
+done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Packages installed by --install, so --uninstall removes only those.
 MANIFEST="$ICARUS_HOME/.setup-packages"
@@ -38,21 +52,27 @@ declare -A PROVIDES=([xfoil]=xfoil [xvfb]=xvfb-run [xauth]=xauth [gmsh]=gmsh [ca
 # python3-venv has no command; it's there once a virtual environment can be made.
 venv_possible() { python3 -c "import ensurepip, venv" 2> /dev/null; }
 # Files this script puts in $ICARUS_HOME/bin (and the name an earlier version used).
-RUNNER_FILES=(run_cfd2d.sh cfd2d_case.py run_calculix.sh render_video.py run_fea.sh fea_case.py run_cfd3d.sh cfd3d_case.py cad_build.py)
+RUNNER_FILES=(icarus-exec run_cfd2d.sh cfd2d_case.py run_calculix.sh render_video.py run_fea.sh fea_case.py run_cfd3d.sh cfd3d_case.py cad_build.py)
 STALE_FILES=(run_case.sh run_openfoam.sh cfd_case.py)
+STATUS_FILE="$ICARUS_HOME/setup.status"
+RUNTIME_FILE="$ICARUS_HOME/runtime.env"
+# The image is named after the Dockerfile's content, so the backend can tell whether it's current.
+IMAGE_REPO=icarus-solvers
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") --install | --uninstall [--yes]
+Usage: $(basename "$0") --install | --install-native | --uninstall [--yes]
 
-  --install     Install what's missing of XFOIL, xvfb, xauth, gmsh, OpenFOAM ($OPENFOAM_PACKAGE, unless
-                another release is there), CalculiX, ParaView and ffmpeg, and put the runner
-                files in $ICARUS_HOME (only those that are missing or changed).
-  --uninstall   Remove the packages and runner files this script installed, if still there.
-                Asks before deleting job folders, and leaves other files in $ICARUS_HOME.
-  --yes         Don't ask before deleting job folders.
+  --install         Docker mode: install Docker if it's missing (asks for root), build the solver
+                    image (OpenFOAM $OPENFOAM_PACKAGE, CalculiX, gmsh, ParaView, ffmpeg, XFOIL) and put the
+                    runner files in $ICARUS_HOME (only those that are missing or changed).
+  --install-native  Install what's missing of XFOIL, xvfb, xauth, gmsh, OpenFOAM ($OPENFOAM_PACKAGE, unless
+                    another release is there), CalculiX, ParaView and ffmpeg with apt instead.
+  --uninstall       Remove the image, packages and runner files an install added, if still there.
+                    Asks before deleting job folders, and leaves other files in $ICARUS_HOME.
+  --yes             Don't ask before deleting job folders.
 
-Set ICARUS_HOME to use a different directory (then match WS_WORKDIR/WS_CFD_SCRIPT).
+Set ICARUS_HOME (or pass --home PATH) to use a different directory (then match WS_WORKDIR/WS_CFD_SCRIPT).
 EOF
 }
 
@@ -228,15 +248,17 @@ ensure_python_environment() {
 }
 
 check_fea() {
-  if "$VENV/bin/python" -c "import numpy, scipy, pyvista, pytetwild, build123d" 2> /dev/null; then
-    log "FEA mesher check passed (numpy, scipy, pyvista, pytetwild, build123d in $VENV)"
+  # In the solver image the environment is at ICARUS_VENV; on a native install it's next to bin/.
+  local venv="${ICARUS_VENV:-$VENV}"
+  if "$venv/bin/python" -c "import numpy, scipy, pyvista, pytetwild, build123d" 2> /dev/null; then
+    log "FEA mesher check passed (numpy, scipy, pyvista, pytetwild, build123d in $venv)"
   else
-    log "FEA mesher check FAILED: the Python environment $VENV is missing numpy, scipy, pyvista, pytetwild or build123d"
+    log "FEA mesher check FAILED: the Python environment $venv is missing numpy, scipy, pyvista, pytetwild or build123d"
     return 1
   fi
 }
 
-do_install() {
+do_install_native() {
   if ! command -v apt-get > /dev/null; then
     echo "This script supports Debian/Ubuntu (apt) only." >&2
     exit 1
@@ -273,11 +295,7 @@ do_install() {
     fi
   done
 
-  check_xfoil
-  check_openfoam
-  check_calculix
-  check_fea
-  check_video
+  check_tools
 
   cat <<EOF
 
@@ -288,6 +306,139 @@ Done. Backend settings for this work station (in the repo-root .env):
   WS_CFD_SCRIPT=$ICARUS_HOME/bin/run_cfd2d.sh
   XFOIL_RUNNER=ws      # to run XFOIL here
 EOF
+}
+
+# Progress for the app: {"state": running|completed|failed, "stage": ..., "message": ...}.
+# Written through a temporary file so a reader never sees half of it, and so the root half of an
+# install and the user half can each replace what the other wrote.
+set_status() {
+  [[ -d "$ICARUS_HOME" ]] || return 0
+  local tmp message
+  message="$(printf %s "$3" | tr -d '"\\\n' | cut -c1-300)"
+  tmp="$(mktemp "$ICARUS_HOME/.setup.status.XXXXXX")" || return 0
+  printf '{"state": "%s", "stage": "%s", "message": "%s", "updated": %s}\n' \
+    "$1" "$2" "$message" "$(date +%s)" > "$tmp"
+  chmod 644 "$tmp"
+  mv -f "$tmp" "$STATUS_FILE"
+}
+
+# Marks the install failed when the script ends early, whatever the reason.
+SETUP_STAGE=""
+mark_failed_on_exit() {
+  local code=$?
+  ((code == 0)) || set_status failed "$SETUP_STAGE" "failed during $SETUP_STAGE (exit $code); see setup.log"
+}
+
+docker_usable() { command -v docker > /dev/null && docker info > /dev/null 2>&1; }
+
+image_name() { echo "$IMAGE_REPO:$(sha256sum "$SCRIPT_DIR/Dockerfile" | cut -c1-12)"; }
+
+# The checks that run on the tools themselves, so in Docker mode inside the container.
+check_tools() {
+  check_xfoil
+  check_openfoam
+  check_calculix
+  check_fea
+  check_video
+}
+
+# The part of a Docker install that needs root: Docker itself, and the docker group for the user.
+do_install_system() {
+  trap mark_failed_on_exit EXIT
+  SETUP_STAGE=docker
+  [[ $EUID -eq 0 ]] || { echo "--install-system must run as root" >&2; exit 1; }
+  local user="${TARGET_USER:-}"
+  [[ -n "$user" ]] || { echo "--install-system needs --user NAME" >&2; exit 2; }
+  id "$user" > /dev/null
+  if ! command -v docker > /dev/null; then
+    command -v apt-get > /dev/null || {
+      echo "Installing Docker automatically supports Debian/Ubuntu (apt) only; install Docker yourself." >&2
+      exit 1
+    }
+    set_status running docker "Installing Docker"
+    log "Installing docker.io"
+    apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
+    [[ -d "$ICARUS_HOME" ]] && echo docker.io >> "$MANIFEST"
+  else
+    log "Docker is already installed"
+  fi
+  if command -v systemctl > /dev/null; then systemctl enable --now docker > /dev/null 2>&1 || true; fi
+  if id -nG "$user" | tr ' ' '\n' | grep -qx docker; then
+    log "$user is already in the docker group"
+  else
+    log "Adding $user to the docker group"
+    usermod -aG docker "$user"
+  fi
+  set_status running docker "Docker is installed"
+}
+
+# Everything that needs no root: the runner files, the solver image, the runtime marker, the checks.
+do_install_user() {
+  trap mark_failed_on_exit EXIT
+  SETUP_STAGE=docker
+  set_status running docker "Checking Docker"
+  command -v docker > /dev/null || { echo "Docker isn't installed; run --install-system as root first." >&2; exit 1; }
+  docker_usable || { echo "This user can't use Docker; it must be in the docker group (log in again after --install-system)." >&2; exit 1; }
+  [[ $EUID -ne 0 ]] || log "Running as root: files go to $ICARUS_HOME; make sure WS_USER can read them."
+
+  SETUP_STAGE=scripts
+  set_status running scripts "Putting the runner files in place"
+  mkdir -p "$ICARUS_HOME/bin" "$ICARUS_HOME/jobs"
+  for file in "${RUNNER_FILES[@]}"; do
+    install_file "$SCRIPT_DIR/$file" "$ICARUS_HOME/bin/$file"
+  done
+  for file in "${STALE_FILES[@]}"; do
+    if [[ -f "$ICARUS_HOME/bin/$file" ]]; then
+      rm -f "$ICARUS_HOME/bin/$file"
+      log "Removed $file, which an earlier version installed"
+    fi
+  done
+
+  SETUP_STAGE=image
+  local image
+  image="$(image_name)"
+  if docker image inspect "$image" > /dev/null 2>&1; then
+    log "Solver image $image is already built"
+  else
+    set_status running image "Building the solver image (OpenFOAM, CalculiX, gmsh, ParaView, ffmpeg, XFOIL); this takes a while"
+    log "Building $image (this downloads about 1.5 GB)"
+    docker build --build-arg "OPENFOAM_PACKAGE=$OPENFOAM_PACKAGE" -t "$image" - < "$SCRIPT_DIR/Dockerfile"
+  fi
+  printf 'ICARUS_RUNTIME=docker\nICARUS_IMAGE=%s\n' "$image" > "$RUNTIME_FILE"
+  # Images of earlier versions of the Dockerfile are no longer needed.
+  docker image ls --format '{{.Repository}}:{{.Tag}}' "$IMAGE_REPO" | grep -vxF "$image" | xargs -r docker rmi > /dev/null 2>&1 || true
+
+  SETUP_STAGE=checks
+  set_status running checks "Checking the solvers"
+  # Run from the setup folder, which the wrapper mounts, so the script and its helpers are there.
+  (cd "$SCRIPT_DIR" && "$ICARUS_HOME/bin/icarus-exec" bash ./setup.sh --check-tools)
+
+  set_status completed done "Ready"
+  log "Docker work station ready (image $image)"
+  cat <<EOF
+
+Done. Backend settings for this work station (in the repo-root .env):
+  WS_HOST=<this work station's address>
+  WS_USER=$(id -un)
+  WS_WORKDIR=$ICARUS_HOME
+  WS_CFD_SCRIPT=$ICARUS_HOME/bin/run_cfd2d.sh
+  XFOIL_RUNNER=ws      # to run XFOIL here
+EOF
+}
+
+# --install by hand: root for Docker if needed, then everything else as this user.
+do_install() {
+  if ! docker_usable; then
+    log "Docker isn't usable by $(id -un); installing it (needs root)"
+    mkdir -p "$ICARUS_HOME"
+    as_root bash "$SCRIPT_DIR/setup.sh" --install-system --home "$ICARUS_HOME" --user "$(id -un)"
+    # The new docker group only applies to new logins; `sg` starts this step with it.
+    if ! docker_usable; then
+      exec sg docker -c "bash '$SCRIPT_DIR/setup.sh' --install-user --home '$ICARUS_HOME'"
+    fi
+  fi
+  do_install_user
 }
 
 do_uninstall() {
@@ -302,6 +453,17 @@ do_uninstall() {
   ((removed)) && log "Removed $removed runner file(s) from $ICARUS_HOME/bin"
   rm -rf "$ICARUS_HOME/bin/__pycache__"
   [[ -d "$ICARUS_HOME/bin" ]] && rmdir "$ICARUS_HOME/bin" 2> /dev/null && log "Removed the empty $ICARUS_HOME/bin"
+
+  # The Docker solver image(s) and the files that went with them.
+  if command -v docker > /dev/null && docker info > /dev/null 2>&1; then
+    local images
+    images="$(docker image ls --format '{{.Repository}}:{{.Tag}}' "$IMAGE_REPO" 2> /dev/null)"
+    if [[ -n "$images" ]]; then
+      # shellcheck disable=SC2086
+      docker rmi $images > /dev/null 2>&1 && log "Removed the solver image(s): $images"
+    fi
+  fi
+  rm -rf "$RUNTIME_FILE" "$ICARUS_HOME/.container-home" "$STATUS_FILE" "$ICARUS_HOME/setup.log"
 
   # The Python environment, if this script made it.
   if [[ -f "$MANIFEST.venv" ]]; then
@@ -365,10 +527,15 @@ do_uninstall() {
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 
 action=""
-for arg in "$@"; do
-  case "$arg" in
-    --install | --uninstall) action="$arg" ;;
+TARGET_USER=""
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case "${args[i]}" in
+    --install | --install-native | --install-system | --install-user | --check-tools | --uninstall)
+      action="${args[i]}" ;;
     --yes) ASSUME_YES=1 ;;
+    --home) i=$((i + 1)) ;; # already read, before the variables that depend on it were set
+    --user) i=$((i + 1)); TARGET_USER="${args[i]:-}" ;;
     -h | --help) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
   esac
@@ -376,6 +543,10 @@ done
 
 case "$action" in
   --install) do_install ;;
+  --install-native) do_install_native ;;
+  --install-system) do_install_system ;;
+  --install-user) do_install_user ;;
+  --check-tools) check_tools ;;
   --uninstall) do_uninstall ;;
   *) usage >&2; exit 2 ;;
 esac

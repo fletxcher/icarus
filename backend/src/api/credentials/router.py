@@ -7,6 +7,7 @@ the user sees the last characters of a key, and a work station's host, user and 
 import logging
 from urllib.parse import urlsplit
 
+import asyncssh
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import SecretStr
 
@@ -14,9 +15,10 @@ from ..agent import ollama
 from ..agent.models import Provider
 from ..auth.router import CurrentUser
 from ..compute.pool import target_for
+from ..compute.runner import SSHRunner
 from ..config import get_settings
 from ..dependencies import ServicesDep
-from . import providers, workstation
+from . import providers, provision, workstation
 from .schemas import (
     HostKey,
     HostKeyRequest,
@@ -24,6 +26,9 @@ from .schemas import (
     ModelKeyInfo,
     OllamaIn,
     Overview,
+    SetupIn,
+    SetupPlan,
+    SetupProgress,
     WorkstationDetails,
     WorkstationIn,
     WorkstationReport,
@@ -183,6 +188,57 @@ async def check_workstation(services: ServicesDep, user: CurrentUser) -> Worksta
     info = await services.credentials.workstation_info(user.id)
     assert info is not None
     return WorkstationReport(workstation=info, checks=checks, machine=machine)
+
+
+async def _own_station(services: ServicesDep, user_id: str) -> SSHRunner:
+    """The runner of the user's saved machine, or 404 if they haven't added one."""
+    station = await services.compute.workstation(user_id)
+    if station.source != "own" or not isinstance(station.runner, SSHRunner):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "You haven't added a work station")
+    return station.runner
+
+
+def _unreachable(problem: Exception, runner: SSHRunner) -> HTTPException:
+    target = runner.target
+    if isinstance(problem, ConnectionProblem):
+        return _unprocessable(str(problem))
+    return _unprocessable(workstation.describe(problem, target.host, target.port))
+
+
+@router.get("/workstation/setup/plan")
+async def setup_plan(services: ServicesDep, user: CurrentUser) -> SetupPlan:
+    """What the setup button would install on the saved machine, for the confirmation dialog."""
+    runner = await _own_station(services, user.id)
+    try:
+        return provision.plan_for(await workstation.probe_machine(runner))
+    except (OSError, TimeoutError, asyncssh.Error, ConnectionProblem) as problem:
+        raise _unreachable(problem, runner) from None
+
+
+@router.post("/workstation/setup", status_code=status.HTTP_202_ACCEPTED)
+async def start_setup(body: SetupIn, services: ServicesDep, user: CurrentUser) -> SetupProgress:
+    """Starts installing Docker and the solver image on the saved machine, in the background.
+
+    The sudo password, when needed, is used for this one request and never stored or logged."""
+    runner = await _own_station(services, user.id)
+    password = body.password.get_secret_value() if body.password else None
+    try:
+        await provision.start(
+            runner, await workstation.probe_machine(runner), runner.target.username, password
+        )
+        return await provision.progress(runner)
+    except (OSError, TimeoutError, asyncssh.Error, ConnectionProblem) as problem:
+        raise _unreachable(problem, runner) from None
+
+
+@router.get("/workstation/setup")
+async def setup_progress(services: ServicesDep, user: CurrentUser) -> SetupProgress:
+    """How setup is going on the saved machine."""
+    runner = await _own_station(services, user.id)
+    try:
+        return await provision.progress(runner)
+    except (OSError, TimeoutError, asyncssh.Error) as problem:
+        raise _unreachable(problem, runner) from None
 
 
 @router.delete("/workstation", status_code=status.HTTP_204_NO_CONTENT)

@@ -15,6 +15,10 @@ import asyncssh
 
 HOME = "/home/tester"
 # What the tool check finds on this fake machine: everything but gmsh.
+MACHINE_PROBED = (
+    "hostname=bench\nkernel=Linux\narch=x86_64\ncpus=8\nmem_kb=16777216\n"
+    "disk_free_kb=104857600\nos_name=Ubuntu 24.04 LTS\ndocker=missing\nprivilege=password_sudo\n"
+)
 TOOLS_FOUND = "xfoil=1\nxvfb-run=1\ngmsh=0\npvbatch=1\nffmpeg=1\npython3=1\nopenfoam=1\n"
 
 
@@ -26,6 +30,14 @@ class FakeStation:
     client_key: asyncssh.SSHKey
     root: Path
     commands: list[str] = field(default_factory=list)
+    # What was sent on the standard input of commands that read it (the sudo password).
+    stdins: list[str] = field(default_factory=list)
+    sudo_password: str = "right"
+    # What `setup.status` and `setup.log` hold.
+    setup_status: str = ""
+    setup_log: str = ""
+    # What the log holds once setup has been launched.
+    log_on_launch: str = ""
     _loop: asyncio.AbstractEventLoop | None = None
     _server: asyncssh.SSHAcceptor | None = None
 
@@ -50,7 +62,23 @@ def start(root: Path, *, authorized: asyncssh.SSHKey | None = None) -> FakeStati
         elif command.startswith("mkdir -p"):
             for path in shlex.split(command)[2:]:
                 os.makedirs(root / path.lstrip("/"), exist_ok=True)
-        elif command.startswith("bash -c"):
+        elif command == "sudo -S -p '' -v":
+            given = str(await process.stdin.read())
+            station.stdins.append(given)
+            process.exit(0 if given == f"{station.sudo_password}\n" else 1)
+            return
+        elif "setsid nohup bash -c" in command:
+            if "read -r secret" in command:
+                station.stdins.append(str(await process.stdin.read()))
+            station.setup_log = station.log_on_launch
+            process.stdout.write("started\n")
+        elif "setup.status" in command and "echo ---" in command:
+            process.stdout.write(f"{station.setup_status}\n---\n{station.setup_log}")
+        elif command.endswith("icarus-exec' --status"):
+            process.stdout.write("runtime=native\nimage=\nimage_present=0\n")
+        elif "bash -c" in command and "hostname=" in command:
+            process.stdout.write(MACHINE_PROBED)
+        elif "bash -c" in command:
             process.stdout.write(TOOLS_FOUND)
         process.exit(0)
 

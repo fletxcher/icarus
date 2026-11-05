@@ -28,7 +28,7 @@ from pymongo.asynchronous.database import AsyncDatabase
 
 from ..catalog import SIMULATIONS
 from ..files.repository import FileRepository
-from .runner import CommandRunner
+from .runner import CommandRunner, via_exec
 from .schemas import (
     TERMINAL_STATUSES,
     Cfd3dCase,
@@ -149,8 +149,8 @@ class SimulationService:
             # streams close, so anything still holding them (a backgrounded `cd && ...` list,
             # say) would keep the submission waiting until the whole simulation is done.
             launch = await self._runner.run(
-                f"cd {shlex.quote(job_dir)} && {{ setsid nohup {shlex.quote(script)} "
-                f"{shlex.quote(job_dir)} > run.log 2>&1 < /dev/null & }}",
+                f"cd {shlex.quote(job_dir)} && {{ setsid nohup {via_exec(self._workdir)}"
+                f"{shlex.quote(script)} {shlex.quote(job_dir)} > run.log 2>&1 < /dev/null & }}",
                 timeout_s=LAUNCH_TIMEOUT_S,
             )
             if not launch.ok:

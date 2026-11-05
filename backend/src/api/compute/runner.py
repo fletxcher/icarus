@@ -54,6 +54,14 @@ def _expand(path: str) -> str:
     return str(Path(path).expanduser())
 
 
+def via_exec(workdir: str) -> str:
+    """The prefix that runs a command where the solvers are on a work station: its
+    `bin/icarus-exec`, which uses the solver image in Docker mode and runs the command directly
+    otherwise. Empty on a machine whose runner files predate it, so those keep working."""
+    path = shlex.quote(f"{workdir}/bin/icarus-exec")
+    return f"$(test -x {path} && echo {path}) "
+
+
 class CommandRunner(Protocol):
     async def run(
         self, command: str, *, cwd: str | None = None, timeout_s: float | None = None
@@ -200,15 +208,22 @@ class SSHRunner:
             return self._connection
 
     async def run(
-        self, command: str, *, cwd: str | None = None, timeout_s: float | None = None
+        self,
+        command: str,
+        *,
+        cwd: str | None = None,
+        timeout_s: float | None = None,
+        stdin: str | None = None,
     ) -> CommandResult:
+        """`stdin` is sent to the command's standard input and never logged (it may be a
+        password for `sudo -S`)."""
         connection = await self._connect()
         if cwd:
             command = f"cd {shlex.quote(cwd)} && {command}"
         logger.debug("ws run: %s", command)
         started = time.perf_counter()
         try:
-            completed = await connection.run(command, check=False, timeout=timeout_s)
+            completed = await connection.run(command, check=False, timeout=timeout_s, input=stdin)
         except (asyncssh.Error, TimeoutError):
             logger.exception("ws command failed (connection error or timeout): %s", command)
             raise

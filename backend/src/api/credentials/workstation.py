@@ -1,6 +1,7 @@
 """Connecting to a user's own work station: host keys, checks and the runner scripts."""
 
 import asyncio
+import hashlib
 import ipaddress
 import logging
 import shlex
@@ -10,7 +11,7 @@ from pathlib import Path
 
 import asyncssh
 
-from ..compute.runner import CommandRunner, SSHRunner, WorkstationTarget, connect
+from ..compute.runner import CommandRunner, SSHRunner, WorkstationTarget, connect, via_exec
 from .schemas import Check, HostKey, MachineInfo
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ COMMAND_TIMEOUT_S = 30.0
 # The runner scripts shipped in the repository, put on the machine at connection time.
 WS_SOURCE = Path(__file__).resolve().parents[4] / "workstation"
 SCRIPTS = [
+    "icarus-exec",
     "run_cfd2d.sh",
     "cfd2d_case.py",
     "render_video.py",
@@ -31,6 +33,16 @@ SCRIPTS = [
     "cad_build.py",
 ]
 SETUP_SCRIPT = "setup.sh"
+# Copied next to setup.sh only: setup.sh builds the solver image from it.
+DOCKERFILE = "Dockerfile"
+IMAGE_REPO = "icarus-solvers"
+
+
+def image_tag() -> str:
+    """The solver image the shipped Dockerfile builds: named after its content, like setup.sh."""
+    digest = hashlib.sha256((WS_SOURCE / DOCKERFILE).read_bytes()).hexdigest()
+    return f"{IMAGE_REPO}:{digest[:12]}"
+
 
 TOOLS_SCRIPT = r"""
 for tool in xfoil xvfb-run gmsh ccx pvbatch ffmpeg python3; do
@@ -74,8 +86,9 @@ else
 fi
 """
 
-# What Icarus can run its solver image on: the OpenFOAM packages inside it are x86-64 only.
-SUPPORTED_ARCHES = ("x86_64", "amd64")
+# What the solver image builds on: the OpenFOAM, CalculiX and Python packages inside it come in
+# x86-64 and ARM64 builds.
+SUPPORTED_ARCHES = ("x86_64", "amd64", "aarch64", "arm64")
 MIN_MEMORY_GB = 4.0
 MIN_DISK_GB = 15.0
 
@@ -229,6 +242,7 @@ async def install_scripts(runner: CommandRunner, workdir: str) -> None:
         )
     for name in [*SCRIPTS, SETUP_SCRIPT]:
         await runner.write_file(f"{workdir}/setup/{name}", (WS_SOURCE / name).read_text())
+    await runner.write_bytes(f"{workdir}/setup/{DOCKERFILE}", (WS_SOURCE / DOCKERFILE).read_bytes())
     installed = await runner.run(
         f"cd {quoted}/setup && install -m 755 {' '.join(SCRIPTS)} ../bin/ "
         f"&& chmod 755 {SETUP_SCRIPT}",
@@ -238,6 +252,38 @@ async def install_scripts(runner: CommandRunner, workdir: str) -> None:
         raise ConnectionProblem(
             f"Couldn't install the runner scripts: {installed.stderr.strip() or 'failed'}"
         )
+
+
+def parse_runtime(output: str) -> dict[str, str]:
+    """`icarus-exec --status`: runtime (docker or native), image and image_present."""
+    return {
+        name.strip(): value.strip()
+        for name, _, value in (line.partition("=") for line in output.splitlines())
+    }
+
+
+def runtime_check(runtime: dict[str, str]) -> Check:
+    """Whether the solvers run in the current solver image, an old one, or directly."""
+    if runtime.get("runtime") != "docker":
+        return Check(
+            id="runtime",
+            label="Where the solvers run",
+            ok=True,
+            detail="Directly on the machine (no Docker)",
+        )
+    expected, image = image_tag(), runtime.get("image", "")
+    if runtime.get("image_present") != "1":
+        detail = f"The solver image {image} isn't on the machine. Set it up again."
+    elif image != expected:
+        detail = f"The solver image {image} is out of date (expected {expected}). Set it up again."
+    else:
+        return Check(
+            id="runtime",
+            label="Where the solvers run",
+            ok=True,
+            detail=f"In Docker, image {image}",
+        )
+    return Check(id="runtime", label="Where the solvers run", ok=False, detail=detail)
 
 
 def parse_machine(output: str) -> MachineInfo:
@@ -261,7 +307,7 @@ def parse_machine(output: str) -> MachineInfo:
     if kernel and kernel != "Linux":
         problems.append(f"{kernel} isn't supported; the machine must run Linux.")
     elif arch and arch not in SUPPORTED_ARCHES:
-        problems.append(f"{arch} processors aren't supported yet; the machine must be x86-64.")
+        problems.append(f"{arch} processors aren't supported; the machine must be x86-64 or ARM64.")
     if memory_gb is not None and memory_gb < MIN_MEMORY_GB:
         problems.append(
             f"Only {memory_gb:g} GB of memory; at least {MIN_MEMORY_GB:g} GB is needed."
@@ -314,12 +360,23 @@ async def run_checks(runner: SSHRunner) -> tuple[list[Check], MachineInfo]:
     target = runner.target
     machine = await probe_machine(runner)
     await install_scripts(runner, target.workdir)
-    result = await runner.run(f"bash -c {shlex.quote(TOOLS_SCRIPT)}", timeout_s=COMMAND_TIMEOUT_S)
-    # The Python environment the FEA mesher runs in (setup.sh makes it next to bin/).
+    # The tools are looked for where jobs will run them: in the solver image on a Docker machine.
+    inside = via_exec(target.workdir)
+    result = await runner.run(
+        f"{inside}bash -c {shlex.quote(TOOLS_SCRIPT)}", timeout_s=COMMAND_TIMEOUT_S
+    )
+    # The Python environment the FEA mesher and CAD builder run in.
     mesher = await runner.run(
-        f"{shlex.quote(target.workdir)}/venv/bin/python "
-        "-c 'import numpy, pyvista, pytetwild, scipy, build123d'",
+        f"{inside}python3 -c 'import numpy, pyvista, pytetwild, scipy, build123d'",
         timeout_s=COMMAND_TIMEOUT_S,
+    )
+    runtime = parse_runtime(
+        (
+            await runner.run(
+                f"{shlex.quote(f'{target.workdir}/bin/icarus-exec')} --status",
+                timeout_s=COMMAND_TIMEOUT_S,
+            )
+        ).stdout
     )
     present: dict[str, bool] = {"fea_mesher": mesher.ok}
     for line in result.stdout.split():
@@ -347,6 +404,7 @@ async def run_checks(runner: SSHRunner) -> tuple[list[Check], MachineInfo]:
         Check(
             id="runner", label="Runner scripts", ok=True, detail=f"Installed in {target.workdir}"
         ),
+        runtime_check(runtime),
     ]
     for check_id, label, names in [
         ("xfoil", "XFOIL", ("xfoil", "xvfb-run")),

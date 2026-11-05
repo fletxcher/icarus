@@ -471,7 +471,7 @@ def test_a_supported_machine_is_described_from_the_probe():
 @pytest.mark.parametrize(
     ("changes", "problem"),
     [
-        ({"arch": "aarch64"}, "aarch64"),
+        ({"arch": "riscv64"}, "riscv64"),
         ({"kernel": "Darwin"}, "Darwin"),
         ({"mem_kb": "1048576"}, "1 GB of memory"),
         ({"disk_free_kb": "1048576"}, "1 GB of free disk"),
@@ -490,3 +490,123 @@ def test_a_probe_that_printed_nothing_still_gives_a_machine():
 
     assert machine.supported and machine.docker == "missing" and machine.privilege == "none"
     assert machine.cpus is None and machine.os == "unknown"
+
+
+def test_the_runtime_check_compares_the_machines_image_with_the_shipped_dockerfile():
+    expected = workstation.image_tag()
+    assert expected.startswith("icarus-solvers:") and len(expected.split(":")[1]) == 12
+
+    direct = workstation.runtime_check({"runtime": "native"})
+    current = workstation.runtime_check(
+        {"runtime": "docker", "image": expected, "image_present": "1"}
+    )
+    stale = workstation.runtime_check(
+        {"runtime": "docker", "image": "icarus-solvers:old", "image_present": "1"}
+    )
+    missing = workstation.runtime_check(
+        {"runtime": "docker", "image": expected, "image_present": "0"}
+    )
+
+    assert direct.ok and current.ok
+    assert not stale.ok and "out of date" in stale.detail
+    assert not missing.ok and "isn't on the machine" in missing.detail
+
+
+def test_commands_go_through_the_wrapper_only_when_the_machine_has_it():
+    from api.compute.runner import via_exec
+
+    assert via_exec("/w") == "$(test -x /w/bin/icarus-exec && echo /w/bin/icarus-exec) "
+
+
+def machine(**changes) -> workstation.MachineInfo:
+    lines = dict(line.split("=", 1) for line in PROBE_OUTPUT.splitlines())
+    lines |= {"docker": "missing", "privilege": "password_sudo"} | changes
+    return workstation.parse_machine("\n".join(f"{k}={v}" for k, v in lines.items()))
+
+
+def test_the_setup_plan_says_what_is_installed_and_what_it_needs():
+    from api.credentials import provision
+
+    needs_password = provision.plan_for(machine())
+    assert needs_password.can_run and needs_password.needs_root and needs_password.needs_password
+    assert any("docker.io" in line for line in needs_password.installs)
+    assert any("OpenFOAM" in line and "icarus-solvers:" in line for line in needs_password.installs)
+
+    free = provision.plan_for(machine(privilege="passwordless_sudo"))
+    assert free.can_run and free.needs_root and not free.needs_password
+
+    ready = provision.plan_for(machine(docker="usable", privilege="none"))
+    assert ready.can_run and not ready.needs_root and len(ready.installs) == 1
+
+    stuck = provision.plan_for(machine(privilege="none"))
+    assert not stuck.can_run and "administrator" in stuck.reason
+
+    unsupported = provision.plan_for(machine(arch="riscv64"))
+    assert not unsupported.can_run and "riscv64" in unsupported.reason
+    assert provision.plan_for(machine(arch="aarch64")).can_run
+
+
+def test_the_launch_command_holds_no_password_and_detaches_setup():
+    from api.credentials import provision
+
+    asked = provision.launch_command("/home/u/icarus", "u", machine(), password=True)
+    assert "read -r secret" in asked and "sudo -S -p" in asked and "sg docker -c" in asked
+    assert "--install-system --home /home/u/icarus --user u" in asked
+    assert "setsid nohup" in asked and "setup.log" in asked and asked.endswith("echo started")
+
+    free = provision.launch_command(
+        "/w", "u", machine(privilege="passwordless_sudo"), password=False
+    )
+    assert "sudo -n" in free and "read -r" not in free and "< /dev/null" in free
+
+    root = provision.launch_command(
+        "/root/icarus", "root", machine(privilege="root"), password=False
+    )
+    assert "sudo" not in root and "sg docker" not in root and "--install-user" in root
+
+    usable = provision.launch_command("/w", "u", machine(docker="usable"), password=False)
+    assert "--install-system" not in usable and "--install-user" in usable
+
+
+def test_setup_checks_the_password_then_runs_in_the_background(client: TestClient, station):
+    client.put("/api/credentials/workstation", json=station_body(station))
+
+    plan = client.get("/api/credentials/workstation/setup/plan").json()
+    assert plan["needs_password"] and plan["can_run"]
+
+    missing = client.post("/api/credentials/workstation/setup", json={})
+    assert missing.status_code == 422 and "sudo password" in missing.json()["detail"]
+    wrong = client.post("/api/credentials/workstation/setup", json={"password": "nope"})
+    assert wrong.status_code == 422 and "rejected" in wrong.json()["detail"]
+    assert not any("setsid nohup" in command for command in station.commands)
+
+    # Once launched, the machine has written its log but not yet its first status.
+    station.log_on_launch = "step 3/8\n"
+    started = client.post("/api/credentials/workstation/setup", json={"password": "right"})
+
+    assert started.status_code == 202, started.text
+    assert started.json()["state"] == "running" and started.json()["log_tail"] == "step 3/8"
+    launch = next(command for command in station.commands if "setsid nohup" in command)
+    assert "right" not in launch and all("right" not in c for c in station.commands)
+    assert station.stdins[-1] == "right\n"
+
+
+def test_setup_cant_start_twice_and_reports_its_state(client: TestClient, station):
+    client.put("/api/credentials/workstation", json=station_body(station))
+    station.setup_status = '{"state": "running", "stage": "image", "message": "Building"}'
+
+    again = client.post("/api/credentials/workstation/setup", json={"password": "right"})
+    assert again.status_code == 422 and "already running" in again.json()["detail"]
+
+    station.setup_status = '{"state": "failed", "stage": "image", "message": "failed during image"}'
+    done = client.get("/api/credentials/workstation/setup").json()
+    assert done["state"] == "failed" and done["message"] == "failed during image"
+
+    station.setup_status = ""
+    station.setup_log = ""
+    assert client.get("/api/credentials/workstation/setup").json()["state"] == "idle"
+
+
+def test_setup_needs_a_saved_machine(client: TestClient):
+    assert client.get("/api/credentials/workstation/setup").status_code == 404
+    assert client.post("/api/credentials/workstation/setup", json={}).status_code == 404

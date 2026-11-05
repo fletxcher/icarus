@@ -137,8 +137,8 @@ def test_export_builds_again_in_the_chosen_format_and_downloads(client, builder)
     download = client.get(f"/api/designs/{file_id}/export", params={"format": "step"})
 
     assert said.startswith("Exported cube.step") and "download it from the part's card" in said
-    assert "cad_build.py export /w/designs/" in builder.commands[-1]
-    assert builder.commands[-1].endswith(" step")
+    assert "icarus-exec python3 /w/bin/cad_build.py export /w/designs/" in builder.commands[-1]
+    assert " step;" in builder.commands[-1]
     assert download.status_code == 200 and download.content == b"ISO-10303-21;"
     assert 'filename="cube.step"' in download.headers["content-disposition"]
     saved = client.get(f"/api/files/{file_id}/original", params={"download": "true"})
