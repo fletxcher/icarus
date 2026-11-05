@@ -80,7 +80,22 @@ export type ModelKeyInfo = {
   updated_at: string;
 };
 
+/** What a machine's card shows, remembered from when it was last checked. */
+export type Hardware = {
+  cpus: number | null;
+  cpu_model: string | null;
+  gpu: string | null;
+};
+
 export type WorkstationInfo = {
+  id: string;
+  name: string;
+  hardware: Hardware;
+  /** The machine jobs run on; at most one of a person's machines is connected. */
+  active: boolean;
+  /** "removing": being cleaned up in the background; "removal_failed": see status_message. */
+  status: "ready" | "removing" | "removal_failed";
+  status_message: string;
   host: string;
   port: number;
   username: string;
@@ -150,7 +165,7 @@ export type SetupProgress = {
 
 export type CredentialsOverview = {
   model_keys: ModelKeyInfo[];
-  workstation: WorkstationInfo | null;
+  workstations: WorkstationInfo[];
   /** Providers the server supplies a key for until the person adds their own. */
   default_providers: ModelProvider[];
   /** Whether the server has a shared work station used until they add one. */
@@ -160,6 +175,9 @@ export type CredentialsOverview = {
 };
 
 export type WorkstationInput = {
+  /** Set to replace a saved machine instead of adding one. */
+  id?: string;
+  name?: string;
   host: string;
   port: number;
   username: string;
@@ -227,7 +245,21 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ password }),
     }),
-  removeWorkstation: () => request<void>("/credentials/workstation", { method: "DELETE" }),
+  connectWorkstation: (id: string) =>
+    request<WorkstationInfo>(`/credentials/workstations/${id}/connect`, {
+      method: "POST",
+    }),
+  disconnectWorkstation: (id: string) =>
+    request<void>(`/credentials/workstations/${id}/disconnect`, {
+      method: "POST",
+    }),
+  /** Starts cleaning the machine up and forgetting it; `force` forgets it at once, for a
+   * machine that can't be reached. */
+  removeWorkstation: (id: string, force = false) =>
+    request<WorkstationInfo | undefined>(
+      `/credentials/workstations/${id}${force ? "?force=true" : ""}`,
+      { method: "DELETE" },
+    ),
   simulationUsage: () => request<SimulationUsage>("/simulations/usage"),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
   /** Signs in: the backend answers with the session cookie, which the browser then keeps. */

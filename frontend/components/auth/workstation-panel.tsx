@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   CheckIcon,
-  CopyIcon,
+  LoaderCircleIcon,
+  PlusIcon,
   ServerIcon,
   Trash2Icon,
   XIcon,
@@ -11,6 +12,17 @@ import {
 import { toast } from "sonner";
 
 import { PasswordInput } from "@/components/auth/password-input";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -54,33 +66,6 @@ function CheckList({ checks }: { checks: WorkstationCheck[] }) {
   );
 }
 
-function CopyLine({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="grid gap-1">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <div className="flex items-start gap-2">
-        <code className="min-w-0 flex-1 rounded-md bg-muted px-2 py-1.5 text-xs break-all">
-          {value}
-        </code>
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          aria-label={`Copy ${label.toLowerCase()}`}
-          onClick={() =>
-            void navigator.clipboard
-              .writeText(value)
-              .then(() => toast.success("Copied"))
-              .catch(() => toast.error("Couldn't copy"))
-          }
-        >
-          <CopyIcon />
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 const KEY_HELP = `ssh-keygen -t ed25519 -f ~/.ssh/icarus -N ""
 cat ~/.ssh/icarus.pub >> ~/.ssh/authorized_keys
 cat ~/.ssh/icarus`;
@@ -91,8 +76,10 @@ function ConnectForm({
   onCancel,
 }: {
   onSaved: (info: WorkstationInfo, checks: WorkstationCheck[]) => void;
-  onCancel: () => void;
+  /** Left out when there is nothing to go back to. */
+  onCancel?: () => void;
 }) {
+  const [name, setName] = useState("");
   const [host, setHost] = useState("");
   const [port, setPort] = useState("22");
   const [username, setUsername] = useState("");
@@ -139,6 +126,7 @@ function ConnectForm({
     setError(null);
     try {
       const report = await api.saveWorkstation({
+        name: name.trim() || undefined,
         host: host.trim(),
         port: portNumber,
         username: username.trim(),
@@ -158,11 +146,20 @@ function ConnectForm({
   return (
     <div className="grid gap-4">
       <p className="text-sm text-muted-foreground">
-        Icarus connects over SSH from the server it runs on, so the machine must
-        be reachable from there. This can be the computer you&apos;re using now
-        when the server runs on it too (use <code>127.0.0.1</code>).
+        Connect a machine you own. Icarus reaches it over SSH from the server it
+        runs on, so the machine must be reachable from there.
       </p>
       <form onSubmit={lookUp} className="grid gap-3">
+        <div className="grid gap-1.5">
+          <Label htmlFor="ws-name">Name</Label>
+          <Input
+            id="ws-name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Lab workstation (optional)"
+            autoComplete="off"
+          />
+        </div>
         <div className="grid grid-cols-[1fr_6rem] gap-2">
           <div className="grid gap-1.5">
             <Label htmlFor="ws-host">Host</Label>
@@ -308,44 +305,198 @@ function ConnectForm({
           {error}
         </p>
       )}
-      <div>
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={onCancel}
-          disabled={busy}
-        >
-          Cancel
-        </Button>
-      </div>
+      {onCancel && (
+        <div>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={onCancel}
+            disabled={busy}
+          >
+            Cancel
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
 
-/** The person's own simulation machine; mount it to load the current state. */
+/** One saved machine: what it is, and the buttons to connect, disconnect or remove it. */
+function MachineCard({
+  machine,
+  busy,
+  checking,
+  onConnect,
+  onDisconnect,
+  onRemove,
+  onRemoveAnyway,
+  onCheck,
+  onSetUp,
+}: {
+  machine: WorkstationInfo;
+  busy: boolean;
+  checking: boolean;
+  onConnect: () => void;
+  onDisconnect: () => void;
+  onRemove: () => void;
+  onRemoveAnyway: () => void;
+  onCheck: () => void;
+  onSetUp: React.ReactNode;
+}) {
+  const { hardware } = machine;
+  const removing = machine.status === "removing";
+  const failed = machine.status === "removal_failed";
+  const cpu = [
+    hardware.cpus ? `${hardware.cpus} cores` : null,
+    hardware.cpu_model,
+  ].filter(Boolean);
+  return (
+    <li
+      className="grid gap-3 rounded-lg border p-3"
+      data-testid="machine-card"
+      aria-label={machine.name}
+    >
+      <div className="grid gap-0.5 text-sm">
+        <span className="flex items-center gap-2 font-medium">
+          <ServerIcon className="size-4 shrink-0" />
+          {machine.name}
+        </span>
+        {cpu.length > 0 && (
+          <span className="text-muted-foreground">{cpu.join(" · ")}</span>
+        )}
+        {hardware.gpu && (
+          <span className="text-muted-foreground">{hardware.gpu}</span>
+        )}
+      </div>
+
+      {removing && (
+        <p
+          className="flex items-center gap-2 text-sm text-muted-foreground"
+          aria-live="polite"
+        >
+          <LoaderCircleIcon className="size-4 animate-spin" />
+          Removing: {machine.status_message || "starting"}…
+        </p>
+      )}
+      {failed && (
+        <p role="alert" className="text-sm break-words text-destructive">
+          Couldn&apos;t clean up the machine: {machine.status_message}
+        </p>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        {!removing && !failed && (
+          <Button
+            variant={machine.active ? "secondary" : "outline"}
+            disabled={busy}
+            onClick={machine.active ? onDisconnect : onConnect}
+          >
+            {machine.active ? "Disconnect" : "Connect"}
+          </Button>
+        )}
+        {machine.active && !removing && !failed && (
+          <>
+            <Button variant="outline" disabled={busy} onClick={onCheck}>
+              {checking ? "Checking…" : "Check again"}
+            </Button>
+            {onSetUp}
+          </>
+        )}
+        {failed && (
+          <>
+            <Button variant="outline" disabled={busy} onClick={onRemove}>
+              Try again
+            </Button>
+            <Button variant="outline" disabled={busy} onClick={onRemoveAnyway}>
+              Remove anyway
+            </Button>
+          </>
+        )}
+        {!removing && !failed && (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label={`Remove ${machine.name}`}
+                disabled={busy}
+              >
+                <Trash2Icon />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Remove {machine.name}?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Icarus will clean up the machine: stop its containers, delete
+                  the solver image, the job folders and its own files, and take
+                  its SSH key out of <code>~/.ssh/authorized_keys</code>. Then
+                  the connection is deleted here. Simulations still running on
+                  it are lost.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Keep it</AlertDialogCancel>
+                <AlertDialogAction onClick={onRemove}>Remove</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
+      </div>
+    </li>
+  );
+}
+
+const POLL_REMOVAL_MS = 3000;
+
+/** The person's own machines: connect one, or add another. Mount it to load the current state. */
 export function WorkstationPanel() {
   const [overview, setOverview] = useState<CredentialsOverview | null>(null);
   const [failed, setFailed] = useState(false);
   const [adding, setAdding] = useState(false);
   const [checks, setChecks] = useState<WorkstationCheck[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(false);
 
-  useEffect(() => {
-    let current = true;
-    api
-      .credentials()
-      .then((result) => current && setOverview(result))
-      .catch(() => current && setFailed(true));
-    return () => {
-      current = false;
-    };
+  const reload = useCallback(async () => {
+    try {
+      setOverview(await api.credentials());
+    } catch {
+      setFailed(true);
+    }
   }, []);
 
-  async function recheck() {
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loads the saved machines once
+    void reload();
+  }, [reload]);
+
+  // While a machine is being cleaned up, its progress comes from the server.
+  const removing = overview?.workstations.some((m) => m.status === "removing");
+  useEffect(() => {
+    if (!removing) return;
+    const timer = setInterval(() => void reload(), POLL_REMOVAL_MS);
+    return () => clearInterval(timer);
+  }, [removing, reload]);
+
+  async function act(work: () => Promise<unknown>, failure: string) {
     setBusy(true);
+    try {
+      await work();
+      await reload();
+    } catch (error) {
+      toast.error(message(error, failure));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function recheck() {
+    setChecking(true);
     try {
       const report = await api.checkWorkstation();
       setChecks(report.checks);
+      await reload();
     } catch (failure) {
       setChecks([
         {
@@ -356,122 +507,103 @@ export function WorkstationPanel() {
         },
       ]);
     } finally {
-      setBusy(false);
-    }
-  }
-
-  async function remove() {
-    setBusy(true);
-    try {
-      await api.removeWorkstation();
-      setOverview((current) => current && { ...current, workstation: null });
-      setChecks(null);
-      toast.success("Work station removed");
-    } catch (failure) {
-      toast.error(message(failure, "Couldn't remove it."));
-    } finally {
-      setBusy(false);
+      setChecking(false);
     }
   }
 
   if (failed)
     return (
       <p className="text-sm text-destructive">
-        Couldn&apos;t load your work station. Try again.
+        Couldn&apos;t load your machines. Try again.
       </p>
     );
   if (!overview) return <Skeleton className="h-40 rounded-lg" />;
 
-  if (adding)
+  const machines = overview.workstations;
+  const noStorage = !overview.storage_available;
+
+  if (adding || machines.length === 0)
     return (
-      <ConnectForm
-        onCancel={() => setAdding(false)}
-        onSaved={(workstation, newChecks) => {
-          setOverview({ ...overview, workstation });
-          setChecks(newChecks);
-          setAdding(false);
-          toast.success("Work station saved");
-        }}
-      />
+      <div className="grid gap-4">
+        {noStorage && (
+          <p role="alert" className="text-sm text-destructive">
+            This server can&apos;t store credentials yet: its CREDENTIALS_KEY
+            isn&apos;t set.
+          </p>
+        )}
+        <ConnectForm
+          onCancel={machines.length > 0 ? () => setAdding(false) : undefined}
+          onSaved={(_, newChecks) => {
+            setChecks(newChecks);
+            setAdding(false);
+            void reload();
+            toast.success("Machine saved and connected");
+          }}
+        />
+      </div>
     );
 
-  const own = overview.workstation;
   return (
     <div className="grid gap-4">
-      {!overview.storage_available && (
+      {noStorage && (
         <p role="alert" className="text-sm text-destructive">
           This server can&apos;t store credentials yet: its CREDENTIALS_KEY
           isn&apos;t set.
         </p>
       )}
-      {own ? (
-        <section className="grid gap-3 rounded-lg border p-3">
-          <div className="flex items-center gap-2 text-sm">
-            <ServerIcon className="size-4" />
-            <span data-testid="workstation-address">
-              {own.username}@{own.host}
-              {own.port !== 22 && `:${own.port}`}
-            </span>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Your simulations and XFOIL runs use this machine. Files are kept in{" "}
-            <code>{own.workdir}</code>.
-          </p>
-          <CopyLine label="Host fingerprint" value={own.fingerprint} />
-          <CopyLine label="Public key" value={own.public_key} />
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              onClick={() => void recheck()}
-              disabled={busy}
-            >
-              {busy ? "Checking…" : "Check again"}
-            </Button>
-            {checks?.some((check) => !check.ok) && (
+      <ul className="grid gap-3" aria-label="Machines">
+        {machines.map((machine) => (
+          <MachineCard
+            key={machine.id}
+            machine={machine}
+            busy={busy}
+            checking={checking}
+            onConnect={() => {
+              setChecks(null);
+              void act(
+                () => api.connectWorkstation(machine.id),
+                "Couldn't connect it.",
+              );
+            }}
+            onDisconnect={() => {
+              setChecks(null);
+              void act(
+                () => api.disconnectWorkstation(machine.id),
+                "Couldn't disconnect it.",
+              );
+            }}
+            onRemove={() =>
+              void act(
+                () => api.removeWorkstation(machine.id),
+                "Couldn't remove it.",
+              )
+            }
+            onRemoveAnyway={() =>
+              void act(
+                () => api.removeWorkstation(machine.id, true),
+                "Couldn't remove it.",
+              )
+            }
+            onCheck={() => void recheck()}
+            onSetUp={
               <WorkstationSetup
-                username={own.username}
-                disabled={busy}
+                username={machine.username}
+                disabled={busy || !checks?.some((check) => !check.ok)}
                 onFinished={() => void recheck()}
               />
-            )}
-            <Button
-              variant="outline"
-              onClick={() => setAdding(true)}
-              disabled={busy}
-            >
-              Replace
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => void remove()}
-              disabled={busy}
-            >
-              <Trash2Icon />
-              Remove
-            </Button>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Jobs already running stay on the machine they started on.
-          </p>
-        </section>
-      ) : (
-        <section className="grid gap-3 rounded-lg border p-3">
-          <p className="text-sm" data-testid="workstation-default">
-            No machine is connected. Connect a machine you own to run XFOIL, CFD
-            and FEA.
-          </p>
-          <div>
-            <Button
-              variant="outline"
-              disabled={!overview.storage_available}
-              onClick={() => setAdding(true)}
-            >
-              <ServerIcon />
-              Connect a remote machine
-            </Button>
-          </div>
-        </section>
-      )}
+            }
+          />
+        ))}
+      </ul>
+      <div>
+        <Button
+          variant="outline"
+          disabled={noStorage}
+          onClick={() => setAdding(true)}
+        >
+          Add <PlusIcon />
+        </Button>
+      </div>
       {checks && <CheckList checks={checks} />}
     </div>
   );
