@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { WorkstationSetup } from "@/components/auth/workstation-setup";
 import {
   api,
   type CredentialsOverview,
@@ -426,6 +427,13 @@ export function WorkstationPanel() {
             >
               {busy ? "Checking…" : "Check again"}
             </Button>
+            {checks?.some((check) => !check.ok) && (
+              <WorkstationSetup
+                username={own.username}
+                disabled={busy}
+                onFinished={() => void recheck()}
+              />
+            )}
             <Button
               variant="outline"
               onClick={() => setAdding(true)}
@@ -449,9 +457,8 @@ export function WorkstationPanel() {
       ) : (
         <section className="grid gap-3 rounded-lg border p-3">
           <p className="text-sm" data-testid="workstation-default">
-            {overview.default_workstation
-              ? "You're using the shared work station Icarus provides."
-              : "No work station is set up. Add one to run XFOIL and CFD."}
+            No machine is connected. Connect a machine you own to run XFOIL, CFD
+            and FEA.
           </p>
           <div>
             <Button

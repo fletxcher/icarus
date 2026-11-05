@@ -130,6 +130,24 @@ export type WorkstationReport = {
   machine: MachineInfo | null;
 };
 
+/** What the setup button would install on the machine, shown before the person confirms. */
+export type SetupPlan = {
+  installs: string[];
+  needs_root: boolean;
+  /** Root comes from a sudo password the person types; it is used once and never stored. */
+  needs_password: boolean;
+  can_run: boolean;
+  reason: string | null;
+};
+
+export type SetupProgress = {
+  state: "idle" | "running" | "completed" | "failed";
+  stage: string;
+  message: string;
+  log_tail: string;
+  updated: number | null;
+};
+
 export type CredentialsOverview = {
   model_keys: ModelKeyInfo[];
   workstation: WorkstationInfo | null;
@@ -201,6 +219,13 @@ export const api = {
   checkWorkstation: () =>
     request<WorkstationReport>("/credentials/workstation/check", {
       method: "POST",
+    }),
+  setupPlan: () => request<SetupPlan>("/credentials/workstation/setup/plan"),
+  setupProgress: () => request<SetupProgress>("/credentials/workstation/setup"),
+  startSetup: (password: string | null) =>
+    request<SetupProgress>("/credentials/workstation/setup", {
+      method: "POST",
+      body: JSON.stringify({ password }),
     }),
   removeWorkstation: () => request<void>("/credentials/workstation", { method: "DELETE" }),
   simulationUsage: () => request<SimulationUsage>("/simulations/usage"),
