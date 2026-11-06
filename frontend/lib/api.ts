@@ -143,6 +143,10 @@ export type WorkstationReport = {
   workstation: WorkstationInfo;
   checks: WorkstationCheck[];
   machine: MachineInfo | null;
+  /** Set when connecting with a password also started setting the machine up. */
+  setup: SetupProgress | null;
+  /** Why setup wasn't started, when something was missing and it couldn't be. */
+  setup_note: string | null;
 };
 
 /** What the setup button would install on the machine, shown before the person confirms. */
@@ -181,7 +185,10 @@ export type WorkstationInput = {
   host: string;
   port: number;
   username: string;
-  private_key: string;
+  /** The machine's password, for this one login: Icarus adds a key of its own with it. */
+  password?: string;
+  /** Instead of the password: the person's own key. */
+  private_key?: string;
   passphrase?: string;
   host_key: string;
   workdir?: string;

@@ -34,6 +34,8 @@ import {
   api,
   type CredentialsOverview,
   type HostKey,
+  type SetupProgress,
+  type WorkstationReport,
   type WorkstationCheck,
   type WorkstationInfo,
 } from "@/lib/api";
@@ -71,48 +73,53 @@ const KEY_HELP = `ssh-keygen -t ed25519 -f ~/.ssh/icarus -N ""
 cat ~/.ssh/icarus.pub >> ~/.ssh/authorized_keys
 cat ~/.ssh/icarus`;
 
-/** Adds a machine: look up its host key, confirm it, then connect with a private key. */
+/** `user@host` or `user@host:port`. */
+function parseAddress(text: string) {
+  const match = text.trim().match(/^([^@\s]+)@([A-Za-z0-9][A-Za-z0-9.-]*)(?::(\d{1,5}))?$/);
+  if (!match) return null;
+  const port = match[3] ? Number(match[3]) : 22;
+  if (port < 1 || port > 65535) return null;
+  return { username: match[1], host: match[2], port };
+}
+
+/** Adds a machine: its address, a check of its fingerprint, and its password. Icarus makes its
+ * own key and adds it with the password, which is used once, and then sets the machine up. */
 function ConnectForm({
   onSaved,
   onCancel,
 }: {
-  onSaved: (info: WorkstationInfo, checks: WorkstationCheck[]) => void;
+  onSaved: (report: WorkstationReport) => void;
   /** Left out when there is nothing to go back to. */
   onCancel?: () => void;
 }) {
   const [name, setName] = useState("");
-  const [host, setHost] = useState("");
-  const [port, setPort] = useState("22");
-  const [username, setUsername] = useState("");
+  const [address, setAddress] = useState("");
   const [hostKey, setHostKey] = useState<HostKey | null>(null);
   const [approved, setApproved] = useState(false);
+  const [password, setPassword] = useState("");
   const [privateKey, setPrivateKey] = useState("");
   const [passphrase, setPassphrase] = useState("");
   const [workdir, setWorkdir] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const portNumber = Number(port);
-  const addressOk =
-    host.trim() !== "" &&
-    Number.isInteger(portNumber) &&
-    portNumber >= 1 &&
-    portNumber <= 65535;
+  const target = parseAddress(address);
+  const ownKey = privateKey.trim() !== "";
 
-  // Changing where to connect invalidates the host key that was looked up.
-  function edit(change: () => void) {
-    change();
+  // Changing where to connect invalidates the fingerprint that was looked up.
+  function editAddress(value: string) {
+    setAddress(value);
     setHostKey(null);
     setApproved(false);
     setError(null);
   }
 
-  async function lookUp(event: React.FormEvent) {
-    event.preventDefault();
+  async function lookUp() {
+    if (!target || hostKey || busy) return;
     setBusy(true);
     setError(null);
     try {
-      setHostKey(await api.lookUpHostKey(host.trim(), portNumber));
+      setHostKey(await api.lookUpHostKey(target.host, target.port));
     } catch (failure) {
       setError(message(failure, "Couldn't reach the machine."));
     } finally {
@@ -122,112 +129,122 @@ function ConnectForm({
 
   async function connect(event: React.FormEvent) {
     event.preventDefault();
-    if (!hostKey) return;
+    if (!hostKey || !target) return;
     setBusy(true);
     setError(null);
     try {
       const report = await api.saveWorkstation({
         name: name.trim() || undefined,
-        host: host.trim(),
-        port: portNumber,
-        username: username.trim(),
-        private_key: privateKey,
-        passphrase: passphrase || undefined,
+        host: target.host,
+        port: target.port,
+        username: target.username,
+        password: ownKey ? undefined : password,
+        private_key: ownKey ? privateKey : undefined,
+        passphrase: ownKey && passphrase ? passphrase : undefined,
         host_key: hostKey.host_key,
         workdir: workdir.trim() || undefined,
       });
-      onSaved(report.workstation, report.checks);
+      onSaved(report);
     } catch (failure) {
       setError(message(failure, "Couldn't connect."));
     } finally {
+      // The password only lives in this form until the request is sent.
+      setPassword("");
       setBusy(false);
     }
   }
 
+  const cancel = onCancel && (
+    <Button type="button" variant="ghost" onClick={onCancel} disabled={busy}>
+      Cancel
+    </Button>
+  );
+  const canConnect =
+    approved && !busy && (ownKey ? privateKey.trim().length >= 32 : password !== "");
+
   return (
-    <div className="grid gap-4">
+    <form
+      className="grid gap-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (hostKey) void connect(event);
+        else void lookUp();
+      }}
+    >
       <p className="text-sm text-muted-foreground">
         Connect a machine you own. Icarus reaches it over SSH from the server it
         runs on, so the machine must be reachable from there.
       </p>
-      <form onSubmit={lookUp} className="grid gap-3">
-        <div className="grid gap-1.5">
-          <Label htmlFor="ws-name">Name</Label>
-          <Input
-            id="ws-name"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="Lab workstation (optional)"
-            autoComplete="off"
-          />
-        </div>
-        <div className="grid grid-cols-[1fr_6rem] gap-2">
-          <div className="grid gap-1.5">
-            <Label htmlFor="ws-host">Host</Label>
-            <Input
-              id="ws-host"
-              value={host}
-              onChange={(event) => edit(() => setHost(event.target.value))}
-              placeholder="192.168.1.20 or my-machine.local"
-              autoComplete="off"
-              spellCheck={false}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="ws-port">Port</Label>
-            <Input
-              id="ws-port"
-              value={port}
-              onChange={(event) => edit(() => setPort(event.target.value))}
-              inputMode="numeric"
-              autoComplete="off"
-            />
-          </div>
-        </div>
-        <div className="grid gap-1.5">
-          <Label htmlFor="ws-user">User name</Label>
-          <Input
-            id="ws-user"
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            placeholder="the account on that machine"
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </div>
-        {!hostKey && (
-          <div>
-            <Button type="submit" disabled={busy || !addressOk}>
-              {busy ? "Looking…" : "Look up the machine"}
-            </Button>
-          </div>
-        )}
-      </form>
+      <div className="grid gap-1.5">
+        <Label htmlFor="ws-name">Name</Label>
+        <Input
+          id="ws-name"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Lab workstation (optional)"
+          autoComplete="off"
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="ws-address">Address</Label>
+        <Input
+          id="ws-address"
+          value={address}
+          onChange={(event) => editAddress(event.target.value)}
+          onBlur={() => void lookUp()}
+          placeholder="ubuntu@192.168.1.20 (add :port if it isn't 22)"
+          autoComplete="off"
+          spellCheck={false}
+        />
+      </div>
 
       {hostKey && (
-        <form onSubmit={connect} className="grid gap-4">
-          <div className="grid gap-2 rounded-lg border p-3 text-sm">
-            <span>
-              Is this the machine&apos;s fingerprint? Icarus will only ever
-              connect to a machine presenting this key.
-            </span>
-            <code className="text-xs break-all">
-              {hostKey.key_type} {hostKey.fingerprint}
-            </code>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={approved}
-                onChange={(event) => setApproved(event.target.checked)}
-              />
-              Yes, that&apos;s my machine
-            </label>
-          </div>
+        <div className="grid gap-2 rounded-lg border p-3 text-sm">
+          <span>
+            Is this the machine&apos;s fingerprint? Icarus will only ever
+            connect to a machine presenting this key.
+          </span>
+          <code className="text-xs break-all">
+            {hostKey.key_type} {hostKey.fingerprint}
+          </code>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={approved}
+              onChange={(event) => setApproved(event.target.checked)}
+            />
+            Yes, that&apos;s my machine
+          </label>
+        </div>
+      )}
 
-          {approved && (
-            <>
+      {approved && (
+        <>
+          {!ownKey && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="ws-password">
+                Password for {target?.username} on the machine
+              </Label>
+              <PasswordInput
+                id="ws-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete="off"
+              />
+              <p className="text-sm text-muted-foreground">
+                Used once, here: Icarus logs in, adds a key of its own so it
+                never needs the password again, and uses it for sudo to install
+                Docker and the solvers. It is never stored.
+              </p>
+            </div>
+          )}
+          <details className="text-sm">
+            <summary className="cursor-pointer text-muted-foreground">
+              Advanced
+            </summary>
+            <div className="mt-3 grid gap-4">
               <div className="grid gap-1.5">
-                <Label htmlFor="ws-key">Private key</Label>
+                <Label htmlFor="ws-key">Use my own private key instead</Label>
                 <Textarea
                   id="ws-key"
                   value={privateKey}
@@ -238,87 +255,63 @@ function ConnectForm({
                   autoComplete="off"
                   spellCheck={false}
                 />
-                <details className="text-sm text-muted-foreground">
-                  <summary className="cursor-pointer">
-                    Make a key for Icarus
-                  </summary>
+                <details className="text-muted-foreground">
+                  <summary className="cursor-pointer">Make a key</summary>
                   <p className="mt-1">On that machine, run:</p>
                   <pre className="mt-1 overflow-x-auto rounded-md bg-muted p-2 text-xs">
                     {KEY_HELP}
                   </pre>
                   <p className="mt-1">
-                    Then paste what the last command prints.
+                    Then paste what the last command prints. Setup then needs
+                    to be started from the machine&apos;s card.
                   </p>
                 </details>
               </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="ws-pass">Key passphrase (if it has one)</Label>
-                <PasswordInput
-                  id="ws-pass"
-                  value={passphrase}
-                  onChange={(event) => setPassphrase(event.target.value)}
-                  autoComplete="off"
-                />
-              </div>
-              <details className="text-sm">
-                <summary className="cursor-pointer text-muted-foreground">
-                  Advanced
-                </summary>
-                <div className="mt-2 grid gap-1.5">
-                  <Label htmlFor="ws-dir">Where Icarus keeps its files</Label>
-                  <Input
-                    id="ws-dir"
-                    value={workdir}
-                    onChange={(event) => setWorkdir(event.target.value)}
-                    placeholder="/home/you/icarus (the default)"
+              {ownKey && (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ws-pass">Key passphrase (if it has one)</Label>
+                  <PasswordInput
+                    id="ws-pass"
+                    value={passphrase}
+                    onChange={(event) => setPassphrase(event.target.value)}
                     autoComplete="off"
-                    spellCheck={false}
                   />
                 </div>
-              </details>
-            </>
-          )}
-
-          {error && (
-            <p role="alert" className="text-sm break-words text-destructive">
-              {error}
-            </p>
-          )}
-          {approved && (
-            <div>
-              <Button
-                type="submit"
-                disabled={
-                  busy ||
-                  username.trim() === "" ||
-                  privateKey.trim().length < 32
-                }
-              >
-                {busy ? "Connecting…" : "Connect and save"}
-              </Button>
+              )}
+              <div className="grid gap-1.5">
+                <Label htmlFor="ws-dir">Where Icarus keeps its files</Label>
+                <Input
+                  id="ws-dir"
+                  value={workdir}
+                  onChange={(event) => setWorkdir(event.target.value)}
+                  placeholder="/home/you/icarus (the default)"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </div>
             </div>
-          )}
-        </form>
+          </details>
+        </>
       )}
 
-      {!hostKey && error && (
+      {error && (
         <p role="alert" className="text-sm break-words text-destructive">
           {error}
         </p>
       )}
-      {onCancel && (
-        <div>
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={onCancel}
-            disabled={busy}
-          >
-            Cancel
+      <div className="flex items-center justify-between gap-2">
+        {hostKey ? (
+          <Button type="submit" disabled={!canConnect}>
+            {busy ? "Connecting…" : "Connect"}
           </Button>
-        </div>
-      )}
-    </div>
+        ) : (
+          <Button type="submit" disabled={busy || !target}>
+            {busy ? "Looking…" : "Continue"}
+          </Button>
+        )}
+        {cancel}
+      </div>
+    </form>
   );
 }
 
@@ -459,6 +452,8 @@ export function WorkstationPanel() {
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
   const [query, setQuery] = useState("");
+  // Setup that connecting with a password already started: its dialog opens by itself.
+  const [autoSetup, setAutoSetup] = useState<SetupProgress | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -544,11 +539,13 @@ export function WorkstationPanel() {
         )}
         <ConnectForm
           onCancel={machines.length > 0 ? () => setAdding(false) : undefined}
-          onSaved={(_, newChecks) => {
-            setChecks(newChecks);
+          onSaved={(report) => {
+            setChecks(report.checks);
+            setAutoSetup(report.setup);
             setAdding(false);
             void reload();
             toast.success("Machine saved and connected");
+            if (report.setup_note) toast.message(report.setup_note);
           }}
         />
       </div>
@@ -598,6 +595,7 @@ export function WorkstationPanel() {
             checking={checking}
             onConnect={() => {
               setChecks(null);
+              setAutoSetup(null);
               void act(
                 () => api.connectWorkstation(machine.id),
                 "Couldn't connect it.",
@@ -605,6 +603,7 @@ export function WorkstationPanel() {
             }}
             onDisconnect={() => {
               setChecks(null);
+              setAutoSetup(null);
               void act(
                 () => api.disconnectWorkstation(machine.id),
                 "Couldn't disconnect it.",
@@ -625,6 +624,9 @@ export function WorkstationPanel() {
             onCheck={() => void recheck()}
             onSetUp={
               <WorkstationSetup
+                key={autoSetup ? "auto" : "manual"}
+                autoOpen={autoSetup !== null}
+                initialProgress={autoSetup}
                 username={machine.username}
                 disabled={busy || !checks?.some((check) => !check.ok)}
                 onFinished={() => void recheck()}

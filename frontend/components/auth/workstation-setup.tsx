@@ -67,14 +67,19 @@ export function WorkstationSetup({
   username,
   disabled,
   onFinished,
+  autoOpen = false,
+  initialProgress = null,
 }: {
   username: string;
   disabled?: boolean;
   onFinished: () => void;
+  /** Starts with the dialog open, for setup that was started when the machine was connected. */
+  autoOpen?: boolean;
+  initialProgress?: SetupProgress | null;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(autoOpen);
   const [plan, setPlan] = useState<SetupPlan | null>(null);
-  const [progress, setProgress] = useState<SetupProgress | null>(null);
+  const [progress, setProgress] = useState<SetupProgress | null>(initialProgress);
   const [password, setPassword] = useState("");
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -103,11 +108,17 @@ export function WorkstationSetup({
     const timer = setInterval(() => {
       api
         .setupProgress()
-        .then(setProgress)
+        .then((current) => {
+          setProgress(current);
+          // Setup that started by itself hasn't loaded its plan; a retry needs it.
+          if (current.state !== "running" && !plan) {
+            void api.setupPlan().then(setPlan, () => undefined);
+          }
+        })
         .catch(() => undefined);
     }, POLL_MS);
     return () => clearInterval(timer);
-  }, [open, running]);
+  }, [open, running, plan]);
 
   useEffect(() => {
     if (progress?.state === "completed" && !finished.current) {
