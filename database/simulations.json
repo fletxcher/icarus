@@ -27,6 +27,9 @@
             "null"
           ]
         },
+        "workstation_id": {
+          "bsonType": "string"
+        },
         "hidden": {
           "bsonType": "bool"
         },

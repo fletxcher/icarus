@@ -135,6 +135,9 @@ SIMULATIONS_VALIDATOR: dict[str, Any] = {
             "user_id": {"bsonType": "string"},
             # The chat that started the job, if any.
             "thread_id": {"bsonType": NULLABLE_STRING},
+            # The machine it runs on: the id of one the user saved, or "shared" for the server's.
+            # Missing on older jobs, which use whichever machine is connected.
+            "workstation_id": {"bsonType": "string"},
             # True once taken off the simulations list; the job itself is kept.
             "hidden": {"bsonType": "bool"},
             # When the chat was told the job ended (null until then; absent for jobs not in a chat).

@@ -336,6 +336,9 @@ class SimulationSummary(BaseModel):
 
 class Simulation(MongoModel):
     thread_id: str | None = None
+    # Where the job runs: a saved machine's id, or "shared". None on jobs from before this was
+    # recorded.
+    workstation_id: str | None = None
     # Taken off the simulations list; the job and its results are kept and still reachable.
     hidden: bool = False
     case: JobCase

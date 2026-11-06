@@ -490,8 +490,11 @@ Request bodies of `/api/auth/*` and `/api/credentials*` are never logged.
 **Their remote machines.** A person can save several machines and connect one at a time. With
 none saved, Settings shows the form for adding one; otherwise it shows a card per machine (name,
 cores, CPU, GPU if any) with a *Connect* button that turns into *Disconnect*, and *Add +* for a new
-one. Adding connects the new machine. Jobs run on the connected machine, and a job stays on the
-machine it started on.
+one. Adding connects the new machine. New jobs run on the connected machine. Each job is saved with
+the id of the machine it started on (`workstation_id`, or `shared` for the server's), and is watched,
+read, fetched and deleted there, so connecting or disconnecting another machine never moves it;
+jobs from before this was recorded use the connected machine. Removing a machine ends the jobs
+still running on it (they're marked failed).
 
 **Removing a machine** (the trash button) cleans it up in the background, then forgets it: over
 SSH with the machine's own key it runs `setup.sh --uninstall --purge --yes` (stops job containers,

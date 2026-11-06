@@ -292,7 +292,7 @@ async def remove_workstation(
     info = await _saved(services, user.id, machine_id)
     if force:
         await services.credentials.delete_workstation(user.id, machine_id)
-        await services.compute.forget(user.id)
+        await services.compute.machine_removed(user.id, machine_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     if info.status != "removing":
         await cleanup.start_removal(services, user.id, machine_id)

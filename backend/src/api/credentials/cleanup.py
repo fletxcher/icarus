@@ -97,8 +97,8 @@ async def _remove(services: "Services", user_id: str, machine_id: str) -> None:
         reason = "Something went wrong while cleaning up the machine."
     else:
         await services.credentials.delete_workstation(user_id, machine_id)
-        await services.compute.forget(user_id)
-        logger.info("user %s removed machine %s", user_id, machine_id)
+        ended = await services.compute.machine_removed(user_id, machine_id)
+        logger.info("user %s removed machine %s (%d job(s) ended)", user_id, machine_id, ended)
         return
     logger.warning("machine %s of user %s wasn't cleaned up: %s", machine_id, user_id, reason)
     await services.credentials.set_workstation_status(user_id, machine_id, "removal_failed", reason)

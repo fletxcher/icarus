@@ -19,6 +19,8 @@ import logging
 import posixpath
 import re
 import shlex
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -69,8 +71,26 @@ class GeometryUnavailable(Exception):
     """The file an FEA job names isn't one of the user's uploaded STL files."""
 
 
+SHARED = "shared"
+
+
+@dataclass(frozen=True)
+class JobStation:
+    """A machine a job runs on: how to reach it, its directory and its CFD run script."""
+
+    runner: CommandRunner
+    workdir: str
+    script: str
+
+
+# Finds the machine with this id (a saved machine's, or "shared"); None if it's gone.
+StationLookup = Callable[[str], Awaitable[JobStation | None]]
+
+
 class SimulationService:
-    """One user's CFD and FEA jobs, run on the work station `runner` reaches."""
+    """One user's CFD and FEA jobs. New jobs run on the machine given here; every job is
+    remembered with the machine it started on, and is watched, read and cleaned up there, even
+    when another machine has been connected since."""
 
     def __init__(
         self,
@@ -81,20 +101,41 @@ class SimulationService:
         workdir: str,
         script: str,
         files: FileRepository | None = None,
+        workstation_id: str = SHARED,
+        lookup: StationLookup | None = None,
     ):
         self._collection = db[SIMULATIONS]
         self._user_id = user_id
-        self._runner = runner
-        self._workdir = workdir
-        self._script = script
+        self._here = JobStation(runner, workdir, script)
+        self._here_id = workstation_id
+        self._lookup = lookup
         self._files = files
 
-    def _tool(self, kind: str, name: str) -> str:
+    @staticmethod
+    def _tool(station: JobStation, kind: str, name: str) -> str:
         """Path of a script that is installed next to the CFD run script."""
-        return posixpath.join(posixpath.dirname(self._script), name.format(kind=kind))
+        return posixpath.join(posixpath.dirname(station.script), name.format(kind=kind))
 
-    def _job_dir(self, job_id: str) -> str:
-        return f"{self._workdir}/jobs/{job_id}"
+    @staticmethod
+    def _job_dir(station: JobStation, job_id: str) -> str:
+        return f"{station.workdir}/jobs/{job_id}"
+
+    async def _station_of(self, doc: dict[str, Any]) -> JobStation:
+        """The machine a job runs on. Jobs from before machines were recorded use the one that
+        new jobs use. Raises MonitorError if the machine was removed."""
+        machine = doc.get("workstation_id")
+        if machine is None or machine == self._here_id:
+            return self._here
+        found = await self._lookup(machine) if self._lookup else None
+        if found is None:
+            raise MonitorError("the machine this simulation ran on was removed")
+        return found
+
+    async def _station_for_job(self, job_id: str) -> JobStation:
+        doc = await self._collection.find_one(
+            {"_id": job_id, "user_id": self._user_id}, {"workstation_id": 1}
+        )
+        return await self._station_of(doc or {})
 
     async def _geometry(self, case: FeaCase | Cfd3dCase) -> tuple[FeaCase | Cfd3dCase, bytes]:
         """The uploaded solid an FEA case names, and the case with the file's name filled in."""
@@ -127,6 +168,7 @@ class SimulationService:
             "_id": str(uuid4()),
             "user_id": self._user_id,
             "thread_id": thread_id,
+            "workstation_id": self._here_id,
             "case": case.model_dump(),
             # Set once the chat has been told how the job ended (explicitly null until then);
             # a job that isn't in a chat has nobody to tell.
@@ -138,18 +180,19 @@ class SimulationService:
         await self._collection.insert_one(doc)
         logger.info("%s job %s queued: %s", case.kind, doc["_id"], case.model_dump())
 
-        job_dir = self._job_dir(doc["_id"])
-        script = self._script if case.kind == "cfd" else self._tool(case.kind, "run_{kind}.sh")
+        here = self._here
+        job_dir = self._job_dir(here, doc["_id"])
+        script = here.script if case.kind == "cfd" else self._tool(here, case.kind, "run_{kind}.sh")
         try:
-            await self._runner.run(f"mkdir -p {shlex.quote(job_dir)}")
-            await self._runner.write_file(f"{job_dir}/case.json", case.model_dump_json(indent=2))
+            await here.runner.run(f"mkdir -p {shlex.quote(job_dir)}")
+            await here.runner.write_file(f"{job_dir}/case.json", case.model_dump_json(indent=2))
             if geometry is not None:
-                await self._runner.write_bytes(f"{job_dir}/geometry.stl", geometry)
+                await here.runner.write_bytes(f"{job_dir}/geometry.stl", geometry)
             # The job must be detached from this command: the command returns when its output
             # streams close, so anything still holding them (a backgrounded `cd && ...` list,
             # say) would keep the submission waiting until the whole simulation is done.
-            launch = await self._runner.run(
-                f"cd {shlex.quote(job_dir)} && {{ setsid nohup {via_exec(self._workdir)}"
+            launch = await here.runner.run(
+                f"cd {shlex.quote(job_dir)} && {{ setsid nohup {via_exec(here.workdir)}"
                 f"{shlex.quote(script)} {shlex.quote(job_dir)} > run.log 2>&1 < /dev/null & }}",
                 timeout_s=LAUNCH_TIMEOUT_S,
             )
@@ -162,14 +205,14 @@ class SimulationService:
         logger.info("%s job %s launched on work station in %s", case.kind, doc["_id"], job_dir)
         return await self._update(doc["_id"], status="running")
 
-    async def _monitor(self, *args: str, kind: str = "cfd") -> dict[str, Any]:
+    async def _monitor(self, station: JobStation, *args: str, kind: str = "cfd") -> dict[str, Any]:
         """Runs workstation/cfd2d_case.py, fea_case.py or cfd3d_case.py (next to the run scripts)
         and returns its JSON."""
         # The 2D CFD jobs are stored with kind "cfd"; their scripts are named after the job type.
-        tool = self._tool("cfd2d" if kind == "cfd" else kind, "{kind}_case.py")
+        tool = self._tool(station, "cfd2d" if kind == "cfd" else kind, "{kind}_case.py")
         command = " ".join(["python3", *map(shlex.quote, (tool, *args))])
         try:
-            result = await self._runner.run(command, timeout_s=MONITOR_TIMEOUT_S)
+            result = await station.runner.run(command, timeout_s=MONITOR_TIMEOUT_S)
         except Exception as error:
             raise MonitorError(f"could not reach the work station: {error}") from error
         if not result.ok:
@@ -183,14 +226,16 @@ class SimulationService:
 
     async def info(self, job_id: str, kind: str = "cfd") -> dict[str, Any]:
         """Static facts about the job: case, solver, mesh quality, dictionaries."""
-        return await self._monitor("info", self._job_dir(job_id), kind=kind)
+        station = await self._station_for_job(job_id)
+        return await self._monitor(station, "info", self._job_dir(station, job_id), kind=kind)
 
     async def progress(
         self, job_id: str, *, log_offset: int, coeff_offset: int, final: bool, kind: str = "cfd"
     ) -> dict[str, Any]:
         """What the run did since the given offsets (residuals, coefficients, stage, ETA)."""
-        args = ["progress", self._job_dir(job_id), str(log_offset), str(coeff_offset)]
-        return await self._monitor(*args, *(["final"] if final else []), kind=kind)
+        station = await self._station_for_job(job_id)
+        args = ["progress", self._job_dir(station, job_id), str(log_offset), str(coeff_offset)]
+        return await self._monitor(station, *args, *(["final"] if final else []), kind=kind)
 
     async def sync_active(self) -> None:
         """Looks at every job of this user that is still going and records the ones that ended,
@@ -248,12 +293,17 @@ class SimulationService:
             .to_list(MAX_LISTED)
         )
         progress: dict[str, dict[str, Any]] = {}
-        for kind in ("cfd", "fea", "cfd3d"):
-            ids = [doc["_id"] for doc in active_docs if doc["case"].get("kind", "cfd") == kind]
-            if not ids:
-                continue
+        # One look per machine and kind of job: each job is asked about where it runs.
+        groups: dict[tuple[str | None, str], list[str]] = {}
+        for doc in active_docs:
+            key = (doc.get("workstation_id"), doc["case"].get("kind", "cfd"))
+            groups.setdefault(key, []).append(doc["_id"])
+        for (machine, kind), ids in groups.items():
             try:
-                progress |= await self._monitor("summary", f"{self._workdir}/jobs", *ids, kind=kind)
+                station = await self._station_of({"workstation_id": machine})
+                progress |= await self._monitor(
+                    station, "summary", f"{station.workdir}/jobs", *ids, kind=kind
+                )
             except MonitorError as error:
                 logger.warning("job list: no %s progress from the work station (%s)", kind, error)
         for doc in active_docs:
@@ -343,18 +393,25 @@ class SimulationService:
         Returns how many simulations were deleted.
         """
         query = {"user_id": self._user_id, "thread_id": thread_id}
-        ids = [doc["_id"] async for doc in self._collection.find(query)]
-        for job_id in ids:
-            await self._remove_files(job_id)
+        docs = [doc async for doc in self._collection.find(query)]
+        ids = [doc["_id"] for doc in docs]
+        for doc in docs:
+            await self._remove_files(doc)
         if ids:
             await self._collection.delete_many({"_id": {"$in": ids}})
             logger.info("deleted %d cfd job(s) of thread %s", len(ids), thread_id)
         return len(ids)
 
-    async def _remove_files(self, job_id: str) -> None:
-        """Stops the job if it is running and removes its directory on the work station."""
+    async def _remove_files(self, doc: dict[str, Any]) -> None:
+        """Stops the job if it is running and removes its directory on the machine it ran on."""
+        job_id = doc["_id"]
         if not SAFE_JOB_ID.match(job_id):
             logger.warning("not removing the files of cfd job %r: unusual id", job_id)
+            return
+        try:
+            station = await self._station_of(doc)
+        except MonitorError as error:
+            logger.info("not removing the files of job %s: %s", job_id, error)
             return
         # run_cfd2d.sh leads its own process group (setsid at launch), so one signal to the
         # group stops the solver and everything else the job started. The [r] keeps pgrep
@@ -362,10 +419,10 @@ class SimulationService:
         command = (
             f"pid=$(pgrep -f '[r]un_(openfoam|fea).sh .*{job_id}' | head -n 1); "
             'if [ -n "$pid" ]; then kill -TERM -- "-$pid"; sleep 2; fi; '
-            f"rm -rf -- {shlex.quote(self._job_dir(job_id))}"
+            f"rm -rf -- {shlex.quote(self._job_dir(station, job_id))}"
         )
         try:
-            await self._runner.run(command, timeout_s=MONITOR_TIMEOUT_S)
+            await station.runner.run(command, timeout_s=MONITOR_TIMEOUT_S)
         except Exception:
             logger.exception("could not remove the files of cfd job %s", job_id)
 
@@ -383,7 +440,8 @@ class SimulationService:
         """A file the job produced (see JOB_FILES); FileNotFoundError if it isn't there."""
         if name not in JOB_FILES:
             raise FileNotFoundError(name)
-        return await self._runner.read_bytes(f"{self._job_dir(job_id)}/{name}")
+        station = await self._station_for_job(job_id)
+        return await station.runner.read_bytes(f"{self._job_dir(station, job_id)}/{name}")
 
     async def get(self, job_id: str) -> Simulation | None:
         """Returns the job, refreshing it from the work station while it's still in flight."""
@@ -395,8 +453,13 @@ class SimulationService:
             return simulation
 
         try:
-            raw = await self._runner.read_file(f"{self._job_dir(job_id)}/status.json")
+            station = await self._station_of(doc)
+            raw = await station.runner.read_file(f"{self._job_dir(station, job_id)}/status.json")
             status = json.loads(raw)
+        except MonitorError as error:
+            # The machine it ran on was removed: its results can't be refreshed any more.
+            logger.debug("cfd job %s: %s", job_id, error)
+            return simulation
         except (OSError, ValueError) as error:
             # Not written yet, or caught mid-write.
             logger.debug("cfd job %s: status.json not readable yet (%s)", job_id, error)
