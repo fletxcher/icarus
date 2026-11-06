@@ -57,7 +57,10 @@ class WorkstationIn(BaseModel):
     host: Host
     port: int = 22
     username: Annotated[str, StringConstraints(strip_whitespace=True, pattern=USERNAME_PATTERN)]
-    private_key: SecretStr = Field(min_length=32, max_length=MAX_PRIVATE_KEY_CHARS)
+    # How Icarus gets in: the person's own private key, or their password for this one login, with
+    # which Icarus adds a key it makes itself to the machine. One of the two.
+    private_key: SecretStr | None = Field(default=None, max_length=MAX_PRIVATE_KEY_CHARS)
+    password: SecretStr | None = Field(default=None, max_length=1024)
     passphrase: SecretStr | None = Field(default=None, max_length=1024)
     host_key: Annotated[str, StringConstraints(strip_whitespace=True, max_length=2048)]
     # Where Icarus keeps its files on the machine; its home directory's `icarus` by default.
@@ -157,6 +160,10 @@ class WorkstationReport(BaseModel):
     workstation: WorkstationInfo
     checks: list[Check]
     machine: MachineInfo | None = None
+    # Set when connecting with a password also started setting the machine up (see `setup`).
+    setup: SetupProgress | None = None
+    # Why setup wasn't started, when something was missing and it couldn't be.
+    setup_note: str | None = None
 
 
 class Overview(BaseModel):

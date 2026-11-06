@@ -179,6 +179,70 @@ def describe(error: BaseException, host: str, port: int, public_key: str | None 
     return f"The SSH connection to {host}:{port} failed ({type(error).__name__})."
 
 
+CONNECT_TIMEOUT_S = 15.0
+
+
+# Adds one public key to ~/.ssh/authorized_keys without disturbing the others, and makes sure
+# sshd will accept the files (it ignores keys when the permissions are too open).
+def install_key_command(public_key: str) -> str:
+    blob = public_key.split()[1]
+    file = '"$HOME/.ssh/authorized_keys"'
+    return (
+        'umask 077; mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh" '
+        f"&& touch {file} && chmod 600 {file} "
+        # The last line may lack its newline; the new key must not be glued onto it.
+        f'&& {{ [ ! -s {file} ] || [ -z "$(tail -c1 {file})" ] || echo >> {file}; }} '
+        f"&& {{ grep -qF -- {shlex.quote(blob)} {file} "
+        f"|| printf '%s\\n' {shlex.quote(public_key)} >> {file}; }}"
+    )
+
+
+async def install_public_key(
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    host_key: asyncssh.SSHKey,
+    public_key: str,
+) -> None:
+    """Logs in with the person's password, on the machine they approved, and adds Icarus's key
+    to it. The password is used for this one login and not kept."""
+    entry = host if port == 22 else f"[{host}]:{port}"
+    try:
+        connection = await asyncssh.connect(
+            host,
+            port=port,
+            username=username,
+            password=password,
+            known_hosts=asyncssh.import_known_hosts(f"{entry} {public_key_line(host_key)}\n"),
+            client_keys=None,
+            config=None,
+            agent_path=None,
+            agent_forwarding=False,
+            preferred_auth="password,keyboard-interactive",
+            connect_timeout=CONNECT_TIMEOUT_S,
+            login_timeout=CONNECT_TIMEOUT_S,
+        )
+    except asyncssh.PermissionDenied:
+        raise ConnectionProblem(
+            "The machine rejected that password or user name. If it only allows key logins, "
+            "use your own key under Advanced."
+        ) from None
+    except (OSError, TimeoutError, asyncssh.Error) as error:
+        raise ConnectionProblem(describe(error, host, port)) from error
+    try:
+        result = await connection.run(
+            install_key_command(public_key), check=False, timeout=COMMAND_TIMEOUT_S
+        )
+    except (OSError, TimeoutError, asyncssh.Error) as error:
+        raise ConnectionProblem(describe(error, host, port)) from error
+    finally:
+        connection.close()
+    if result.exit_status != 0:
+        detail = str(result.stderr or "").strip() or "failed"
+        raise ConnectionProblem(f"Couldn't add Icarus's key on the machine: {detail}")
+
+
 def make_target(
     host: str, port: int, username: str, key: asyncssh.SSHKey, host_key: asyncssh.SSHKey
 ) -> WorkstationTarget:

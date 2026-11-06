@@ -137,21 +137,42 @@ async def look_up_host_key(body: HostKeyRequest, user: CurrentUser) -> HostKey:
 async def save_workstation(
     body: WorkstationIn, services: ServicesDep, user: CurrentUser
 ) -> WorkstationReport:
-    """Connects to the machine with the given key and the approved host key, installs the
-    runner scripts there and, if that works, saves the machine."""
+    """Connects to the machine, installs the runner scripts there and, if that works, saves it.
+
+    With a private key it connects with that key. With a password, Icarus makes a key of its own,
+    adds it to the machine using the password (for this one login) and then connects with it;
+    if the machine then lacks what Icarus needs, setup starts in the background using the same
+    password for sudo. The password is never stored or logged."""
     if not 1 <= body.port <= 65535:
         raise _unprocessable("The port must be between 1 and 65535.")
     if body.id and await services.credentials.workstation_info(user.id, body.id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such machine")
+    private_key = body.private_key.get_secret_value() if body.private_key else None
+    password = body.password.get_secret_value() if body.password else None
+    if bool(private_key) == bool(password):
+        raise _unprocessable("Give either the machine's password or a private key.")
+    if private_key and len(private_key.strip()) < 32:
+        raise _unprocessable("That doesn't look like a private key.")
     try:
         await workstation.check_address(
             body.host, body.port, allow_private=get_settings().allow_private_workstations
         )
         approved = workstation.parse_host_key(body.host_key)
-        key = workstation.load_private_key(
-            body.private_key.get_secret_value(),
-            body.passphrase.get_secret_value() if body.passphrase else None,
-        )
+        if password:
+            key = asyncssh.generate_private_key("ssh-ed25519", comment="icarus")
+            await workstation.install_public_key(
+                body.host,
+                body.port,
+                body.username,
+                password,
+                approved,
+                f"{workstation.public_key_line(key)} icarus",
+            )
+        else:
+            key = workstation.load_private_key(
+                private_key or "",
+                body.passphrase.get_secret_value() if body.passphrase else None,
+            )
         target, checks, machine = await workstation.inspect(
             workstation.make_target(body.host, body.port, body.username, key, approved),
             body.workdir.rstrip("/") if body.workdir else None,
@@ -176,7 +197,36 @@ async def save_workstation(
     )
     await services.compute.forget(user.id)
     logger.info("user %s saved their work station %s@%s", user.id, body.username, body.host)
-    return WorkstationReport(workstation=saved, checks=checks, machine=machine)
+    report = WorkstationReport(workstation=saved, checks=checks, machine=machine)
+    if password and any(not check.ok for check in checks):
+        await _start_setup(services, user.id, machine, password, report)
+    return report
+
+
+async def _start_setup(
+    services: ServicesDep,
+    user_id: str,
+    machine: workstation.MachineInfo,
+    password: str,
+    report: WorkstationReport,
+) -> None:
+    """Starts setting the new machine up, with the password it was connected with as the sudo
+    password if root is needed. Leaves a note instead when it can't."""
+    plan = provision.plan_for(machine)
+    if not plan.can_run:
+        report.setup_note = plan.reason
+        return
+    runner = await _own_station(services, user_id)
+    try:
+        await provision.start(
+            runner, machine, runner.target.username, password if plan.needs_password else None
+        )
+        report.setup = await provision.progress(runner)
+    except (OSError, TimeoutError, asyncssh.Error, ConnectionProblem) as problem:
+        report.setup_note = (
+            f"The machine is connected, but setup didn't start: {problem} "
+            "Use Set up this machine to try again."
+        )
 
 
 @router.post("/workstation/check")

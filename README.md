@@ -506,12 +506,19 @@ machine can't be reached the record stays with the reason, and the person can tr
 you@example.com` adds three made-up machines (hosts under `example.invalid`; `--remove` takes them
 away).
 
-Adding a machine: the person enters host, port and user, the backend shows the machine's
-SSH host key, and the person approves its fingerprint. That host key is then pinned: the
-backend connects only to a machine presenting it. They paste a private key (kept
-without its passphrase, encrypted); the connection uses only that key (no agent, no
-`~/.ssh` of the server). Saving connects, creates `~/icarus` (or the chosen directory),
-puts the runner scripts and `setup.sh` there and reports what's installed (XFOIL, OpenFOAM, CalculiX,
+Adding a machine takes an address (`user@host`, or `user@host:port`), a check of the machine's SSH
+host key, and the machine's password. The backend fetches the host key, the person approves its
+fingerprint, and it's then pinned: the backend connects only to a machine presenting it. With the
+password, the backend logs in once, adds an ed25519 key it made itself to `~/.ssh/authorized_keys`
+and connects with that key from then on; the private key is kept encrypted, never shown, and the
+password is used for that login and for `sudo` during setup, and kept nowhere. (Under *Advanced* a
+person can give their own private key instead, which also skips the automatic setup.) The connection
+uses only that key (no agent, no `~/.ssh` of the server). Saving connects, creates `~/icarus` (or the
+chosen directory),
+puts the runner scripts and `setup.sh` there and, when the connection used a password and the
+machine lacks what Icarus needs, starts the setup in the background right away (a dialog shows the
+progress; if sudo rejects the password the machine stays connected with a note, and *Set up this
+machine* asks again). It reports what's installed (XFOIL, OpenFOAM, CalculiX,
 gmsh, ParaView, ffmpeg) along with the machine's hardware (cores, memory, disk, GPU, OS) and
 refuses machines that can't run Icarus; anything missing is installed with the setup button or by
 running `bash ~/icarus/setup/setup.sh --install` on the machine. The machine must be reachable over SSH from

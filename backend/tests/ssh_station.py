@@ -33,6 +33,10 @@ class FakeStation:
     # What was sent on the standard input of commands that read it (the sudo password).
     stdins: list[str] = field(default_factory=list)
     sudo_password: str = "right"
+    # The password the machine accepts for logging in (none: key logins only), and the public
+    # keys (`ssh-ed25519 AAAA...`) added to its authorized_keys, by the person or by Icarus.
+    password: str | None = None
+    installed_keys: list[str] = field(default_factory=list)
     # What `setup.status` and `setup.log` hold.
     setup_status: str = ""
     setup_log: str = ""
@@ -52,12 +56,34 @@ def start(root: Path, *, authorized: asyncssh.SSHKey | None = None) -> FakeStati
     client_key = asyncssh.generate_private_key("ssh-ed25519")
     station = FakeStation("127.0.0.1", 0, host_key, client_key, root)
     allowed = authorized or client_key
-    authorized_keys = asyncssh.import_authorized_keys(allowed.export_public_key("openssh").decode())
+    station.installed_keys.append(
+        " ".join(allowed.export_public_key("openssh").decode().split()[:2])
+    )
+
+    class Server(asyncssh.SSHServer):
+        def begin_auth(self, username: str) -> bool:
+            return True
+
+        def password_auth_supported(self) -> bool:
+            return station.password is not None
+
+        def validate_password(self, username: str, password: str) -> bool:
+            return password == station.password
+
+        def public_key_auth_supported(self) -> bool:
+            return True
+
+        def validate_public_key(self, username: str, key: asyncssh.SSHKey) -> bool:
+            line = " ".join(key.export_public_key("openssh").decode().split()[:2])
+            return line in station.installed_keys
 
     async def handle(process: asyncssh.SSHServerProcess) -> None:
         command = process.command or ""
         station.commands.append(command)
-        if command.startswith("printf %s"):
+        if 'echo >> "$HOME/.ssh/authorized_keys"' in command:
+            line = next(part for part in shlex.split(command) if part.startswith("ssh-"))
+            station.installed_keys.append(" ".join(line.split()[:2]))
+        elif command.startswith("printf %s"):
             process.stdout.write(HOME)
         elif command.startswith("mkdir -p"):
             for path in shlex.split(command)[2:]:
@@ -90,11 +116,10 @@ def start(root: Path, *, authorized: asyncssh.SSHKey | None = None) -> FakeStati
 
     async def serve() -> None:
         station._server = await asyncssh.create_server(
-            asyncssh.SSHServer,
+            Server,
             station.host,
             0,
             server_host_keys=[host_key],
-            authorized_client_keys=authorized_keys,
             process_factory=handle,
             sftp_factory=sftp,
         )

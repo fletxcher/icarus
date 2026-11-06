@@ -708,3 +708,99 @@ def test_setup_cant_start_twice_and_reports_its_state(client: TestClient, statio
 def test_setup_needs_a_saved_machine(client: TestClient):
     assert client.get("/api/credentials/workstation/setup").status_code == 404
     assert client.post("/api/credentials/workstation/setup", json={}).status_code == 404
+
+
+def password_body(fake: ssh_station.FakeStation, **changes) -> dict:
+    body = station_body(fake, password="hunter2", **changes)
+    del body["private_key"]
+    return body
+
+
+def test_a_password_adds_icarus_s_own_key_and_connects_with_it(client: TestClient, station):
+    station.password = "hunter2"
+    station.sudo_password = "hunter2"
+
+    response = client.put("/api/credentials/workstation", json=password_body(station))
+
+    assert response.status_code == 200, response.text
+    saved = response.json()["workstation"]
+    assert saved["public_key"].split()[1] in " ".join(station.installed_keys)
+    assert any('authorized_keys"' in command for command in station.commands)
+    # The password was used for the login (and sudo), and is nowhere: not in a command, the
+    # response, or what's stored.
+    everything = " ".join(station.commands) + response.text + str(stored_credentials(client))
+    assert "hunter2" not in everything
+    assert [doc["kind"] for doc in stored_credentials(client)] == ["workstation"]
+    # The saved key is the one Icarus made: it can connect again without the password.
+    station.password = None
+    assert client.post("/api/credentials/workstation/check").status_code == 200
+
+
+def test_a_wrong_password_saves_nothing(client: TestClient, station):
+    station.password = "right-one"
+
+    response = client.put("/api/credentials/workstation", json=password_body(station))
+
+    assert response.status_code == 422 and "rejected that password" in response.json()["detail"]
+    assert "hunter2" not in response.text
+    assert stored_credentials(client) == []
+
+
+def test_a_password_or_a_key_is_needed_but_not_both(client: TestClient, station):
+    neither = station_body(station)
+    del neither["private_key"]
+    both = station_body(station, password="hunter2")
+
+    for body in (neither, both):
+        response = client.put("/api/credentials/workstation", json=body)
+        assert response.status_code == 422 and "either" in response.json()["detail"]
+    assert stored_credentials(client) == []
+
+
+def test_connecting_with_a_password_starts_setup_with_the_same_password(
+    client: TestClient, station
+):
+    station.password = "hunter2"
+    station.sudo_password = "hunter2"
+    station.log_on_launch = "installing docker\n"
+
+    report = client.put("/api/credentials/workstation", json=password_body(station)).json()
+
+    assert report["setup"]["state"] == "running" and report["setup_note"] is None
+    launch = next(command for command in station.commands if "setsid nohup" in command)
+    assert "hunter2" not in launch and "--install-system" in launch
+    assert station.stdins[-1] == "hunter2\n"  # handed to the one sudo that installs Docker
+
+
+def test_a_password_that_sudo_rejects_leaves_the_machine_saved_with_a_note(
+    client: TestClient, station
+):
+    station.password = "hunter2"
+    station.sudo_password = "something-else"
+
+    report = client.put("/api/credentials/workstation", json=password_body(station)).json()
+
+    assert report["setup"] is None and "rejected" in report["setup_note"]
+    assert "Set up this machine" in report["setup_note"]
+    assert len(client.get("/api/credentials").json()["workstations"]) == 1
+
+
+def test_a_machine_that_cant_run_icarus_is_connected_without_starting_setup(
+    client: TestClient, station, monkeypatch
+):
+    station.password = "hunter2"
+    monkeypatch.setattr(
+        ssh_station, "MACHINE_PROBED", ssh_station.MACHINE_PROBED.replace("x86_64", "riscv64")
+    )
+
+    report = client.put("/api/credentials/workstation", json=password_body(station)).json()
+
+    assert report["setup"] is None and "riscv64" in report["setup_note"]
+
+
+def test_the_install_key_command_adds_the_key_once_and_keeps_the_others():
+    command = workstation.install_key_command("ssh-ed25519 AAAAblob icarus")
+
+    assert "chmod 700" in command and "chmod 600" in command
+    assert "grep -qF -- AAAAblob" in command  # not added twice
+    assert ">> " in command and "authorized_keys" in command
