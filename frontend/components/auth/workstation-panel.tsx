@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CheckIcon,
   LoaderCircleIcon,
@@ -29,7 +29,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { WorkstationSetup } from "@/components/auth/workstation-setup";
+import {
+  SetupSteps,
+  WorkstationSetup,
+} from "@/components/auth/workstation-setup";
 import {
   api,
   type CredentialsOverview,
@@ -472,6 +475,7 @@ function MachineCard({
 }
 
 const POLL_REMOVAL_MS = 3000;
+const POLL_SETUP_MS = 3000;
 
 /** The person's own machines: connect one, or add another. Mount it to load the current state. */
 export function WorkstationPanel() {
@@ -482,8 +486,12 @@ export function WorkstationPanel() {
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
   const [query, setQuery] = useState("");
+  // How setup of the connected machine is going. Kept here, not in its dialog, so the steps keep
+  // updating below the machines after the dialog is closed.
+  const [setup, setSetup] = useState<SetupProgress | null>(null);
   // Setup that connecting with a password already started: its dialog opens by itself.
-  const [autoSetup, setAutoSetup] = useState<SetupProgress | null>(null);
+  const [openSetup, setOpenSetup] = useState(false);
+  const lastSetupState = useRef<SetupProgress["state"] | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -518,7 +526,7 @@ export function WorkstationPanel() {
     }
   }
 
-  async function recheck() {
+  const recheck = useCallback(async () => {
     setChecking(true);
     try {
       const report = await api.checkWorkstation();
@@ -536,7 +544,48 @@ export function WorkstationPanel() {
     } finally {
       setChecking(false);
     }
-  }
+  }, [reload]);
+
+  // Every look at setup comes through here, so the end of a run is noticed once.
+  const handleSetup = useCallback(
+    (next: SetupProgress) => {
+      const was = lastSetupState.current;
+      lastSetupState.current = next.state;
+      setSetup(next);
+      if (was === "running" && next.state === "completed") {
+        toast.success("The machine is ready");
+        void recheck();
+      } else if (was === "running" && next.state === "failed") {
+        toast.error(`Setup failed: ${next.message}`);
+      }
+    },
+    [recheck],
+  );
+
+  // Setup may already be running from before this page was opened.
+  const activeId = overview?.workstations.find((m) => m.active)?.id;
+  useEffect(() => {
+    if (!activeId) return;
+    let current = true;
+    api.setupProgress().then(
+      (progress) => {
+        if (current && progress.state === "running") handleSetup(progress);
+      },
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+  }, [activeId, handleSetup]);
+
+  const setupRunning = setup?.state === "running";
+  useEffect(() => {
+    if (!setupRunning) return;
+    const timer = setInterval(() => {
+      api.setupProgress().then(handleSetup, () => undefined);
+    }, POLL_SETUP_MS);
+    return () => clearInterval(timer);
+  }, [setupRunning, handleSetup]);
 
   if (failed)
     return (
@@ -571,7 +620,8 @@ export function WorkstationPanel() {
           onCancel={machines.length > 0 ? () => setAdding(false) : undefined}
           onSaved={(report) => {
             setChecks(report.checks);
-            setAutoSetup(report.setup);
+            if (report.setup) handleSetup(report.setup);
+            setOpenSetup(report.setup !== null);
             setAdding(false);
             void reload();
             toast.success("Machine saved and connected");
@@ -621,11 +671,13 @@ export function WorkstationPanel() {
           <MachineCard
             key={machine.id}
             machine={machine}
-            busy={busy}
+            busy={busy || setupRunning}
             checking={checking}
             onConnect={() => {
               setChecks(null);
-              setAutoSetup(null);
+              setSetup(null);
+              lastSetupState.current = null;
+              setOpenSetup(false);
               void act(
                 () => api.connectWorkstation(machine.id),
                 "Couldn't connect it.",
@@ -633,7 +685,9 @@ export function WorkstationPanel() {
             }}
             onDisconnect={() => {
               setChecks(null);
-              setAutoSetup(null);
+              setSetup(null);
+              lastSetupState.current = null;
+              setOpenSetup(false);
               void act(
                 () => api.disconnectWorkstation(machine.id),
                 "Couldn't disconnect it.",
@@ -654,18 +708,28 @@ export function WorkstationPanel() {
             onCheck={() => void recheck()}
             onSetUp={
               <WorkstationSetup
-                key={autoSetup ? "auto" : "manual"}
-                autoOpen={autoSetup !== null}
-                initialProgress={autoSetup}
+                autoOpen={openSetup}
                 username={machine.username}
-                disabled={busy || !checks?.some((check) => !check.ok)}
-                onFinished={() => void recheck()}
+                progress={setup}
+                onProgress={handleSetup}
+                disabled={
+                  busy ||
+                  !(
+                    setup?.state === "running" ||
+                    setup?.state === "failed" ||
+                    checks?.some((check) => !check.ok)
+                  )
+                }
               />
             }
           />
         ))}
       </ul>
-      {checks && <CheckList checks={checks} />}
+      {setup && (setup.state === "running" || setup.state === "failed") ? (
+        <SetupSteps progress={setup} />
+      ) : (
+        checks && <CheckList checks={checks} />
+      )}
     </div>
   );
 }

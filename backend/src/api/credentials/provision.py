@@ -21,7 +21,8 @@ from .workstation import COMMAND_TIMEOUT_S, ConnectionProblem, image_tag
 
 logger = logging.getLogger(__name__)
 
-LOG_TAIL_LINES = 25
+LOG_TAIL_LINES = 40
+CANCEL_TIMEOUT_S = 90.0
 SOLVER_IMAGE_NOTE = (
     "The solver image: OpenFOAM, gmsh, CalculiX, ParaView, ffmpeg, XFOIL and the Python "
     "environment for meshing and CAD (built on the machine, about 1.5 GB to download)"
@@ -114,6 +115,22 @@ async def start(
     if not started.ok:
         raise ConnectionProblem(f"Couldn't start setup: {started.stderr.strip() or 'failed'}")
     logger.info("setup started on %s@%s", runner.target.username, runner.target.host)
+
+
+async def cancel(runner: SSHRunner) -> SetupProgress:
+    """Stops setup if it's running and removes the solver image it built (Docker stays). The
+    machine does this itself (`setup.sh --cancel`) and records it in the status file."""
+    workdir = runner.target.workdir
+    setup = shlex.quote(f"{workdir}/setup/setup.sh")
+    result = await runner.run(
+        f"if [ -f {setup} ]; then bash {setup} --cancel --home {shlex.quote(workdir)}; "
+        "else echo 'nothing to cancel'; fi",
+        timeout_s=CANCEL_TIMEOUT_S,
+    )
+    if not result.ok:
+        raise ConnectionProblem(f"Couldn't cancel setup: {result.stderr.strip() or 'failed'}")
+    logger.info("setup cancelled on %s@%s", runner.target.username, runner.target.host)
+    return await progress(runner)
 
 
 async def progress(runner: SSHRunner) -> SetupProgress:

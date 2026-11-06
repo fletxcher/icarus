@@ -149,7 +149,7 @@ class SetupIn(BaseModel):
 
 
 class SetupProgress(BaseModel):
-    state: Literal["idle", "running", "completed", "failed"]
+    state: Literal["idle", "running", "completed", "failed", "cancelled"]
     stage: str
     message: str
     log_tail: str

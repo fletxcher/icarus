@@ -160,7 +160,7 @@ export type SetupPlan = {
 };
 
 export type SetupProgress = {
-  state: "idle" | "running" | "completed" | "failed";
+  state: "idle" | "running" | "completed" | "failed" | "cancelled";
   stage: string;
   message: string;
   log_tail: string;
@@ -247,6 +247,9 @@ export const api = {
     }),
   setupPlan: () => request<SetupPlan>("/credentials/workstation/setup/plan"),
   setupProgress: () => request<SetupProgress>("/credentials/workstation/setup"),
+  /** Stops setup and removes the solver image it built. */
+  cancelSetup: () =>
+    request<SetupProgress>("/credentials/workstation/setup", { method: "DELETE" }),
   startSetup: (password: string | null) =>
     request<SetupProgress>("/credentials/workstation/setup", {
       method: "POST",

@@ -635,7 +635,13 @@ Linux on x86-64 or ARM64 with at least 4 GB of memory and 15 GB of free disk.
 **The setup button.** After a machine is connected, *Set up this machine* in Settings shows what
 will be installed and starts setup in the background on the machine (`setup.sh --install-system`
 for Docker and the docker group, then `--install-user` for the image, which needs no root). Progress
-comes from `~/icarus/setup.status` and `setup.log`, so the person can close the page and come back.
+comes from `~/icarus/setup.status` (a stage per step: Docker, runner scripts, solver image, then XFOIL,
+OpenFOAM, CalculiX, the Python tools and the video tools) and `setup.log`. The settings list the steps
+with a spinner on the one being worked on and a check mark on each finished one, also with the dialog
+closed, so the person can close the page and come back. A failed step shows the reason from the log
+(for example `XFOIL check FAILED`). *Cancel* in the dialog (`DELETE /api/credentials/workstation/setup`,
+which runs `setup.sh --cancel` on the machine) stops a running setup, including its docker build, and
+removes the solver image; Docker itself stays installed.
 Root comes from nothing if the user is root or already has Docker, `sudo -n` if sudo needs no
 password, otherwise the person types their sudo password once: it's checked with `sudo -S -v`, sent
 over the SSH channel's standard input to the one `sudo` that runs the root half, and never put in a

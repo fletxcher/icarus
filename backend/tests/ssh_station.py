@@ -33,6 +33,7 @@ class FakeStation:
     # What was sent on the standard input of commands that read it (the sudo password).
     stdins: list[str] = field(default_factory=list)
     sudo_password: str = "right"
+    cancelled: bool = False
     # The password the machine accepts for logging in (none: key logins only), and the public
     # keys (`ssh-ed25519 AAAA...`) added to its authorized_keys, by the person or by Icarus.
     password: str | None = None
@@ -98,6 +99,12 @@ def start(root: Path, *, authorized: asyncssh.SSHKey | None = None) -> FakeStati
                 station.stdins.append(str(await process.stdin.read()))
             station.setup_log = station.log_on_launch
             process.stdout.write("started\n")
+        elif "setup.sh --cancel" in command or "'nothing to cancel'" in command:
+            station.setup_status = (
+                '{"state": "cancelled", "stage": "cancel", "message": "Setup was cancelled"}'
+            )
+            station.setup_log = ""
+            station.cancelled = True
         elif "setup.status" in command and "echo ---" in command:
             process.stdout.write(f"{station.setup_status}\n---\n{station.setup_log}")
         elif command.endswith("icarus-exec' --status"):

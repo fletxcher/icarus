@@ -291,6 +291,16 @@ async def start_setup(body: SetupIn, services: ServicesDep, user: CurrentUser) -
         raise _unreachable(problem, runner) from None
 
 
+@router.delete("/workstation/setup")
+async def cancel_setup(services: ServicesDep, user: CurrentUser) -> SetupProgress:
+    """Stops setup of the connected machine and removes the solver image it built."""
+    runner = await _own_station(services, user.id)
+    try:
+        return await provision.cancel(runner)
+    except (OSError, TimeoutError, asyncssh.Error, ConnectionProblem) as problem:
+        raise _unreachable(problem, runner) from None
+
+
 @router.get("/workstation/setup")
 async def setup_progress(services: ServicesDep, user: CurrentUser) -> SetupProgress:
     """How setup is going on the saved machine."""

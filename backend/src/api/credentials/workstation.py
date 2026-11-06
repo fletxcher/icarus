@@ -48,7 +48,8 @@ TOOLS_SCRIPT = r"""
 for tool in xfoil xvfb-run gmsh ccx pvbatch ffmpeg python3; do
   if command -v "$tool" > /dev/null 2>&1; then echo "$tool=1"; else echo "$tool=0"; fi
 done
-if ls /usr/lib/openfoam/openfoam*/etc/bashrc /opt/openfoam*/etc/bashrc > /dev/null 2>&1; then
+# ls exits 2 when one of the globs matches nothing, even if the other found a file.
+if [ -n "$(ls /usr/lib/openfoam/openfoam*/etc/bashrc /opt/openfoam*/etc/bashrc 2>/dev/null)" ]; then
   echo openfoam=1
 else
   echo openfoam=0
@@ -309,7 +310,7 @@ async def install_scripts(runner: CommandRunner, workdir: str) -> None:
     await runner.write_bytes(f"{workdir}/setup/{DOCKERFILE}", (WS_SOURCE / DOCKERFILE).read_bytes())
     installed = await runner.run(
         f"cd {quoted}/setup && install -m 755 {' '.join(SCRIPTS)} ../bin/ "
-        f"&& chmod 755 {SETUP_SCRIPT}",
+        f"&& chmod 755 {SETUP_SCRIPT} {' '.join(SCRIPTS)}",
         timeout_s=COMMAND_TIMEOUT_S,
     )
     if not installed.ok:

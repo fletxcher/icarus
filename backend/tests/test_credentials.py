@@ -804,3 +804,21 @@ def test_the_install_key_command_adds_the_key_once_and_keeps_the_others():
     assert "chmod 700" in command and "chmod 600" in command
     assert "grep -qF -- AAAAblob" in command  # not added twice
     assert ">> " in command and "authorized_keys" in command
+
+
+def test_setup_can_be_cancelled(client: TestClient, station):
+    client.put("/api/credentials/workstation", json=station_body(station))
+    station.setup_status = '{"state": "running", "stage": "image", "message": "Building"}'
+
+    cancelled = client.delete("/api/credentials/workstation/setup")
+
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["state"] == "cancelled" and station.cancelled
+    cancel_command = next(c for c in station.commands if "--cancel" in c)
+    assert "--cancel --home /home/tester/icarus" in cancel_command
+    # After a cancel it can be started again.
+    assert client.get("/api/credentials/workstation/setup").json()["state"] == "cancelled"
+
+
+def test_cancelling_needs_a_saved_machine(client: TestClient):
+    assert client.delete("/api/credentials/workstation/setup").status_code == 404

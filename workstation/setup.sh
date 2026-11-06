@@ -185,7 +185,7 @@ LOADED,1,25.
 U
 *END STEP
 INP
-  if "$SCRIPT_DIR/run_calculix.sh" "$tmp" > "$tmp/output.txt" 2>&1; then
+  if bash "$SCRIPT_DIR/run_calculix.sh" "$tmp" > "$tmp/output.txt" 2>&1; then
     u1="$(awk 'NF == 4 && $1 == 2 { print $2; exit }' "$tmp/model.dat")"
     if awk -v u="${u1:-0}" 'BEGIN { exit !(u > 3e-4 && u < 5e-4) }'; then
       log "CalculiX check passed (block pulled with 100 N, displacement $u1 mm)"
@@ -327,20 +327,39 @@ set_status() {
 SETUP_STAGE=""
 mark_failed_on_exit() {
   local code=$?
-  ((code == 0)) || set_status failed "$SETUP_STAGE" "failed during $SETUP_STAGE (exit $code); see setup.log"
+  ((code == 0)) && return
+  # The checks run in a container with their own trap, which knows which tool failed; the
+  # install that started them must not replace that with a vaguer "failed during checks".
+  grep -q '"state": "failed"' "$STATUS_FILE" 2> /dev/null && return
+  # The reason is in the log: the last "==> ... FAILED" line, else its last line.
+  local reason=""
+  if [[ -f "$ICARUS_HOME/setup.log" ]]; then
+    reason="$(grep -E '^==> .*FAILED' "$ICARUS_HOME/setup.log" | tail -n 1)"
+    [[ -n "$reason" ]] || reason="$(grep -v '^[[:space:]]*$' "$ICARUS_HOME/setup.log" | tail -n 1)"
+  fi
+  set_status failed "$SETUP_STAGE" "failed during $SETUP_STAGE (exit $code): ${reason#==> }"
 }
 
 docker_usable() { command -v docker > /dev/null && docker info > /dev/null 2>&1; }
 
 image_name() { echo "$IMAGE_REPO:$(sha256sum "$SCRIPT_DIR/Dockerfile" | cut -c1-12)"; }
 
-# The checks that run on the tools themselves, so in Docker mode inside the container.
+# The checks that run on the tools themselves, so in Docker mode inside the container. Each one
+# is its own stage in setup.status, so the app can show which tool is being checked.
 check_tools() {
-  check_xfoil
-  check_openfoam
-  check_calculix
-  check_fea
-  check_video
+  trap mark_failed_on_exit EXIT
+  local step
+  for step in "xfoil:XFOIL" "openfoam:OpenFOAM" "calculix:CalculiX" "fea:the Python tools for FEA and design" "video:the flow video tools"; do
+    SETUP_STAGE="${step%%:*}"
+    set_status running "$SETUP_STAGE" "Checking ${step#*:}"
+    case "$SETUP_STAGE" in
+      xfoil) check_xfoil ;;
+      openfoam) check_openfoam ;;
+      calculix) check_calculix ;;
+      fea) check_fea ;;
+      video) check_video ;;
+    esac
+  done
 }
 
 # The part of a Docker install that needs root: Docker itself, and the docker group for the user.
@@ -413,7 +432,7 @@ do_install_user() {
   SETUP_STAGE=checks
   set_status running checks "Checking the solvers"
   # Run from the setup folder, which the wrapper mounts, so the script and its helpers are there.
-  (cd "$SCRIPT_DIR" && "$ICARUS_HOME/bin/icarus-exec" bash ./setup.sh --check-tools)
+  (cd "$SCRIPT_DIR" && "$ICARUS_HOME/bin/icarus-exec" bash ./setup.sh --check-tools --home "$ICARUS_HOME")
 
   set_status completed done "Ready"
   log "Docker work station ready (image $image)"
@@ -440,6 +459,45 @@ do_install() {
     fi
   fi
   do_install_user
+}
+
+# Stops an install that is running and removes the solver image it built (Docker itself stays).
+# Run by the app's Cancel button; it waits for the install to end so that nothing overwrites the
+# "cancelled" status written last.
+do_cancel() {
+  local pattern='[s]etup\.sh --install-(system|user)' pid group mine
+  mine="$(ps -o pgid= -p $$ | tr -d ' ')"
+  log "Stopping setup"
+  for signal in TERM KILL; do
+    for pid in $(pgrep -f "$pattern" || true); do
+      # The install was started with setsid, so its docker build and apt share its process group.
+      group="$(ps -o pgid= -p "$pid" 2> /dev/null | tr -d ' ')"
+      if [[ -n "$group" && "$group" != "$mine" ]]; then
+        kill -"$signal" -- "-$group" 2> /dev/null || true
+      fi
+    done
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      pgrep -f "$pattern" > /dev/null || break
+      sleep 0.5
+    done
+    pgrep -f "$pattern" > /dev/null || break
+  done
+  if command -v docker > /dev/null && docker info > /dev/null 2>&1; then
+    local images image
+    images="$(docker image ls --format '{{.Repository}}:{{.Tag}}' "$IMAGE_REPO" 2> /dev/null)"
+    for image in $images; do
+      docker ps -q --filter "ancestor=$image" | xargs -r docker kill > /dev/null 2>&1 || true
+    done
+    # shellcheck disable=SC2086
+    [[ -z "$images" ]] || docker rmi -f $images > /dev/null 2>&1 || true
+    [[ -z "$images" ]] || log "Removed the solver image(s): $images"
+  fi
+  rm -f "$RUNTIME_FILE"
+  if pgrep -f "$pattern" > /dev/null; then
+    set_status failed cancel "Setup couldn't be stopped: part of it runs as root. Try again once it finishes."
+  else
+    set_status cancelled cancel "Setup was cancelled and the solver image removed."
+  fi
 }
 
 do_uninstall() {
@@ -548,7 +606,7 @@ TARGET_USER=""
 args=("$@")
 for ((i = 0; i < ${#args[@]}; i++)); do
   case "${args[i]}" in
-    --install | --install-native | --install-system | --install-user | --check-tools | --uninstall)
+    --install | --install-native | --install-system | --install-user | --check-tools | --cancel | --uninstall)
       action="${args[i]}" ;;
     --yes) ASSUME_YES=1 ;;
     --purge) PURGE=1 ;;
@@ -565,6 +623,7 @@ case "$action" in
   --install-system) do_install_system ;;
   --install-user) do_install_user ;;
   --check-tools) check_tools ;;
+  --cancel) do_cancel ;;
   --uninstall) do_uninstall ;;
   *) usage >&2; exit 2 ;;
 esac
