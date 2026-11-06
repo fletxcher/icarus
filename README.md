@@ -506,7 +506,7 @@ machine can't be reached the record stays with the reason, and the person can tr
 you@example.com` adds three made-up machines (hosts under `example.invalid`; `--remove` takes them
 away).
 
-Adding a machine takes an address (`user@host`, or `user@host:port`), a check of the machine's SSH
+Adding a machine takes a user, an IP or host and a port (side by side in one row), a check of the machine's SSH
 host key, and the machine's password. The backend fetches the host key, the person approves its
 fingerprint, and it's then pinned: the backend connects only to a machine presenting it. With the
 password, the backend logs in once, adds an ed25519 key it made itself to `~/.ssh/authorized_keys`

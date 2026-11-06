@@ -73,15 +73,6 @@ const KEY_HELP = `ssh-keygen -t ed25519 -f ~/.ssh/icarus -N ""
 cat ~/.ssh/icarus.pub >> ~/.ssh/authorized_keys
 cat ~/.ssh/icarus`;
 
-/** `user@host` or `user@host:port`. */
-function parseAddress(text: string) {
-  const match = text.trim().match(/^([^@\s]+)@([A-Za-z0-9][A-Za-z0-9.-]*)(?::(\d{1,5}))?$/);
-  if (!match) return null;
-  const port = match[3] ? Number(match[3]) : 22;
-  if (port < 1 || port > 65535) return null;
-  return { username: match[1], host: match[2], port };
-}
-
 /** Adds a machine: its address, a check of its fingerprint, and its password. Icarus makes its
  * own key and adds it with the password, which is used once, and then sets the machine up. */
 function ConnectForm({
@@ -93,7 +84,9 @@ function ConnectForm({
   onCancel?: () => void;
 }) {
   const [name, setName] = useState("");
-  const [address, setAddress] = useState("");
+  const [username, setUsername] = useState("");
+  const [host, setHost] = useState("");
+  const [port, setPort] = useState("22");
   const [hostKey, setHostKey] = useState<HostKey | null>(null);
   const [approved, setApproved] = useState(false);
   const [password, setPassword] = useState("");
@@ -103,12 +96,20 @@ function ConnectForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const target = parseAddress(address);
+  const portNumber = Number(port);
+  const target =
+    username.trim() !== "" &&
+    host.trim() !== "" &&
+    Number.isInteger(portNumber) &&
+    portNumber >= 1 &&
+    portNumber <= 65535
+      ? { username: username.trim(), host: host.trim(), port: portNumber }
+      : null;
   const ownKey = privateKey.trim() !== "";
 
   // Changing where to connect invalidates the fingerprint that was looked up.
-  function editAddress(value: string) {
-    setAddress(value);
+  function edit(change: () => void) {
+    change();
     setHostKey(null);
     setApproved(false);
     setError(null);
@@ -160,7 +161,9 @@ function ConnectForm({
     </Button>
   );
   const canConnect =
-    approved && !busy && (ownKey ? privateKey.trim().length >= 32 : password !== "");
+    approved &&
+    !busy &&
+    (ownKey ? privateKey.trim().length >= 32 : password !== "");
 
   return (
     <form
@@ -185,17 +188,42 @@ function ConnectForm({
           autoComplete="off"
         />
       </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor="ws-address">Address</Label>
-        <Input
-          id="ws-address"
-          value={address}
-          onChange={(event) => editAddress(event.target.value)}
-          onBlur={() => void lookUp()}
-          placeholder="ubuntu@192.168.1.20 (add :port if it isn't 22)"
-          autoComplete="off"
-          spellCheck={false}
-        />
+      <div className="grid grid-cols-[1fr_2fr_5rem] gap-2">
+        <div className="grid gap-1.5">
+          <Label htmlFor="ws-user">User</Label>
+          <Input
+            id="ws-user"
+            value={username}
+            onChange={(event) => edit(() => setUsername(event.target.value))}
+            onBlur={() => void lookUp()}
+            placeholder="ubuntu"
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="ws-host">IP or host</Label>
+          <Input
+            id="ws-host"
+            value={host}
+            onChange={(event) => edit(() => setHost(event.target.value))}
+            onBlur={() => void lookUp()}
+            placeholder="192.168.1.20"
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="ws-port">Port</Label>
+          <Input
+            id="ws-port"
+            value={port}
+            onChange={(event) => edit(() => setPort(event.target.value))}
+            onBlur={() => void lookUp()}
+            inputMode="numeric"
+            autoComplete="off"
+          />
+        </div>
       </div>
 
       {hostKey && (
@@ -262,14 +290,16 @@ function ConnectForm({
                     {KEY_HELP}
                   </pre>
                   <p className="mt-1">
-                    Then paste what the last command prints. Setup then needs
-                    to be started from the machine&apos;s card.
+                    Then paste what the last command prints. Setup then needs to
+                    be started from the machine&apos;s card.
                   </p>
                 </details>
               </div>
               {ownKey && (
                 <div className="grid gap-1.5">
-                  <Label htmlFor="ws-pass">Key passphrase (if it has one)</Label>
+                  <Label htmlFor="ws-pass">
+                    Key passphrase (if it has one)
+                  </Label>
                   <PasswordInput
                     id="ws-pass"
                     value={passphrase}
