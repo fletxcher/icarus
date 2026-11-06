@@ -5,6 +5,7 @@ import {
   CheckIcon,
   LoaderCircleIcon,
   PlusIcon,
+  SearchIcon,
   ServerIcon,
   Trash2Icon,
   XIcon,
@@ -457,6 +458,7 @@ export function WorkstationPanel() {
   const [checks, setChecks] = useState<WorkstationCheck[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [query, setQuery] = useState("");
 
   const reload = useCallback(async () => {
     try {
@@ -521,6 +523,15 @@ export function WorkstationPanel() {
 
   const machines = overview.workstations;
   const noStorage = !overview.storage_available;
+  // Matches what a card shows: its name, CPU and GPU.
+  const needle = query.trim().toLowerCase();
+  const shown = needle
+    ? machines.filter((machine) =>
+        [machine.name, machine.hardware.cpu_model, machine.hardware.gpu]
+          .filter(Boolean)
+          .some((text) => text!.toLowerCase().includes(needle)),
+      )
+    : machines;
 
   if (adding || machines.length === 0)
     return (
@@ -551,8 +562,35 @@ export function WorkstationPanel() {
           isn&apos;t set.
         </p>
       )}
+      <div className="flex items-center justify-between gap-3">
+        <div className="relative w-full max-w-xs">
+          <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search machines"
+            aria-label="Search machines"
+            className="pl-8"
+            autoComplete="off"
+          />
+        </div>
+        <Button
+          variant="outline"
+          disabled={noStorage}
+          onClick={() => setAdding(true)}
+          className="shrink-0"
+        >
+          Add <PlusIcon />
+        </Button>
+      </div>
+      {shown.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          No machine matches &ldquo;{query.trim()}&rdquo;.
+        </p>
+      )}
       <ul className="grid gap-3" aria-label="Machines">
-        {machines.map((machine) => (
+        {shown.map((machine) => (
           <MachineCard
             key={machine.id}
             machine={machine}
@@ -595,15 +633,6 @@ export function WorkstationPanel() {
           />
         ))}
       </ul>
-      <div>
-        <Button
-          variant="outline"
-          disabled={noStorage}
-          onClick={() => setAdding(true)}
-        >
-          Add <PlusIcon />
-        </Button>
-      </div>
       {checks && <CheckList checks={checks} />}
     </div>
   );
