@@ -1,30 +1,32 @@
 # Icarus
 
 An AI engineering assistant for airfoil analysis and design. Describe what you need (a NACA
-profile, a polar at some Reynolds number, a CFD run) and Icarus runs the real solvers
-and shows its reasoning, every tool call with its result, and the answer.
+profile, a polar at some Reynolds number, a CFD run, a bracket to design and check) and Icarus
+runs the real solvers and shows its reasoning, every tool call with its result, and the answer.
 
 - `frontend/`: Next.js + shadcn/ui chat interface
-- `backend/`: FastAPI service that stores chats in MongoDB and runs a LangGraph agent
-  (Mistral) with tools for XFOIL analyses and CFD simulations on the simulation work station
-- `workstation/`: scripts that set up and run the solvers on the simulation work station
+- `backend/`: FastAPI service that stores chats in MongoDB and runs a LangGraph agent with tools
+- `workstation/`: scripts and the Docker image that run the solvers on a remote machine
 
 Configuration for both lives in the `.env` at the repo root.
 
-## Solvers and tools
+## What it can do
 
 | Tool | Used for | Links |
 |---|---|---|
 | XFOIL | Fast 2D airfoil polars | [Home page](https://web.mit.edu/drela/Public/web/xfoil/) |
-| OpenFOAM (ESI) | CFD: incompressible flow around airfoils and bluff bodies | [openfoam.com](https://www.openfoam.com) · [Documentation](https://www.openfoam.com/documentation) · [User guide](https://www.openfoam.com/documentation/user-guide) · [Source](https://develop.openfoam.com/Development/openfoam) |
-| CalculiX | Open source finite element solver (structural and thermal) | [calculix.de](https://www.calculix.de) · [Solver author's page](http://www.dhondt.de) |
+| OpenFOAM (ESI) | 2D and 3D CFD (incompressible RANS) | [openfoam.com](https://www.openfoam.com) · [Documentation](https://www.openfoam.com/documentation) |
+| CalculiX | Finite element analysis (structural and thermal) of uploaded solids | [calculix.de](https://www.calculix.de) |
 | gmsh | Meshing for the CFD cases | [gmsh.info](https://gmsh.info) |
 | ParaView, ffmpeg | Flow images and video | [paraview.org](https://www.paraview.org) · [ffmpeg.org](https://ffmpeg.org) |
+| build123d | Designing parts from code | [build123d](https://github.com/gumyr/build123d) |
 
-All of them are installed on the work station by `workstation/setup.sh` (see
-[Setting up a work station](#simulation-work-station)).
+Plots are drawn from Plotly specs, and users can attach text, CSV, STL, OBJ, STEP and PDF files.
+Simulations run on a machine the user connects; the chat is told when a job ends.
 
-## Frontend
+## Running it
+
+**Frontend**
 
 ```bash
 cd frontend
@@ -32,663 +34,101 @@ npm install
 npm run dev   # http://localhost:3000
 ```
 
-The frontend talks to the backend at `NEXT_PUBLIC_API_URL` (default
-`http://localhost:8000`), read from the root `.env` by `next.config.ts`. It renders each
-reply as it streams: the model's reasoning, every tool call with its arguments, status
-and result, then the answer.
-
-**Where you land.** `frontend/proxy.ts` runs before any page is sent: a browser holding the
-session cookie goes straight to the app (opening on a new chat, not the last one) and is taken
-off `/login` and `/signup`; one without goes to `/login`. It only checks that the cookie is
-there. If the session behind it has expired, the app finds out when it asks the API (401),
-signs the stale cookie out and returns to the login page, and if the API can't be reached it says
-so with a "Try again" button instead of treating that as being signed out (which would bounce
-between the pages). Cookies are shared by every port of a host, so this works with the API on
-`localhost:8000` and with the API on the same domain; with `NEXT_PUBLIC_API_URL` pointing at
-another site the proxy stands aside and the pages do the same check by asking the API. Moving
-between the chat and a simulation's page keeps the chat you were in; a page load or signing
-in opens a new one.
-
-## Backend
+**Backend**
 
 ```bash
 cd backend
 uv sync
 uv run api   # http://localhost:8000, docs at /docs
-uv run uvicorn api.app:app --reload
 ```
 
-Every setting is in `backend/src/api/config.py`. The API starts without any model
-provider key; chat storage works and sending a message returns 503 until one is set.
+Every setting is in `backend/src/api/config.py`. The API starts without a model provider key;
+sending a message returns 503 until one is set.
 
-### Signing in with Google
+Main `.env` settings:
 
-The login and signup pages offer "with Google", which is disabled until the server has a Google
-OAuth client. To set one up:
-
-1. In the [Google Cloud console](https://console.cloud.google.com/apis/credentials), configure the
-   OAuth consent screen (scopes `openid`, `email`, `profile`; while the app is in "Testing", add the
-   accounts allowed to sign in as test users), then create an **OAuth client ID** of type
-   **Web application**.
-2. Add the authorised redirect URI `{API_PUBLIC_URL}/api/auth/google/callback` (locally
-   `http://localhost:8000/api/auth/google/callback`) and, for the JavaScript origin, the frontend's
-   address.
-3. Put the client id and secret in `.env` as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, with
-   `API_PUBLIC_URL` and `FRONTEND_URL` set to where browsers reach the API and the frontend, and
-   restart the API.
-
-The flow is the authorization-code flow with PKCE and a random `state`, both kept in a short-lived
-`HttpOnly` cookie between leaving for Google and coming back (`GET /api/auth/google/login`, then
-`/google/callback`). The API trades the code for Google's profile itself, then signs the person in with
-the same session cookie a password login sets, and sends the browser to the app; any failure goes
-back to `/login?error=` with a message. Google's id for the person (`sub`) is stored as an
-`identities` entry, so a changed Google email still finds the account. A first sign-in with an email
-that has no account creates one without a password; one that matches an existing account **adds
-Google to that account**, on the strength of Google having verified the address. Accounts made
-with a password aren't email-verified here, so someone who registered an address they don't own
-could keep password access to the account its real owner later signs into with Google.
-Unverified Google emails are refused. `GET /api/auth/providers` says whether the button is on.
-
-### MongoDB: local or remote
-
-`MONGODB_TARGET` is `local` (default) or `remote` and picks which connection is used:
-`MONGODB_LOCAL_URI` / `MONGODB_LOCAL_NAME`, or `MONGODB_REMOTE_URI` /
-`MONGODB_REMOTE_NAME` (e.g. MongoDB Atlas; the URI carries the credentials, and
-`remote` without it refuses to start). The startup log shows which one is in use. Tests
-always use the local one.
-
-#### Local MongoDB
-
-The `icarus-db` container doesn't publish its port, so `localhost:27017` won't reach it.
-Either recreate it with `-p 27017:27017`, or point `MONGODB_LOCAL_URI` at the container's IP
-(`docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' icarus-db`),
-which can change when the container restarts. The container stores data in an anonymous
-volume, so mount that volume explicitly if you recreate it and want to keep the data.
-
-### Logging
-
-Every log line carries the id of the HTTP request that produced it (also returned as
-the `X-Request-ID` response header). Logged:
-
-- each request and response: method, path, status, duration and bodies (streamed
-  responses are summarized), plus the traceback of any unhandled error;
-- each agent turn, model call (duration, token usage, tools requested) and tool call
-  (arguments, result or traceback, duration);
-- commands run locally or on the work station (exit code, duration, stderr on failure) and CFD
-  job status changes.
-
-`LOG_LEVEL` (default `INFO`) and `LOG_BODY_MAX_CHARS` (default 2000, longer payloads are
-truncated) control it.
-
-### Layout
-
-```
-backend/src/api/
-  app.py              FastAPI app, lifespan (Mongo + services), /api/health, /api/models
-  config.py           Settings from env vars / the repo-root .env
-  log_config.py       Logging setup (request ids on every line)
-  middleware.py       Request/response logging
-  db.py               Mongo client and indexes
-  services.py         Builds the shared services at startup
-  claim_data.py       `uv run claim-data <email>`: gives pre-accounts chats, files and simulations to an account
-  auth/               Users + sessions: schemas, password hashing, user repository, /api/auth/signup, /login, /me and /logout
-  credentials/        Users' own model keys and work station: vault (encryption), repository, SSH checks, /api/credentials
-  chats/              Threads + messages: schemas, repository, routes
-  agent/
-    graph.py          LangGraph graph: agent node <-> tool node loop
-    tools.py          Agent tools (XFOIL polar, NACA search, CFD submit/status)
-    stream.py         Runs one turn, streams SSE events, persists the reply
-    logging_callbacks.py  Logs model and tool calls
-    prompts.py        System prompt
-    models.py         Selectable models and the provider keys that enable them
-    factory.py        Builds one user's agent from their keys and work station
-    capabilities.py   Which tools can run, and why not
-  compute/
-    runner.py         CommandRunner: LocalRunner (this server) / SSHRunner (work station)
-    pool.py           Each user's work station: their own, or the shared one
-    xfoil.py          XFOIL script builder, polar parser, XfoilService
-    simulations.py    CFD job submission and polling
-    router.py         /api/simulations
-workstation/setup.sh     Prepares (or cleans up) a fresh simulation work station
-workstation/run_cfd2d.sh, cfd2d_case.py  2D CFD entrypoint and its case builder (gmsh, simpleFoam / pimpleFoam, results)
-workstation/run_cfd3d.sh, cfd3d_case.py  3D CFD entrypoint and its case builder (snappyHexMesh, simpleFoam, results)
-workstation/run_fea.sh, fea_case.py      FEA entrypoint and its case builder (mesh, CalculiX deck, results)
-workstation/run_calculix.sh              Runs one CalculiX input deck; run_fea.sh calls it
-workstation/cad_build.py  Runs the agent's build123d code and writes the part (STL) and its report
-```
-
-### API
-
-Everything except `/api/auth/signup`, `/login`, `/logout` and `/api/health` needs a signed-in user (401
-otherwise), and chats, files and simulations belong to the user who made them: anyone else gets a 404.
-
-| Method | Path | |
-|---|---|---|
-| POST | `/api/auth/signup` | Create an account `{name, email, password}` (password 8–128 characters, stored as an Argon2id hash); 409 if the email is taken. Doesn't sign in |
-| POST | `/api/auth/login` | Sign in `{email, password}`: starts a session and sets the HttpOnly `icarus_session` cookie (30 days); 401 for any wrong email or password |
-| GET | `/api/auth/me` | The signed-in user (from the session cookie); 401 if nobody is |
-| PATCH | `/api/auth/me/preferences` | Save the reply language `{language}` (`en`, `es`, … or null) |
-| POST | `/api/auth/logout` | End the session and clear the cookie (204, also when not signed in) |
-| GET | `/api/credentials` | The user's saved model keys (last 4 characters only) and machines (name, cores, CPU, GPU, whether connected), and what the server supplies by default |
-| PUT / DELETE | `/api/credentials/model-keys/{provider}` | Save `{api_key}` for `mistral` or `openrouter` (checked with the provider first), or remove it |
-| POST | `/api/credentials/workstation/host-key` | Look up a machine's SSH host key `{host, port}` so the person can approve its fingerprint |
-| PUT | `/api/credentials/workstation` | Add a machine `{name?, host, port, username, private_key, passphrase?, host_key, workdir?}` (or replace one with `id`): install the runner scripts, save it and connect it; returns what's installed there and the machine's hardware |
-| POST | `/api/credentials/workstation/check` | Re-check the connected machine |
-| POST | `/api/credentials/workstations/{id}/connect`, `/disconnect` | Make a saved machine the one jobs run on (any other is disconnected), or disconnect it (204) |
-| DELETE | `/api/credentials/workstations/{id}` | Remove a machine: 202 and a background cleanup, then it's forgotten. `?force=true` forgets it at once (204) |
-| GET | `/api/threads` | List the user's threads, newest first |
-| POST | `/api/threads` | Create a thread `{title}` |
-| GET | `/api/threads/{id}` | Thread with messages |
-| PATCH | `/api/threads/{id}` | Rename / pin `{title?, pinned?}` |
-| DELETE | `/api/threads/{id}` | Delete thread and messages |
-| DELETE | `/api/threads/{id}/messages/{message_id}` | Delete a message and all later ones |
-| POST | `/api/threads/{id}/messages` | Send `{content, model?, attachments?, language?}` and stream the reply (SSE) |
-| POST | `/api/files` | Upload a text file (multipart `file`) to attach; returns its id |
-| DELETE | `/api/files/{id}` | Remove a file that hasn't been sent yet |
-| GET | `/api/simulations/usage` | CFD runs started in the last 7 days, 30 days and ever, with outcomes, shapes and approximate time |
-| GET | `/api/status` | Checks the database, model provider, XFOIL and the work station (the help dialog's connection status) |
-| GET | `/api/simulations/{job_id}` | CFD job status (refreshes from the work station) |
-| GET | `/api/models`, `/api/health` | |
-
-**Edit** a message: delete from it, then POST the new content.
-**Regenerate** a reply: delete from the reply, then POST `{}` (no content).
-
-#### Streaming events
-
-`POST /api/threads/{id}/messages` responds with `text/event-stream`:
-
-| Event | Data |
+| Setting | Purpose |
 |---|---|
-| `start` | `{message_id}` |
-| `reasoning` | `{text}` |
-| `token` | `{text}` |
-| `tool_call` | `{id, name, args}` |
-| `tool_result` | `{id, name, status, content}` (status `success` or `error`) |
-| `title` | `{title}` (first message of a chat only; sent before `start` when ready within 5 s) |
-| `done` | `{message_id}` |
-| `error` | `{message}` |
+| `MISTRAL_API_TOKEN`, `OPENROUTER_API_KEY`, `OLLAMA_BASE_URL` | Model providers. Users can also add their own keys in Settings |
+| `DEFAULT_MODEL` | Model chosen when the user doesn't pick one |
+| `MONGODB_TARGET` | `local` (default) or `remote`, with `MONGODB_LOCAL_URI` / `MONGODB_REMOTE_URI` and the matching `_NAME` |
+| `CREDENTIALS_KEY` | Encrypts users' saved keys and SSH keys. Keep a copy: losing it makes them unreadable |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional "Sign in with Google" (see below) |
+| `XFOIL_RUNNER` | `ws` (a connected machine) or `local` (this server, needs `xfoil` and `xvfb`) |
+| `ALLOW_PRIVATE_WORKSTATIONS` | Set `false` on a public server to refuse private network addresses |
 
-The assistant message is saved as `streaming`, then finalized as `done`, `stopped`
-(client disconnected) or `error`. Its `parts` record the turn in order: `reasoning`,
-`tool` (args, status, result) and `text`; `content` holds the answer text alone.
+Generate a credentials key with
+`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
 
-A failing tool doesn't end the turn: the error goes back to the model as the tool's
-result so it can explain or retry.
+**Sign in with Google.** In the [Google Cloud console](https://console.cloud.google.com/apis/credentials)
+create an OAuth client ID of type *Web application* with the redirect URI
+`{API_PUBLIC_URL}/api/auth/google/callback` (locally `http://localhost:8000/api/auth/google/callback`),
+put the id and secret in `.env`, and set `API_PUBLIC_URL` and `FRONTEND_URL`. While the consent
+screen is in "Testing", add the allowed accounts as test users.
 
-The agent is rebuilt from stored messages each turn, so edits and regenerations apply
-naturally. Reasoning and tool calls from earlier turns aren't replayed; their outcomes
-live in the assistant's text.
+**MongoDB.** A local MongoDB or a remote one such as Atlas both work. A local `icarus-db`
+container doesn't publish its port by default, so start it with `-p 27017:27017`.
 
-### Database
+## Connecting a machine
 
-MongoDB, database `MONGODB_LOCAL_NAME` or `MONGODB_REMOTE_NAME`. IDs are UUID strings and dates are timezone-aware UTC.
+Icarus runs simulations on a machine the user already owns, reached over SSH. It doesn't run them on
+the server or on the computer the browser is on. The machine must be Linux (x86-64 or ARM64) with at
+least 4 GB of memory and 15 GB of free disk.
 
-Each collection's schema and indexes are written out in `database/<collection>.json`
-(`threads`, `messages`, `files`, `simulations`, `users`, `sessions`, `credentials`): a `$jsonSchema`
-validator, the indexes, and whether it's `enforced`. Those files are generated from the
-Python definitions (`backend/src/api/catalog.py`), which the backend reads, not the
-files. After changing a definition, run `uv run export-schemas` in `backend/`; a test
-fails if the files are out of date (`--check` does the same).
+In Settings → Work station, add a machine with its user, address, port and password, and approve its
+SSH fingerprint. The backend then:
 
-At startup the backend builds every index and, for the enforced collections (`users`,
-`sessions`, `credentials`), creates them with their validator or re-applies it, so a schema change
-reaches the database on the next start. The other four hold data from earlier versions of
-the app, so their schemas document what is written today and are checked by tests (every
-kind of document the app produces is inserted into a collection that enforces them), not
-by MongoDB.
+1. logs in once with the password and installs an SSH key it made itself, so the password isn't kept;
+2. pins the machine's host key, and connects only with that key from then on;
+3. copies the runner scripts to `~/icarus` and checks what's installed;
+4. offers **Set up this machine**, which installs Docker if needed and gets the solver image.
 
-| Collection | Holds |
-|---|---|
-| `threads`, `messages` | Chats and their messages (a reply's `parts`: reasoning, tool calls, text) |
-| `files` | Uploaded text files attached to messages |
-| `simulations` | CFD jobs submitted to the work station |
-| `users` | Accounts (validated) |
-| `sessions` | Signed-in browsers (validated) |
-| `credentials` | Each user's own model keys and work station, secrets encrypted (validated) |
+Users can save several machines and connect one at a time. Each job is saved with the machine it
+started on and stays there. Removing a machine cleans it up over SSH (removes the image, job folders
+and Icarus's key) before forgetting it.
 
-**`users`**: `email` (lowercase, unique), `email_verified_at`, `name`, `avatar_url`,
-`password_hash` (Argon2id; null for OAuth-only users), `identities` (`provider` +
-`subject`, unique across users), `role` (`user` / `admin`), `status` (`active` /
-`disabled`), `preferences` (`default_model`, `theme`), `created_at`, `updated_at`,
-`last_login_at`. The API returns `UserPublic`, which leaves out the hash and identities.
+Secrets (API keys, SSH private keys) are encrypted with `CREDENTIALS_KEY`, never returned by the
+API, and never logged. The setup password is used for the login and for `sudo` during setup and then
+discarded.
 
-**`credentials`**: one document per user, `kind` (`model_key` / `workstation`) and `name`
-(the provider, or `default`): `sealed` (the secret, encrypted) and `details` (what can be
-shown: a key's last 4 characters, or a machine's host, port, user, directory, host key and
-fingerprints).
+### The solver image
 
-`threads`, `files` and `simulations` carry the owner's `user_id`.
+All solvers run in one Docker image (`workstation/Dockerfile`), tagged
+`icarus-solvers:<hash of the Dockerfile>`. Setup first tries to pull it from
+`ghcr.io/fletxcher/icarus-solvers` and builds it on the machine only if the pull fails (set
+`ICARUS_REGISTRY=none` to always build).
 
-**`sessions`**: `user_id`, `token_hash`, `created_at`, `last_seen_at`, `expires_at`,
-`revoked_at`, `user_agent`, `ip`. The browser cookie holds a random token; only its
-SHA-256 hash is stored (unique), so a database leak doesn't expose live sessions.
-MongoDB deletes a session after `expires_at` (TTL index), and `(user_id, created_at)` is
-indexed for listing or revoking a user's sessions.
+The `solver-image` GitHub workflow builds and publishes the image whenever `workstation/Dockerfile`
+changes, or on demand from the Actions tab (ARM64 is optional, because it's slow). The package needs to
+be public so machines can pull it without a login.
 
-The models are in `backend/src/api/auth/schemas.py` (what the app reads and writes) and
-mirrored as validators in `definitions.py`, so the database itself rejects bad roles,
-uppercase emails, unknown fields and so on. Tests insert documents from the models into
-a validated collection to keep the two in step.
-
-### Tools and what the model knows about them
-
-Tools are only given to the model when they can actually run, checked at startup:
-
-| Tool | Available when |
-|---|---|
-| `create_plot` | always |
-| `run_xfoil_polar`, `search_naca4_airfoils` | `XFOIL_RUNNER=local` with `xfoil` (and `xvfb-run` unless `XFOIL_DISPLAY=none`) installed, or `XFOIL_RUNNER=ws` with a work station |
-| `create_geometry`, `export_geometry` | a work station is configured, with `build123d` in its Python environment (`setup.sh --install` adds it) |
-| `submit_cfd_simulation`, `submit_fea_simulation`, `submit_cfd3d_simulation`, `get_simulation_status` | a work station is configured (`WS_HOST`, or the user's own) |
-
-The system prompt lists the available tools and names each missing capability with the
-reason, and tells the model to say plainly when something isn't available instead of
-attempting it or inventing tools. The startup log shows which tools are active and why
-others aren't. A call to a tool that doesn't exist comes back to the model as an error.
-
-### Telling the chat when a simulation ends
-
-The agent never waits on or polls a simulation. A watcher in the backend (`compute/watcher.py`,
-every `SIMULATION_WATCH_S` seconds, default 10; 0 turns it off) looks at each job still going on
-the work station, which costs no model tokens, and when one has ended it records the result and
-adds a **notice** to the chat that started the job (`role: "notice"`, once per job: `notified_at`
-on the job is claimed atomically). The notice reads "Simulation <id> finished: it completed after
-about 2 min 13 s", followed by the job's inputs and results. It is part of the chat's history, so
-the next time the user writes, the agent already has the outcome (a notice and the user's message
-are sent to the model as one message), and the chat shows it as a card with **Open simulation**
-and **Discuss the results**; the latter makes the assistant answer from the notice without the
-user typing anything (`POST /api/threads/{id}/messages` with no content works when the last
-message is a notice). Each turn also tells the agent which of the chat's simulations are still
-running and for how long, so it can answer "is it done?" itself. The page notices a job ending
-too: a toast, and the open chat reloads so the notice shows without a refresh. A job that ends
-while the work station can't be reached is picked up on the next pass that can; a job started
-outside a chat has no chat to tell.
-
-### FEA on an uploaded solid
-
-`submit_fea_simulation` analyses an STL the user attached (the model takes the file's id from
-the attachment, which is shown to it with the file's summary; only the user's own files work).
-The job is `case.json` plus `geometry.stl` on the work station, run by `run_fea.sh`:
-
-1. **Mesh** (`fea_case.py mesh`): repairs the surface (zero-area and doubled triangles go; open or
-   non-manifold edges are reported) and meshes it with [fTetWild](https://github.com/wildmeshing/fTetWild),
-   which copes with the self-intersections common in 3D-print STLs that gmsh and TetGen reject.
-   The tetrahedra become second-order (C3D10) elements. The mesh is coarsened until it fits the
-   solver (`ICARUS_FEA_MAX_ELEMENTS`, default 70,000), and says so.
-2. **Deck** (`fea_case.py deck`): the part is clamped on its lowest or highest face along an axis;
-   loads are rotation (`CENTRIF`), a uniform surface pressure and, with a gas temperature, convection
-   on the whole surface (a steady coupled temperature and stress analysis). Materials (Inconel 718,
-   Ti-6Al-4V, aluminium 7075, steel 4340) have typical handbook properties that vary with temperature.
-3. **Solve** with CalculiX (`run_calculix.sh`), plus a second run for natural frequencies if asked
-   (stiffened by the rotation).
-4. **Results** into `status.json`: displacement, peak and typical von Mises stress, safety factor on
-   yield (with the temperature-dependent yield strength), temperatures, frequencies against engine
-   orders, mass, and warnings (service temperature, yielding, resonance, a coarse mesh).
-
-**3D views.** `fea_case.py results` also writes `view.json`: the part's outside (triangles of the
-mesh's corner nodes, wound outward) with the von Mises stress (averaged to the nodes), displacement
-vectors and, with a gas temperature, the temperature on it, as base64 float32 arrays. The job's page
-draws it with three.js (`components/chat/model-viewer.tsx`): drag to turn, scroll to zoom, choose the
-field and colour palette, exaggerate the deformation, and switch between a colour range that
-leaves out the top 2% (a clamp's stress spike would otherwise set the scale) and the full one. While
-a job runs, the page shows the uploaded STL itself, and any attached `.stl` has a 3D button that opens
-it (`GET /api/files/{id}/original` serves the bytes back to their owner). CFD jobs keep their rendered
-images and flow video.
-
-The support is the solid's own extreme face along the chosen axis, taken from the STL rather than
-the mesh (the mesher may move the surface by a fraction of a millimetre), and a job is refused if
-no flat face lies there. A displacement over a quarter of the part's size is flagged as not believable.
-
-Stress at the clamp is an artefact of clamping, so results are reported both anywhere and away from it
-(more than 10% of the part's length from the support). Creep, fatigue, contact and a real support
-(a dovetail, say) aren't modelled. The mesher needs numpy, scipy, pyvista and pytetwild, which `setup.sh`
-puts in `~/icarus/venv`. FEA jobs appear in the simulations list and have their own page.
-
-### Designing parts
-
-`create_geometry` takes build123d Python code from the model, builds it on the work station
-(`workstation/cad_build.py`, in the same Python environment as the FEA mesher) and keeps the part
-as an ordinary STL file in the chat, together with the code. The FEA and 3D CFD tools take its id as
-`geometry_file_id` like an upload, so "design a bracket, then check it" needs no hand-off. The chat shows
-the part in 3D (the same viewer as uploads), the code, and a format menu with a download button.
-
-**Export formats** are STEP, STL, 3MF, OBJ, GLB and BREP. The part's card offers all of them, so the agent
-isn't to ask which one the user wants; it calls `export_geometry` only when the user names a format.
-STL downloads are the stored file; the other formats are built again from the code on the work
-station (`GET /api/designs/{id}/export?format=`), so they take a few seconds and need it reachable.
-
-**What the code can do.** `cad_build.py` refuses code that imports anything but build123d, math,
-numpy and a few standard modules, or that uses `open`, `eval`, `getattr` or dunder attributes, then runs
-it with CPU, memory and file-size limits (and no network, when the kernel allows an unprivileged
-network namespace; the report says whether it did). That check is hygiene against mistakes,
-not a security boundary: the work station is the user's own machine, and the design code runs
-as that user. A failed build returns the error with the line of the model's code, for it to fix.
-Units are millimetres, and a part must be one fused solid to be analysed (the report warns otherwise).
-
-### 3D CFD on an uploaded solid
-
-`submit_cfd3d_simulation` runs steady incompressible RANS (`simpleFoam`, k-omega SST with wall
-functions) around, or through, an uploaded STL. The job is `case.json` plus `geometry.stl`, run by
-`run_cfd3d.sh`: **mesh** (`cfd3d_case.py mesh`: a `blockMesh` box, then `snappyHexMesh` with surface
-and distance refinement), **solve** (`decomposePar`, `mpirun simpleFoam`), **results**
-(`foamToVTK` of the surfaces, then `cfd3d_case.py results`). Three domains:
-
-| Domain | Box and boundaries | Reports |
-|---|---|---|
-| `external` | 3 lengths upstream, 7 downstream, 2.5 to the sides; freestream far field | drag, cross force, moments, pressure and wall shear on the solid |
-| `passage` | one blade pitch wide, `cyclic` across it, slip at the ends of the span | the above plus total-pressure loss, flow turning and inlet/exit angles, mass balance |
-| `rotating` | a cylindrical MRF zone (`rotatingZone`) around the solid at `spin_rpm` | thrust, torque, shaft power, CT, CP, advance ratio, propulsive efficiency |
-
-Cavities and holes in the STL are filled into one outer envelope (`fill_cavities`), since the flow
-can't reach them. The mesh level (coarse, medium, fine) sets the refinement and the iteration count;
-each level has a cell budget (about 450k, 1M and 1.6M), and if the mesh overshoots it the mesher
-falls back to the next coarser level and says so; `ICARUS_NPROC` caps the solver's processes (4). `results` writes `view.json` like FEA's,
-with the surface pressure, pressure coefficient and wall shear stress for the job's 3D viewer.
-
-Limits, all repeated in the results' warnings: the solver is incompressible, so it warns above
-Mach 0.3; wall functions want y+ between 30 and 300; rotating cases are frozen-rotor (MRF), not
-unsteady; the pitch of a passage must be larger than the solid's own width in that direction (blades
-that overlap, such as a root block wider than the pitch, are refused); and a job needs numpy, scipy,
-pyvista and the OpenFOAM `snappyHexMesh` and `foamToVTK`.
-
-### Plots
-
-`create_plot` takes a Plotly figure spec (JSON with `data` traces and a `layout`), not
-code, so the same spec always draws the same plot and nothing runs on the server.
-Plotly's own validator checks every spec; invalid properties go back to the model as
-errors naming what to fix and showing the right shape. Free models make a few
-predictable mistakes, so these are repaired instead of failing (each retry costs a
-request): arrays wrapped as `{"item": [...]}`, numbers written as strings (`"42"`; only
-whole arrays of numeric strings convert, so category labels stay), and a figure sent as
-a JSON string, a bare list of traces or a single trace. Limits: 20 traces, 50,000
-points, 2 MB.
-
-The model gets a one-line summary; the validated figure is stored on the reply's tool
-part as `artifact` and drawn inline by the frontend (Plotly loads only when a chat has a
-plot). The app applies its own theme from a colorblind-validated palette, with separate
-light and dark steps: categorical colors in a fixed order, a one-hue sequential scale
-and a blue/gray/red diverging scale for fields. Specs' own templates, backgrounds and
-fonts are dropped. Each plot has a hover layer, a PNG download and a "Show data" table.
-Plot text doesn't render LaTeX, so the model is told to use Unicode and `<sub>`/`<sup>`.
-
-### Chat titles
-
-A new chat starts with its first message as a placeholder title. Alongside the first
-reply, the model is asked for a 2–6 word title as a `ChatTitle` tool call (free-text
-requests let `openrouter/free` route to safety classifiers that answer "safe"). It's
-saved and streamed as a `title` event ahead of the reply: the reply keeps generating
-but is held for up to 5 seconds so the title shows first, and a slower title follows
-as soon as it's ready. Renaming a chat stops this from ever replacing your
-title. It costs one extra model request per new chat; `AUTO_TITLE=false` turns it off.
-
-### Attachments
-
-The **+** button in the composer (or dropping files onto it) uploads files right away;
-they're sent with the next message, 10 at most. What reaches the model depends on the file:
-
-| File | The model gets | Limit |
-|---|---|---|
-| Text: airfoil `.dat`, `.csv`, `.txt`, `.json`, ... | The contents (a `.csv` also gets a one-line summary of its rows and columns) | `FILE_MAX_BYTES` (1 MB) |
-| `.stl` (binary or ASCII) | A measured summary: triangles, vertices, bounding box, surface area, volume, whether it's watertight | `FILE_MAX_BINARY_BYTES` (15 MB) |
-| `.obj` | Vertex, face and triangle counts, bounding box, object and material names | same |
-| `.step`, `.stp` | Name, schema, creating program, products, face and solid counts, length unit, approximate bounding box | same |
-| `.pdf` | The extracted text of the first 60 pages (a scanned PDF has none, which the model is told) | same |
-
-Geometry files aren't pasted into the prompt (a mesh is far too large to read); the summary says
-so, and the original bytes are stored with the file. Units aren't stored in STL and OBJ files, so the
-summary says that too. Files are checked by content as well as by name (a `.stl` that isn't an STL,
-or a password-protected PDF, is refused with the reason). Text is cut at `FILE_CONTEXT_MAX_CHARS`
-(20,000) characters per file in the model's context. The 15 MB limit comes from MongoDB's 16 MB
-document size. Files are stored in the `files` collection and deleted with their chat.
-
-### Models and reasoning
-
-Models are offered per provider, and only when a key for that provider exists: the server's
-(in `.env`) or the user's own (Settings, API keys). A user's own key replaces the
-server's for that provider only. `/api/models` and the model picker list just the models
-the signed-in user can use:
-
-| Key | Models |
-|---|---|
-| `MISTRAL_API_TOKEN` | `mistral-medium-3-5`, `mistral-small-latest` |
-| `OPENROUTER_API_KEY` | `openrouter/free` (routes to a free model; 50 requests a day, 1,000 after buying $10 of credits) |
-| `OLLAMA_BASE_URL` | whatever models that [Ollama](https://ollama.com) server has installed, as `ollama/<name>` |
-
-Ollama needs no key: a user gives the address of their server (Settings, API keys), the
-backend lists its installed models (`/api/tags`, refreshed every 30 s) and offers them.
-The models must support tool calling, and the server must be reachable from the backend
-(the same address rules as a work station apply, see `ALLOW_PRIVATE_WORKSTATIONS`).
-
-An agent turn makes several model requests (one per step plus the answer), so free
-quotas run out quickly. `DEFAULT_MODEL` picks the default; if it isn't available, the
-first available model is used, with a warning in the logs.
-
-Only providers whose thinking can stream into the chat are offered. `REASONING_EFFORT=high` (default)
-streams the model's thinking before its answer; `none` turns it off. Mistral sends thinking as content blocks and OpenRouter as
-`reasoning_content`; both stream as `reasoning` events.
-
-### Credentials: your own keys and remote machine
-
-Users bring their own model API keys and their own remote simulation machine (Settings → API
-keys, Settings → Work station). Without them they use what the server provides: the keys in
-`.env` and the shared work station (`WS_*`).
-
-**Storage.** Secrets (API keys, SSH private keys) are encrypted with Fernet under
-`CREDENTIALS_KEY` and kept in the `credentials` collection; each is sealed together with
-its owner and name, so a copied value is refused. No endpoint returns a secret: the API
-shows a key's last 4 characters and a machine's host, user and fingerprints. Make a key with
+To set a machine up by hand, run this on it:
 
 ```bash
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+./setup.sh --install     # installs Docker if needed, then gets the solver image
+./setup.sh --uninstall   # removes what an install added (asks before deleting job data)
 ```
 
-Losing `CREDENTIALS_KEY` makes saved credentials unreadable (they're then ignored and
-the user falls back to the server's). To rotate, put the new key first:
-`CREDENTIALS_KEY=<new>,<old>`. Without any key the app runs, but nothing can be saved.
-Request bodies of `/api/auth/*` and `/api/credentials*` are never logged.
+Everything that runs a solver goes through `bin/icarus-exec`, which runs the command in the container
+as the calling user.
 
-**Their remote machines.** A person can save several machines and connect one at a time. With
-none saved, Settings shows the form for adding one; otherwise it shows a card per machine (name,
-cores, CPU, GPU if any) with a *Connect* button that turns into *Disconnect*, and *Add +* for a new
-one. Adding connects the new machine. New jobs run on the connected machine. Each job is saved with
-the id of the machine it started on (`workstation_id`, or `shared` for the server's), and is watched,
-read, fetched and deleted there, so connecting or disconnecting another machine never moves it;
-jobs from before this was recorded use the connected machine. Removing a machine ends the jobs
-still running on it (they're marked failed).
+## How a simulation runs
 
-**Removing a machine** (the trash button) cleans it up in the background, then forgets it: over
-SSH with the machine's own key it runs `setup.sh --uninstall --purge --yes` (stops job containers,
-removes the solver image, the job folders, the setup copy and the Python environment; packages only
-if root is available without a password) and takes its key out of `~/.ssh/authorized_keys` (only
-lines holding that key). Only then do the record and the encrypted key leave the database. If the
-machine can't be reached the record stays with the reason, and the person can try again or
-*Remove anyway*, which skips the cleanup. For a look at the settings, `uv run seed-machines
-you@example.com` adds three made-up machines (hosts under `example.invalid`; `--remove` takes them
-away).
+Jobs are submit-and-poll, because they outlast any HTTP request: the backend writes `case.json` in a
+job folder on the machine and starts a script detached (`run_cfd2d.sh`, `run_cfd3d.sh` or
+`run_fea.sh`). The script keeps `status.json` up to date, and the backend reads it back. A watcher
+adds a notice to the chat when a job ends, so the agent never has to wait. Each job has its own
+page with progress, residuals, logs, results, images and flow video.
 
-Adding a machine takes a user, an IP or host and a port (side by side in one row), a check of the machine's SSH
-host key, and the machine's password. The backend fetches the host key, the person approves its
-fingerprint, and it's then pinned: the backend connects only to a machine presenting it. With the
-password, the backend logs in once, adds an ed25519 key it made itself to `~/.ssh/authorized_keys`
-and connects with that key from then on; the private key is kept encrypted, never shown, and the
-password is used for that login and for `sudo` during setup, and kept nowhere. (Under *Advanced* a
-person can give their own private key instead, which also skips the automatic setup.) The connection
-uses only that key (no agent, no `~/.ssh` of the server). Saving connects, creates `~/icarus` (or the
-chosen directory),
-puts the runner scripts and `setup.sh` there and, when the connection used a password and the
-machine lacks what Icarus needs, starts the setup in the background right away (a dialog shows the
-progress; if sudo rejects the password the machine stays connected with a note, and *Set up this
-machine* asks again). It reports what's installed (XFOIL, OpenFOAM, CalculiX,
-gmsh, ParaView, ffmpeg) along with the machine's hardware (cores, memory, disk, GPU, OS) and
-refuses machines that can't run Icarus; anything missing is installed with the setup button or by
-running `bash ~/icarus/setup/setup.sh --install` on the machine. The machine must be reachable over SSH from
-the server running the backend: Icarus connects to remote machines only, there's no mode that runs
-jobs on the computer the browser is on. For local development, a machine on `127.0.0.1` or the
-local network still works. `ALLOW_PRIVATE_WORKSTATIONS=false`
-refuses loopback, private and link-local addresses, which a server on the public internet
-should set. A job lives on the machine it started on; switching machines doesn't move it.
+## Deployment
 
-**Existing data.** Chats, files and simulations from before accounts have no owner and
-stay hidden until claimed: `uv run claim-data you@example.com` (add `--dry-run` to count).
+The root `vercel.json` deploys `frontend/` and `backend/` as two services on one domain (`/api/*` goes
+to the backend). In production leave `NEXT_PUBLIC_API_URL` and `CORS_ORIGINS` unset, use a remote
+MongoDB (`MONGODB_TARGET=remote`), set `CREDENTIALS_KEY` and `ALLOW_PRIVATE_WORKSTATIONS=false`, and
+use `XFOIL_RUNNER=ws`, since XFOIL can't be installed on Vercel. Vercel functions have a maximum
+duration, so long-running work (CFD, machine setup) must stay on the connected machine.
 
-### Simulation work station
-
-The backend reaches the shared work station over SSH (`WS_HOST`, `WS_USER`, `WS_SSH_KEY_PATH`). The work station's
-host key must be in `~/.ssh/known_hosts` (or `WS_KNOWN_HOSTS_PATH`).
-
-**CFD** jobs are submit-and-poll, since they outlast any HTTP request:
-
-1. The backend writes `{WS_WORKDIR}/jobs/{job_id}/case.json`.
-2. It launches `{WS_CFD_SCRIPT} {job_dir}` detached.
-3. The script keeps `{job_dir}/status.json` updated with
-   `{"status": "running" | "completed" | "failed", "result": {...}, "error": "..."}`.
-4. `get_simulation_status` / `GET /api/simulations/{id}` read it back into Mongo.
-
-`workstation/run_cfd2d.sh` implements that contract: gmsh meshes the case (one cell thick,
-boundary layer resolved to y+ ~ 1), `gmshToFoam` converts it, and OpenFOAM solves it on
-up to 4 cores with the k-omega SST model (laminar below Re 1000). `workstation/cfd2d_case.py` writes
-the mesh script and the OpenFOAM dictionaries from `case.json` and reads the results
-back; each step logs to `{job_dir}/log.<step>`, and a failure puts the end of that log in
-the job's `error`. The flow is incompressible, so `mach` is ignored (and flagged above
-Mach 0.3).
-
-| `shape` | Needs | Reference length | Default regime |
-|---|---|---|---|
-| `airfoil` | `naca` (4-digit, or 5-digit without reflex) | chord | steady (`simpleFoam`) |
-| `cylinder` | | diameter | transient (`pimpleFoam`) |
-| `ellipse` | `aspect_ratio` (length / height) | frontal height | transient |
-| `wedge` | `half_angle` (apex faces the flow) | base height | transient |
-| `rectangle` | `aspect_ratio` (length / height) | frontal height | transient |
-
-`regime` overrides the default. Steady runs stop when the residuals converge (or after
-2500 / 3500 / 5000 iterations for coarse / medium / fine meshes) and report the average of
-the last iterations; transient runs go to 80 convective times, average over the second
-half and report the Strouhal number when the lift oscillates. Results carry `cl`, `cd`,
-`cm` (per unit span, on the reference length), `history` for plotting, final residuals,
-the airfoil's y+, the cell count and `warnings`.
-
-**Simulations.** The chart icon at the top right opens a panel on the right (the count on
-it is the running jobs). It lists the running simulations, each with a progress bar, stage
-and time left, or "No simulations running", plus the most recent finished ones. Clicking
-one goes to its own page, `/simulations/<id>`, which has the full monitor: stages,
-progress, Courant number and live force-coefficient plots (Overview), residuals, setup
-(case, solver, mesh quality, the OpenFOAM dictionaries), the log tail and the results with
-the flow images and video. The trash button on that page asks for a confirmation and then
-takes the job off the list; nothing is deleted. The job keeps running if it was running,
-its results and files stay, and the page stays reachable (the button turns into *Show in
-list*). The simulation's card in the chat always links to its page, listed or not.
-`PATCH /api/simulations/{id}` with `{"hidden": true|false}` does it, and there is no
-endpoint that deletes a single job. A simulation is only really deleted with the chat it
-was started in: deleting the thread stops the job if it is running and removes its record and
-its files on the work station. The backend serves the rest from `GET /api/simulations` (the
-list), `/api/simulations/{id}/info`, `/progress?log_offset=&coeff_offset=` (only what is
-new since the offsets the last call returned) and
-`/files/velocity.png|pressure.png|flow.mp4`; these read the work station's logs over SSH
-through `workstation/cfd2d_case.py`.
-
-**Images and flow video.** With `video` on (the default), every run gets a
-`velocity.png` and a `pressure.png` (pressure coefficient) of the final flow field, and
-transient runs also get `flow.mp4`, the z-vorticity at every saved time step. Transient runs
-save a snapshot every 0.25 convective times, afterwards `foamToVTK` converts them and
-`workstation/render_video.py` (ParaView's `pvbatch` on a virtual display) draws them, zoomed on the
-body and its wake with fixed colour ranges, and ffmpeg encodes the video (25 fps). The
-Results tab shows them, and the result's `media` entry lists them. If ParaView or ffmpeg is
-missing or rendering fails, the job still completes and a warning says why (see
-`log.render`); the VTK files and frames are deleted afterwards. `log.results` records what
-was written to `status.json`.
-
-Wall conditions on the body (`wall_type`): `no_slip`, `slip`, `moving` (surface velocity
-`wall_velocity_x` / `wall_velocity_y` in freestream speeds) and `rotating` (a cylinder with
-`spin_ratio` = surface speed / freestream speed). `roughness_height` (fraction of the
-reference length) adds a rough-wall function and sizes the first cell for y+ ~ 30. The
-flow direction is rotated by `alpha`, so the farfield and mesh stay the same.
-
-#### Setting up a work station
-
-The solvers run in one Docker image built on the machine, so the machine only needs Docker. Copy
-`workstation/` to the machine (the app does this when a machine is connected) and run, as the user
-the backend connects as:
-
-```bash
-./setup.sh --install          # Docker mode: installs Docker if it's missing (asks for root), builds the solver image
-./setup.sh --install-native   # the older way: installs the tools with apt directly, no Docker
-./setup.sh --uninstall        # removes the image, packages and runner files an install added (asks before deleting job data)
-```
-
-The image (`workstation/Dockerfile`, tagged `icarus-solvers:<hash of the Dockerfile>`) is pulled from `ghcr.io/fletxcher/icarus-solvers` when that tag is published, and built on the machine otherwise (set `ICARUS_REGISTRY=none` to always build). The `solver-image` GitHub workflow builds and publishes it whenever the Dockerfile changes (or from the Actions tab, with ARM64 as an option); nothing is built on a developer machine. Make the package public once so machines can pull it without a login. It holds:
-
-| Tool | Notes |
-|---|---|
-| [XFOIL](https://web.mit.edu/drela/Public/web/xfoil/), `xvfb` | Fast 2D polars; runs under a virtual display |
-| [OpenFOAM](https://www.openfoam.com) | `OPENFOAM_PACKAGE` (default `openfoam2512`) from the official [apt repository](https://www.openfoam.com/download); about 1 GB |
-| [CalculiX](https://www.calculix.de) | `bin/run_calculix.sh <job_dir>` solves `<job_dir>/model.inp` and writes `model.dat`, `model.frd` and `log.ccx` |
-| gmsh, ParaView, ffmpeg | Meshing, flow images and video |
-| Python environment | numpy, scipy, pyvista, pytetwild and build123d, for meshing uploaded solids and for design |
-
-Everything that runs a solver goes through `bin/icarus-exec`. In Docker mode (`runtime.env` names the
-image) it runs the command in a container as the calling user, with the work directory and the
-current directory mounted at the same paths; otherwise it runs the command directly. The job
-scripts, XFOIL and the CAD builder all start through it, so they don't know which mode they're in.
-Jobs launched through it keep running when the SSH session closes, as before. The machine must be
-Linux on x86-64 or ARM64 with at least 4 GB of memory and 15 GB of free disk.
-
-**The setup button.** After a machine is connected, *Set up this machine* in Settings shows what
-will be installed and starts setup in the background on the machine (`setup.sh --install-system`
-for Docker and the docker group, then `--install-user` for the image, which needs no root). Progress
-comes from `~/icarus/setup.status` (a stage per step: Docker, runner scripts, solver image, then XFOIL,
-OpenFOAM, CalculiX, the Python tools and the video tools) and `setup.log`. The settings list the steps
-with a spinner on the one being worked on and a check mark on each finished one, also with the dialog
-closed, so the person can close the page and come back. A failed step shows the reason from the log
-(for example `XFOIL check FAILED`). *Cancel* in the dialog (`DELETE /api/credentials/workstation/setup`,
-which runs `setup.sh --cancel` on the machine) stops a running setup, including its docker build, and
-removes the solver image; Docker itself stays installed.
-Root comes from nothing if the user is root or already has Docker, `sudo -n` if sudo needs no
-password, otherwise the person types their sudo password once: it's checked with `sudo -S -v`, sent
-over the SSH channel's standard input to the one `sudo` that runs the root half, and never put in a
-command line, an environment variable, the database or a log (request bodies of `/api/credentials*`
-aren't logged). If the image changes with a new Dockerfile, *Check again* reports it out of date and
-setup builds the new one.
-
-Both actions look before they act. An install skips what's already there, and copies a runner
-file only when it's missing or has changed. `--uninstall` removes only what an install added, and
-only what's still present; it asks before deleting job folders and leaves anything else in `~/icarus`
-(the directory itself goes only if it ends up empty).
-
-**XFOIL** runs wherever `XFOIL_RUNNER` points (`ws` or `local`), through the same
-`CommandRunner` interface. One polar takes about a second, so CPU isn't the deciding
-factor. Running it on the work station is the default because serverless hosts (like Vercel)
-can't install the Fortran XFOIL binary. Use `local` when the API runs on a normal
-server or container with `xfoil` installed.
-
-Without a display, XFOIL must not open its plot window. The Debian/Ubuntu `xfoil`
-package crashes (SIGFPE) when its graphics are turned off, so by default
-(`XFOIL_DISPLAY=xvfb`) it runs under a virtual display with `xvfb-run`; install it with
-`sudo apt install xvfb` on whichever machine runs XFOIL. For an XFOIL build without that
-crash, `XFOIL_DISPLAY=none` turns its graphics off instead.
-
-### Deployment notes
-
-- **Vercel services.** The root `vercel.json` deploys `frontend/` (Next.js) and
-  `backend/` (FastAPI) as two services on one domain: `/api/*` goes to the backend,
-  everything else to the frontend. The backend receives the original path (it sees
-  `/api/threads`, not `/threads`), which matches its routes. No service calls another on
-  the server (the browser calls the API), so no bindings are declared.
-- Vercel finds the backend through `[tool.vercel] entrypoint = "src.api.app:app"` in
-  `backend/pyproject.toml` (its default detection doesn't look in `src/api/`). The
-  backend uses relative imports, so the same code runs as `src.api` there and as `api`
-  locally (`uv run api`, tests) without the project having to be installed.
-- In production the frontend calls the API on the same origin, so leave
-  `NEXT_PUBLIC_API_URL` and `CORS_ORIGINS` unset on Vercel. Locally the frontend defaults
-  to `http://localhost:8000` (`vercel dev` runs both services together instead).
-- Vercel functions have a maximum duration (300 s on Hobby). Chat streaming and XFOIL
-  calls fit within it; CFD is already asynchronous.
-- Set the backend's variables (`MONGODB_TARGET=remote`, `MONGODB_REMOTE_*`, provider keys, `WS_*`, ...) in the Vercel
-  project. `MONGODB_REMOTE_URI` must be reachable from Vercel, e.g. MongoDB Atlas; a local
-  Docker container isn't. XFOIL can't be installed on Vercel, so use `XFOIL_RUNNER=ws`.
-- Set `CREDENTIALS_KEY` (and `ALLOW_PRIVATE_WORKSTATIONS=false` on a public server), and keep a copy of the
-  key: it can't be recovered.
-
-### Development
+## Development
 
 ```bash
 cd backend
@@ -696,14 +136,14 @@ uv run ruff check . && uv run ruff format .
 MONGODB_LOCAL_URI=mongodb://<host>:27017 uv run pytest
 ```
 
-Tests share one throwaway database per run, emptied between tests. (A database per test
-creates enough files to exhaust MongoDB's open-file limit, which is 1024 in a default
-Docker container, and crash it. Start the container with
-`--ulimit nofile=65536:65536` if you see "Too many open files".)
+API tests use a throwaway database and a scripted chat model, and skip when MongoDB isn't reachable.
+Start MongoDB with `--ulimit nofile=65536:65536` if you see "Too many open files".
 
-API tests use a throwaway database and a scripted chat model in place of Mistral; they
-skip when MongoDB isn't reachable.
+Database schemas are written out in `database/<collection>.json`, generated from
+`backend/src/api/catalog.py`. After changing a definition, run `uv run export-schemas` in `backend/`
+(a test fails if the files are out of date).
 
 ## License
 
-MIT, see [LICENSE](LICENSE). The solvers in the work station image (OpenFOAM, CalculiX and the rest) keep their own licenses.
+MIT, see [LICENSE](LICENSE). The solvers in the work station image (OpenFOAM, CalculiX and the rest)
+keep their own licenses.
