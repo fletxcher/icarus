@@ -58,6 +58,8 @@ STATUS_FILE="$ICARUS_HOME/setup.status"
 RUNTIME_FILE="$ICARUS_HOME/runtime.env"
 # The image is named after the Dockerfile's content, so the backend can tell whether it's current.
 IMAGE_REPO=icarus-solvers
+# Where the published image is pulled from before falling back to building it; "none" always builds.
+REGISTRY_REPO="${ICARUS_REGISTRY:-ghcr.io/fletxcher/icarus-solvers}"
 
 usage() {
   cat <<EOF
@@ -344,6 +346,23 @@ docker_usable() { command -v docker > /dev/null && docker info > /dev/null 2>&1;
 
 image_name() { echo "$IMAGE_REPO:$(sha256sum "$SCRIPT_DIR/Dockerfile" | cut -c1-12)"; }
 
+# Pulls the published image for this Dockerfile and gives it the local name. Fails (so the caller
+# builds) when there's no registry, the image isn't published or the network is down.
+pull_image() {
+  local image="$1" remote
+  [[ "$REGISTRY_REPO" != none ]] || return 1
+  remote="$REGISTRY_REPO:${image##*:}"
+  set_status running image "Downloading the solver image; this takes a few minutes"
+  log "Pulling $remote"
+  if docker pull "$remote" && docker tag "$remote" "$image"; then
+    # Only the local name stays, so removing it (cancel, uninstall) frees the layers.
+    docker rmi "$remote" > /dev/null 2>&1 || true
+    return 0
+  fi
+  log "Couldn't pull $remote; building the image instead"
+  return 1
+}
+
 # The checks that run on the tools themselves, so in Docker mode inside the container. Each one
 # is its own stage in setup.status, so the app can show which tool is being checked.
 check_tools() {
@@ -420,6 +439,8 @@ do_install_user() {
   image="$(image_name)"
   if docker image inspect "$image" > /dev/null 2>&1; then
     log "Solver image $image is already built"
+  elif pull_image "$image"; then
+    log "Pulled $image"
   else
     set_status running image "Building the solver image (OpenFOAM, CalculiX, gmsh, ParaView, ffmpeg, XFOIL); this takes a while"
     log "Building $image (this downloads about 1.5 GB)"

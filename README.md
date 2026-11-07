@@ -615,7 +615,7 @@ the backend connects as:
 ./setup.sh --uninstall        # removes the image, packages and runner files an install added (asks before deleting job data)
 ```
 
-The image (`workstation/Dockerfile`, tagged `icarus-solvers:<hash of the Dockerfile>`) holds:
+The image (`workstation/Dockerfile`, tagged `icarus-solvers:<hash of the Dockerfile>`) is pulled from `ghcr.io/fletxcher/icarus-solvers` when that tag is published, and built on the machine otherwise (set `ICARUS_REGISTRY=none` to always build). The `solver-image` GitHub workflow builds and publishes it whenever the Dockerfile changes (or from the Actions tab, with ARM64 as an option); nothing is built on a developer machine. Make the package public once so machines can pull it without a login. It holds:
 
 | Tool | Notes |
 |---|---|
