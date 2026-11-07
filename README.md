@@ -703,3 +703,7 @@ Docker container, and crash it. Start the container with
 
 API tests use a throwaway database and a scripted chat model in place of Mistral; they
 skip when MongoDB isn't reachable.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The solvers in the work station image (OpenFOAM, CalculiX and the rest) keep their own licenses.
