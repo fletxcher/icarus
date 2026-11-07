@@ -1,7 +1,7 @@
 [project]
 name = "api"
 version = "0.1.0"
-description = "Icarus API: chat storage and the LangGraph aerodynamics agent"
+description = "Icarus API: chat storage and the LangGraph engineering agent"
 authors = [
     { name = "fletxcher", email = "fletxcher@gmail.com" }
 ]

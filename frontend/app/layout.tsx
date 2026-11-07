@@ -19,7 +19,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Icarus",
-  description: "Chat with LLMs",
+  description: "An AI engineering assistant",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

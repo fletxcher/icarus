@@ -2,7 +2,7 @@ from collections.abc import Mapping
 
 from langchain_core.tools import BaseTool
 
-INTRO = "You are Icarus, an aerodynamics assistant for airfoil analysis and design."
+INTRO = "You are Icarus, an engineering assistant."
 
 RULES = """\
 Rules for tools:

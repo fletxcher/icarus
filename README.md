@@ -1,8 +1,8 @@
 # Icarus
 
-An AI engineering assistant for airfoil analysis and design. Describe what you need (a NACA
-profile, a polar at some Reynolds number, a CFD run, a bracket to design and check) and Icarus
-runs the real solvers and shows its reasoning, every tool call with its result, and the answer.
+An AI engineering assistant. Describe what you need (a NACA profile, a polar at some Reynolds
+number, a CFD run, a bracket to design and check) and Icarus runs the real solvers and shows its
+reasoning, every tool call with its result, and the answer.
 
 - `frontend/`: Next.js + shadcn/ui chat interface
 - `backend/`: FastAPI service that stores chats in MongoDB and runs a LangGraph agent with tools
