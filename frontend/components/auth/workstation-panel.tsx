@@ -352,22 +352,18 @@ function ConnectForm({
 function MachineCard({
   machine,
   busy,
-  checking,
   onConnect,
   onDisconnect,
   onRemove,
   onRemoveAnyway,
-  onCheck,
   onSetUp,
 }: {
   machine: WorkstationInfo;
   busy: boolean;
-  checking: boolean;
   onConnect: () => void;
   onDisconnect: () => void;
   onRemove: () => void;
   onRemoveAnyway: () => void;
-  onCheck: () => void;
   onSetUp: React.ReactNode;
 }) {
   const { hardware } = machine;
@@ -421,14 +417,7 @@ function MachineCard({
             {machine.active ? "Disconnect" : "Connect"}
           </Button>
         )}
-        {machine.active && !removing && !failed && (
-          <>
-            <Button variant="outline" disabled={busy} onClick={onCheck}>
-              {checking ? "Checking…" : "Check again"}
-            </Button>
-            {onSetUp}
-          </>
-        )}
+        {machine.active && !removing && !failed && onSetUp}
         {failed && (
           <>
             <Button variant="outline" disabled={busy} onClick={onRemove}>
@@ -484,7 +473,6 @@ export function WorkstationPanel() {
   const [adding, setAdding] = useState(false);
   const [checks, setChecks] = useState<WorkstationCheck[] | null>(null);
   const [busy, setBusy] = useState(false);
-  const [checking, setChecking] = useState(false);
   const [query, setQuery] = useState("");
   // How setup of the connected machine is going. Kept here, not in its dialog, so the steps keep
   // updating below the machines after the dialog is closed.
@@ -527,7 +515,6 @@ export function WorkstationPanel() {
   }
 
   const recheck = useCallback(async () => {
-    setChecking(true);
     try {
       const report = await api.checkWorkstation();
       setChecks(report.checks);
@@ -541,8 +528,6 @@ export function WorkstationPanel() {
           detail: message(failure, "Failed"),
         },
       ]);
-    } finally {
-      setChecking(false);
     }
   }, [reload]);
 
@@ -672,7 +657,6 @@ export function WorkstationPanel() {
             key={machine.id}
             machine={machine}
             busy={busy || setupRunning}
-            checking={checking}
             onConnect={() => {
               setChecks(null);
               setSetup(null);
@@ -705,22 +689,19 @@ export function WorkstationPanel() {
                 "Couldn't remove it.",
               )
             }
-            onCheck={() => void recheck()}
             onSetUp={
-              <WorkstationSetup
-                autoOpen={openSetup}
-                username={machine.username}
-                progress={setup}
-                onProgress={handleSetup}
-                disabled={
-                  busy ||
-                  !(
-                    setup?.state === "running" ||
-                    setup?.state === "failed" ||
-                    checks?.some((check) => !check.ok)
-                  )
-                }
-              />
+              // Only a machine that isn't ready (or is being set up) offers setup.
+              setup?.state === "running" ||
+              setup?.state === "failed" ||
+              checks?.some((check) => !check.ok) ? (
+                <WorkstationSetup
+                  autoOpen={openSetup}
+                  username={machine.username}
+                  progress={setup}
+                  onProgress={handleSetup}
+                  disabled={busy}
+                />
+              ) : null
             }
           />
         ))}
