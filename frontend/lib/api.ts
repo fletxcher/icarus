@@ -22,6 +22,19 @@ export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ??
   (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "");
 
+/** How many messages the signed-in user has left of their daily allowance. */
+export type MessageAllowance = {
+  /** An admin, or no limit set: nothing below applies. */
+  unlimited: boolean;
+  limit: number;
+  used: number;
+  remaining: number;
+  /** When the oldest counted message stops counting, so another can be sent. */
+  resets_at: string | null;
+  /** Models of these providers use the person's own key, so they never count. */
+  own_key_providers: Provider[];
+};
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -284,6 +297,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify(account),
     }),
+  messageAllowance: () => request<MessageAllowance>("/usage/messages"),
   listModels: () => request<Model[]>("/models"),
   listThreads: () => request<Thread[]>("/threads"),
   getThread: (id: string) => request<ThreadWithMessages>(`/threads/${id}`),

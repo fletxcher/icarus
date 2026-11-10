@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     # Comma-separated to rotate: the first seals new values, all of them open old ones.
     credentials_key: SecretStr | None = None
 
+    # How many messages each user may send in any 24 hours (a prompt and its reply is one). Admins
+    # and turns that use the user's own model key aren't counted. 0 means no limit.
+    daily_message_limit: int = Field(default=5, ge=0)
+
     # HTTP
     cors_origins: list[str] = ["http://localhost:3000"]
 

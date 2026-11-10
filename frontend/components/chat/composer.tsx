@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowUpIcon, PlusIcon, SquareIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useMessageAllowance } from "@/lib/use-message-allowance";
 import { cn } from "@/lib/utils";
 import { addFiles, removeFile, sendMessage, stopGeneration } from "@/stores/chat-actions";
 import { useChatStore, useIsGenerating } from "@/stores/chat-store";
@@ -15,17 +16,35 @@ import { ModelSelector } from "./model-selector";
 const ACCEPTED_FILES =
   ".dat,.txt,.csv,.tsv,.json,.md,.xml,.yaml,.yml,.log,.stl,.obj,.step,.stp,.pdf,text/*";
 
+/** When the next message can be sent: a time today, or the day and time. */
+function whenSlotOpens(iso: string | null): string {
+  if (!iso) return "later";
+  const at = new Date(iso);
+  const time = at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return at.toDateString() === new Date().toDateString()
+    ? time
+    : `${at.toLocaleDateString([], { weekday: "short" })} ${time}`;
+}
+
 export function Composer({ placeholder = "Ask anything" }: { placeholder?: string }) {
   const draft = useChatStore((state) => state.draft);
   const setDraft = useChatStore((state) => state.setDraft);
   const pendingFiles = useChatStore((state) => state.pendingFiles);
   const activeThreadId = useChatStore((state) => state.activeThreadId);
   const isGenerating = useIsGenerating();
+  const models = useChatStore((state) => state.models);
+  const modelId = useChatStore((state) => state.model);
+  const allowance = useMessageAllowance(`${isGenerating}`);
+  // Only models reached with the server's key count against the daily allowance.
+  const provider = models.find((model) => model.id === modelId)?.provider;
+  const counted =
+    !!allowance && !allowance.unlimited && !(provider && allowance.own_key_providers.includes(provider));
+  const outOfMessages = counted && allowance.remaining === 0;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const isUploading = pendingFiles.some((file) => file.status === "uploading");
-  const canSend = draft.trim().length > 0 && !isGenerating && !isUploading;
+  const canSend = draft.trim().length > 0 && !isGenerating && !isUploading && !outOfMessages;
 
   // Focus the input whenever the user switches chats.
   useEffect(() => {
@@ -128,6 +147,13 @@ export function Composer({ placeholder = "Ask anything" }: { placeholder?: strin
             }}
           />
           <ModelSelector />
+          {counted && (
+            <span aria-live="polite" className="px-1 text-xs text-muted-foreground">
+              {outOfMessages
+                ? `Out of messages · next at ${whenSlotOpens(allowance.resets_at)}`
+                : `${allowance.remaining} of ${allowance.limit} messages left`}
+            </span>
+          )}
         </div>
 
         {isGenerating ? (

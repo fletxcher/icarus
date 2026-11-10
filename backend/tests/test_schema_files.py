@@ -141,6 +141,11 @@ def _run_app_flows(client: TestClient) -> None:
     )
     client.portal.call(credentials.add_workstation, user_id, station, "PRIVATE KEY")
 
+    # A counted message, for the daily limit.
+    limiter = client.app.state.services.limiter
+    limiter.limit = 5
+    client.portal.call(limiter.claim, user_id)
+
 
 def _documents(database: Database, name: str) -> list[dict[str, Any]]:
     return list(database[name].find())

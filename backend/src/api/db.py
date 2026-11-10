@@ -44,4 +44,5 @@ async def ensure_schema(db: AsyncDatabase) -> None:
             else:
                 await db.create_collection(spec.name, **options)
                 logger.info("created collection %s with a schema validator", spec.name)
-        await db[spec.name].create_indexes(spec.indexes)
+        if spec.indexes:  # a collection that is only ever read by _id has none
+            await db[spec.name].create_indexes(spec.indexes)

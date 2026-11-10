@@ -17,7 +17,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -216,7 +216,9 @@ async def stream_turn(
     model: str,
     language: Language | None = None,
     situation: str | None = None,
+    on_error: Callable[[], Awaitable[None]] | None = None,
 ) -> AsyncIterator[ServerSentEvent]:
+    """Runs one turn and streams it. `on_error` runs if the turn fails (not when it is stopped)."""
     settings = get_settings()
     messages = await chats.list_messages(thread_id)
     file_ids = [attachment.id for message in messages for attachment in message.attachments]
@@ -317,6 +319,8 @@ async def stream_turn(
                 error=error_message,
             )
         )
+        if status == "error" and on_error is not None:
+            await asyncio.shield(on_error())
 
 
 async def title_first(

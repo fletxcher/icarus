@@ -14,6 +14,7 @@ from .config import Settings
 from .credentials.repository import CredentialRepository
 from .credentials.vault import Vault
 from .files.repository import FileRepository
+from .limits.repository import MessageLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,8 @@ class Services:
     files: FileRepository
     users: UserRepository
     sessions: SessionRepository
+    # The daily limit on messages.
+    limiter: MessageLimiter
     credentials: CredentialRepository
     # Each user's work station: their own, or the shared one.
     compute: ComputePool
@@ -51,6 +54,7 @@ def build_services(settings: Settings, db: AsyncDatabase) -> Services:
         files=FileRepository(db),
         users=UserRepository(db),
         sessions=SessionRepository(db),
+        limiter=MessageLimiter(db, limit=settings.daily_message_limit),
         credentials=credentials,
         compute=compute,
         agents=AgentFactory(settings, chats, credentials, compute),

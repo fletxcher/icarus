@@ -24,6 +24,7 @@ from .chats.definitions import (
 from .compute.definitions import SIMULATIONS_INDEXES, SIMULATIONS_VALIDATOR
 from .credentials.definitions import CREDENTIALS_INDEXES, CREDENTIALS_VALIDATOR
 from .files.definitions import FILES_INDEXES, FILES_VALIDATOR
+from .limits.definitions import MESSAGE_USAGE_INDEXES, MESSAGE_USAGE_VALIDATOR
 
 THREADS = "threads"
 MESSAGES = "messages"
@@ -32,6 +33,7 @@ FILES = "files"
 USERS = "users"
 SESSIONS = "sessions"
 CREDENTIALS = "credentials"
+MESSAGE_USAGE = "message_usage"
 
 
 @dataclass(frozen=True)
@@ -98,6 +100,13 @@ COLLECTIONS = [
         "CREDENTIALS_KEY; `details` holds what can be shown without decrypting.",
         CREDENTIALS_VALIDATOR,
         CREDENTIALS_INDEXES,
+        enforced=True,
+    ),
+    CollectionSpec(
+        MESSAGE_USAGE,
+        "How many messages each user has sent in the last 24 hours, for the daily limit.",
+        MESSAGE_USAGE_VALIDATOR,
+        MESSAGE_USAGE_INDEXES,
         enforced=True,
     ),
 ]

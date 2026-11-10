@@ -28,6 +28,7 @@ dependencies = [
 api = "api:main"
 export-schemas = "api.schema_export:main"
 claim-data = "api.claim_data:main"
+make-admin = "api.make_admin:main"
 seed-machines = "api.seed_machines:main"
 
 [build-system]

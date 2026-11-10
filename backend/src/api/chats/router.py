@@ -1,18 +1,24 @@
 import asyncio
-from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
+from functools import partial
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langgraph.graph.state import CompiledStateGraph
 
+from ..agent.factory import UserAgent
 from ..agent.stream import stream_turn, title_first
 from ..auth.router import CurrentUser
+from ..auth.schemas import User
 from ..compute.describe import running_note
 from ..dependencies import ServicesDep
 from ..design.service import designs_note
+from ..files.schemas import StoredFile
 from ..languages import Language
+from ..limits.repository import WINDOW, LimitReached
 from .schemas import (
     MessageCreate,
     Thread,
@@ -95,6 +101,8 @@ class Turn:
     situation: str | None = None
     # Running when this turn starts a chat that still has a placeholder title.
     title: asyncio.Task[str | None] | None = None
+    # Gives the counted message back; None when this turn isn't counted.
+    refund: Callable[[], Awaitable[None]] | None = None
 
 
 async def start_turn(
@@ -128,6 +136,59 @@ async def start_turn(
     if len(attachments) != len(file_ids):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unknown attachment")
 
+    refund = await count_message(services, user, setup, model)
+    try:
+        turn = await store_and_build_turn(
+            thread_id, body, services, user, thread, setup, model, attachments, file_ids
+        )
+    except Exception:
+        # Nothing was answered, so the message isn't used up.
+        if refund:
+            await refund()
+        raise
+    return replace(turn, refund=refund)
+
+
+async def count_message(
+    services: ServicesDep, user: User, setup: UserAgent, model: str
+) -> Callable[[], Awaitable[None]] | None:
+    """Counts this turn against the user's daily limit (429 when it's used up) and returns what
+    gives it back, or None when it isn't counted: no limit, an admin, or a model the user
+    reaches with their own key."""
+    limiter = services.limiter
+    if limiter.unlimited or user.role == "admin":
+        return None
+    provider = next(option.provider for option in setup.models if option.id == model)
+    own = {key.provider for key in await services.credentials.list_model_keys(user.id)}
+    if provider in own:
+        return None
+    try:
+        claim = await limiter.claim(user.id)
+    except LimitReached as reached:
+        wait = max(int((reached.resets_at - datetime.now(UTC)).total_seconds()), 1)
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            f"You've used your {limiter.limit} messages for the last "
+            f"{int(WINDOW.total_seconds() // 3600)} hours. Add your own API key in Settings "
+            "for unlimited messages, or try again later.",
+            headers={"Retry-After": str(wait)},
+        ) from None
+    return partial(limiter.refund, user.id, claim)
+
+
+async def store_and_build_turn(
+    thread_id: str,
+    body: MessageCreate,
+    services: ServicesDep,
+    user: User,
+    thread: Thread,
+    setup: UserAgent,
+    model: str,
+    attachments: list[StoredFile],
+    file_ids: list[str],
+) -> Turn:
+    """Stores the user's message (if there's one) and gathers what the reply needs."""
+    assert setup.agent is not None
     if body.content is not None:
         await services.chats.add_message(
             thread_id,
@@ -170,6 +231,7 @@ async def send_message(
         model=turn.model,
         language=turn.language,
         situation=turn.situation,
+        on_error=turn.refund,
     )
     if turn.title is not None:
         events = title_first(events, turn.title, wait_s=TITLE_WAIT_S)

@@ -1,0 +1,40 @@
+{
+  "collection": "message_usage",
+  "description": "How many messages each user has sent in the last 24 hours, for the daily limit.",
+  "enforced": true,
+  "validator": {
+    "$jsonSchema": {
+      "bsonType": "object",
+      "additionalProperties": false,
+      "required": [
+        "_id",
+        "claims"
+      ],
+      "properties": {
+        "_id": {
+          "bsonType": "string"
+        },
+        "claims": {
+          "bsonType": "array",
+          "items": {
+            "bsonType": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "at"
+            ],
+            "properties": {
+              "id": {
+                "bsonType": "string"
+              },
+              "at": {
+                "bsonType": "date"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "indexes": []
+}

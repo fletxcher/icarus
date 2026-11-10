@@ -54,6 +54,7 @@ Main `.env` settings:
 | `MONGODB_TARGET` | `local` (default) or `remote`, with `MONGODB_LOCAL_URI` / `MONGODB_REMOTE_URI` and the matching `_NAME` |
 | `CREDENTIALS_KEY` | Encrypts users' saved keys and SSH keys. Keep a copy: losing it makes them unreadable |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional "Sign in with Google" (see below) |
+| `DAILY_MESSAGE_LIMIT` | Messages each user may send in any 24 hours (default 5; a prompt and its reply is one; 0 means no limit) |
 | `XFOIL_RUNNER` | `ws` (a connected machine) or `local` (this server, needs `xfoil` and `xvfb`) |
 | `ALLOW_PRIVATE_WORKSTATIONS` | Set `false` on a public server to refuse private network addresses |
 
@@ -65,6 +66,12 @@ create an OAuth client ID of type *Web application* with the redirect URI
 `{API_PUBLIC_URL}/api/auth/google/callback` (locally `http://localhost:8000/api/auth/google/callback`),
 put the id and secret in `.env`, and set `API_PUBLIC_URL` and `FRONTEND_URL`. While the consent
 screen is in "Testing", add the allowed accounts as test users.
+
+**Daily message limit.** Each user gets `DAILY_MESSAGE_LIMIT` messages in any rolling 24 hours, to protect
+the server's model keys. Sending, editing and regenerating all count; a reply that fails on the provider's
+side is given back. Admins and models reached with the user's own API key (Settings) aren't counted. Make
+an account an admin with `uv run make-admin you@example.com` in `backend/`. Over the limit the API answers 429,
+and the composer shows how many messages are left (`GET /api/usage/messages`).
 
 **MongoDB.** A local MongoDB or a remote one such as Atlas both work. A local `icarus-db`
 container doesn't publish its port by default, so start it with `-p 27017:27017`.
