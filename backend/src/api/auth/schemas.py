@@ -10,7 +10,6 @@ from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, BeforeValidator, EmailStr, Field
 
-from ..languages import Language
 from ..mongo import MongoModel
 
 Role = Literal["user", "admin"]
@@ -42,8 +41,6 @@ class Identity(BaseModel):
 class Preferences(BaseModel):
     default_model: str | None = None
     theme: Theme = "system"
-    # What the assistant replies in; None leaves it to the model (usually the user's own).
-    language: Language | None = None
 
 
 class User(MongoModel):

@@ -49,7 +49,7 @@ Main `.env` settings:
 
 | Setting | Purpose |
 |---|---|
-| `MISTRAL_API_TOKEN`, `OPENROUTER_API_KEY`, `OLLAMA_BASE_URL` | Model providers. Users can also add their own keys in Settings |
+| `OPENROUTER_API_KEY`, `OLLAMA_BASE_URL` | Model providers the server supplies. Users add their own OpenAI, Anthropic, OpenRouter or Ollama keys in Settings |
 | `DEFAULT_MODEL` | Model chosen when the user doesn't pick one |
 | `MONGODB_TARGET` | `local` (default) or `remote`, with `MONGODB_LOCAL_URI` / `MONGODB_REMOTE_URI` and the matching `_NAME` |
 | `CREDENTIALS_KEY` | Encrypts users' saved keys and SSH keys. Keep a copy: losing it makes them unreadable |

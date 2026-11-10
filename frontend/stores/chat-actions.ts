@@ -2,7 +2,6 @@ import { toast } from "sonner";
 import { ApiError, api, streamReply } from "@/lib/api";
 import { applyStreamEvent } from "@/lib/chat/apply-event";
 import type { Attachment, Message } from "@/lib/chat/types";
-import { useAuth } from "@/stores/auth-store";
 import { useChatStore } from "./chat-store";
 
 const TITLE_MAX_LENGTH = 60;
@@ -227,7 +226,6 @@ async function runTurn(threadId: string, content?: string, attachments: Attachme
       content,
       model: model ?? undefined,
       attachments: attachments.map((attachment) => attachment.id),
-      language: useAuth.getState().language ?? undefined,
     };
     for await (const event of streamReply(threadId, body, controller.signal)) {
       if (event.type === "start") {

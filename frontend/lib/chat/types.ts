@@ -59,7 +59,7 @@ export type Thread = {
 
 export type ThreadWithMessages = Thread & { messages: Message[] };
 
-export type Provider = "mistral" | "openrouter" | "ollama";
+export type Provider = "anthropic" | "openai" | "openrouter" | "ollama";
 
 /** A model the backend can use; only providers with an API key are listed. */
 export type Model = {

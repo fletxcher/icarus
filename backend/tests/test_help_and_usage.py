@@ -1,11 +1,8 @@
 from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
-from langchain_core.messages import AIMessage
 
 from api.catalog import SIMULATIONS
-from tests.conftest import use_scripted_agent
-from tests.test_chats_api import create_thread, read_events
 
 
 def add_simulation(client: TestClient, *, age_days: float, status: str, shape: str, took_s: float):
@@ -64,29 +61,3 @@ def test_status_reports_each_dependency(client: TestClient):
     assert checks["models"]["ok"] is True
     assert checks["work_station"]["ok"] is False  # none configured in tests
     assert "Settings" in checks["work_station"]["detail"]
-
-
-def test_the_chosen_language_is_given_to_the_model(client: TestClient):
-    model = use_scripted_agent(client, [AIMessage("Hola"), AIMessage("Hello")])
-    thread_id = create_thread(client)
-
-    read_events(client, thread_id, {"content": "Hi", "language": "es"})
-    read_events(client, thread_id, {"content": "Again"})
-
-    spanish, default = (
-        [message.content for message in call if message.type == "system"] for call in model.seen
-    )
-    assert any("Reply in Spanish" in text for text in spanish)
-    assert not any("Reply in" in text and "Spanish" in text for text in default)
-    assert len(default) == 1  # just the system prompt
-
-
-def test_an_unknown_language_is_rejected(client: TestClient):
-    use_scripted_agent(client, [AIMessage("x")])
-    thread_id = create_thread(client)
-
-    response = client.post(
-        f"/api/threads/{thread_id}/messages", json={"content": "Hi", "language": "xx"}
-    )
-
-    assert response.status_code == 422

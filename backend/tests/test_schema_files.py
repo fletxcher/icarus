@@ -61,9 +61,7 @@ def _run_app_flows(client: TestClient) -> None:
     )
     use_agent(
         client,
-        build_agent(
-            {"mistral-medium-3-5": model}, plot_tools(), default_model="mistral-medium-3-5"
-        ),
+        build_agent({"openrouter/free": model}, plot_tools(), default_model="openrouter/free"),
     )
     read_events(client, thread_id, {"content": "Plot it", "attachments": [uploaded["id"]]})
 
@@ -76,9 +74,9 @@ def _run_app_flows(client: TestClient) -> None:
     use_agent(
         client,
         build_agent(
-            {"mistral-medium-3-5": FailingModel(replies=[], seen=[])},
+            {"openrouter/free": FailingModel(replies=[], seen=[])},
             [],
-            default_model="mistral-medium-3-5",
+            default_model="openrouter/free",
         ),
     )
     read_events(client, create_thread(client), {"content": "This one fails"})
@@ -129,7 +127,7 @@ def _run_app_flows(client: TestClient) -> None:
 
     # The user's own model key and work station, sealed.
     credentials = client.app.state.services.credentials
-    client.portal.call(credentials.set_model_key, user_id, "mistral", "sk-test-1234")
+    client.portal.call(credentials.set_model_key, user_id, "anthropic", "sk-test-1234")
     station = WorkstationDetails(
         host="10.0.0.5",
         port=22,
@@ -162,7 +160,7 @@ def _model_documents() -> dict[str, list[dict[str, Any]]]:
             email="b@example.com",
             identities=[identity],
             role="admin",
-            preferences=Preferences(default_model="mistral-medium-3-5", theme="dark"),
+            preferences=Preferences(default_model="openrouter/free", theme="dark"),
             last_login_at=now,
         ),
     ]

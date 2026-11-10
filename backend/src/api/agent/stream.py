@@ -39,7 +39,6 @@ from ..chats.schemas import (
 from ..config import get_settings
 from ..files.extract import BINARY_KINDS
 from ..files.repository import FileRepository, FileText
-from ..languages import Language
 from .logging_callbacks import AgentLoggingHandler
 
 logger = logging.getLogger(__name__)
@@ -103,7 +102,7 @@ def split_message(message: AIMessage) -> tuple[str, str]:
     """Splits a (streamed) model message into (reasoning, answer text).
 
     Providers report reasoning differently, and LangChain's `.text` drops it:
-    - Mistral: `{"type": "thinking", "thinking": [{"type": "text", ...}]}` content blocks.
+    - Anthropic: `{"type": "thinking", "thinking": "..."}` content blocks.
     - OpenRouter: a `reasoning_content` string in `additional_kwargs`.
     """
     reasoning, text = [], []
@@ -136,12 +135,10 @@ PROVIDER_ERRORS = {
 
 def _provider_failure(error: Exception) -> tuple[str, int, str | None] | None:
     """(provider, HTTP status, the provider's own message) for an API error response."""
-    if isinstance(error, httpx.HTTPStatusError):  # Mistral's client
-        return "Mistral", error.response.status_code, None
     if isinstance(error, OpenRouterError):
         return "OpenRouter", error.status_code, error.message
-    # Ollama's client raises ResponseError carrying the HTTP status.
-    names = {"ollama": "Ollama"}
+    # The OpenAI, Anthropic and Ollama clients raise errors that carry the HTTP status.
+    names = {"openai": "OpenAI", "anthropic": "Anthropic", "ollama": "Ollama"}
     module = type(error).__module__.split(".")[0]
     status = getattr(error, "status_code", None)
     if module in names and isinstance(status, int):
@@ -214,7 +211,6 @@ async def stream_turn(
     *,
     thread_id: str,
     model: str,
-    language: Language | None = None,
     situation: str | None = None,
     on_error: Callable[[], Awaitable[None]] | None = None,
 ) -> AsyncIterator[ServerSentEvent]:
@@ -242,7 +238,6 @@ async def stream_turn(
         "configurable": {
             "thread_id": thread_id,
             "model": model,
-            "language": language,
             "situation": situation,
         },
         "callbacks": [AgentLoggingHandler(payload_max_chars=settings.log_body_max_chars)],

@@ -80,7 +80,6 @@ export type CurrentUser = {
   id: string;
   email: string;
   name: string | null;
-  preferences: { language: string | null };
 };
 
 export type ModelProvider = Provider;
@@ -222,12 +221,6 @@ export const api = {
   providers: () => request<{ google: boolean }>("/auth/providers"),
   /** Where signing in with Google starts (a full-page navigation, not a fetch). */
   googleLoginUrl: () => `${API_URL}/api/auth/google/login`,
-  /** Saves the reply language to the signed-in user's preferences. */
-  setLanguage: (language: string | null) =>
-    request<CurrentUser>("/auth/me/preferences", {
-      method: "PATCH",
-      body: JSON.stringify({ language }),
-    }),
   status: () => request<StatusCheck[]>("/status"),
   credentials: () => request<CredentialsOverview>("/credentials"),
   saveModelKey: (provider: ModelProvider, apiKey: string) =>
@@ -370,7 +363,6 @@ export async function* streamReply(
     content?: string;
     model?: string;
     attachments?: string[];
-    language?: string;
   },
   signal: AbortSignal,
 ): AsyncGenerator<StreamEvent> {

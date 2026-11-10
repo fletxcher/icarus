@@ -9,7 +9,6 @@ from pydantic import BaseModel, StringConstraints
 
 from ..config import get_settings
 from ..dependencies import ServicesDep
-from ..languages import Language
 from . import google
 from .repository import SESSION_LIFETIME, EmailTaken
 from .schemas import Email, User, UserPublic
@@ -178,21 +177,6 @@ async def google_callback(
 async def me(user: CurrentUser) -> UserPublic:
     """Who is signed in."""
     return user.public()
-
-
-class PreferencesUpdate(BaseModel):
-    language: Language | None
-
-
-@router.patch("/me/preferences")
-async def update_preferences(
-    body: PreferencesUpdate, user: CurrentUser, services: ServicesDep
-) -> UserPublic:
-    """Saves the signed-in user's preferences."""
-    updated = await services.users.set_language(user.id, body.language)
-    if updated is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not signed in")
-    return updated.public()
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)

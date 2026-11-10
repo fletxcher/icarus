@@ -4,7 +4,6 @@ from typing import Any, get_args
 
 from pymongo import ASCENDING, DESCENDING, IndexModel
 
-from ..languages import Language
 from .schemas import IdentityProvider, Role, Theme, UserStatus
 
 NULLABLE_STRING = ["string", "null"]
@@ -64,7 +63,6 @@ USERS_VALIDATOR: dict[str, Any] = {
                 "properties": {
                     "default_model": {"bsonType": NULLABLE_STRING},
                     "theme": _enum(Theme),
-                    "language": {"enum": [*get_args(Language), None]},
                 },
             },
             "created_at": {"bsonType": "date"},

@@ -10,7 +10,6 @@ from langgraph.graph import START, MessagesState, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from ..languages import LANGUAGES
 from .prompts import build_system_prompt
 
 
@@ -32,16 +31,7 @@ def build_agent(
     async def call_model(state: MessagesState, config: RunnableConfig) -> dict:
         model_id = config.get("configurable", {}).get("model", default_model)
         model = bound.get(model_id, bound[default_model])
-        language = config.get("configurable", {}).get("language")
-        # The user's chosen reply language comes after the system prompt, per request.
         preface = [prompt]
-        if language in LANGUAGES:
-            preface.append(
-                SystemMessage(
-                    f"Reply in {LANGUAGES[language]}, whatever language the user writes in. "
-                    "Keep tool names, units and code as they are."
-                )
-            )
         # What's going on right now (e.g. simulations still running), refreshed every turn.
         if situation := config.get("configurable", {}).get("situation"):
             preface.append(SystemMessage(situation))

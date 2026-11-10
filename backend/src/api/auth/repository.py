@@ -1,12 +1,10 @@
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from pymongo import ReturnDocument
 from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.errors import DuplicateKeyError
 
 from ..catalog import SESSIONS, USERS
-from ..languages import Language
 from .passwords import UNMATCHED_HASH, hash_password, verify_password
 from .schemas import Email, Identity, Session, User
 from .tokens import hash_token, new_token
@@ -43,14 +41,6 @@ class UserRepository:
 
     async def get(self, user_id: str) -> User | None:
         doc = await self._users.find_one({"_id": user_id})
-        return User.model_validate(doc) if doc else None
-
-    async def set_language(self, user_id: str, language: Language | None) -> User | None:
-        doc = await self._users.find_one_and_update(
-            {"_id": user_id},
-            {"$set": {"preferences.language": language, "updated_at": datetime.now(UTC)}},
-            return_document=ReturnDocument.AFTER,
-        )
         return User.model_validate(doc) if doc else None
 
     async def get_by_email(self, email: Email) -> User | None:

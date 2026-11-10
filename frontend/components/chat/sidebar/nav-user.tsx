@@ -4,7 +4,6 @@ import {
   ActivityIcon,
   ChevronsUpDownIcon,
   CircleHelpIcon,
-  GlobeIcon,
   LogInIcon,
   LogOutIcon,
   SettingsIcon,
@@ -33,7 +32,6 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { languageName } from "@/lib/languages";
 import { useAuth } from "@/stores/auth-store";
 import { forgetLanding } from "@/stores/chat-actions";
 
@@ -51,7 +49,7 @@ function initialsOf(text: string): string {
 export function NavUser() {
   const { isMobile } = useSidebar();
   const router = useRouter();
-  const { user, logout, language } = useAuth();
+  const { user, logout } = useAuth();
   const [dialog, setDialog] = useState<"settings" | "help" | null>(null);
   const [section, setSection] = useState<SettingsSection>("general");
 
@@ -136,18 +134,6 @@ export function NavUser() {
             >
               <ActivityIcon />
               Usage
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => {
-                setSection("language");
-                setDialog("settings");
-              }}
-            >
-              <GlobeIcon />
-              Language
-              <span className="ml-auto truncate pl-3 text-xs text-muted-foreground">
-                {languageName(language)}
-              </span>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setDialog("help")}>
               <CircleHelpIcon />

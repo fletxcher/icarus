@@ -15,13 +15,13 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=ENV_FILE, env_ignore_empty=True, extra="ignore")
 
-    # Model providers: each one's models are offered only when its key is set.
-    mistral_api_token: SecretStr | None = None
+    # Model providers: each one's models are offered only when a key for it is set, by the server
+    # (below) or by the user (Anthropic and OpenAI keys come only from users, in Settings).
     openrouter_api_key: SecretStr | None = None
     # An Ollama server (e.g. http://localhost:11434) whose installed models are offered.
     ollama_base_url: str | None = None
     # Used when a message doesn't pick a model; falls back to the first available one.
-    default_model: str = "mistral-medium-3-5"
+    default_model: str = "openrouter/free"
     # Name new chats from their first message (one extra model request per chat).
     auto_title: bool = True
     # "high" streams the model's thinking before its answer; "none" skips it.

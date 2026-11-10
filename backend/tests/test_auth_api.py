@@ -150,21 +150,3 @@ def test_logout_ends_the_session_and_clears_the_cookie(client: TestClient):
     client.cookies.set("icarus_session", token)  # even a copy of the old cookie is dead now
     assert client.get("/api/auth/me").status_code == 401
     assert client.post("/api/auth/logout").status_code == 204  # and signing out again is fine
-
-
-def test_language_is_saved_in_the_users_preferences(client: TestClient):
-    signup(client)
-    login(client)
-
-    response = client.patch("/api/auth/me/preferences", json={"language": "es"})
-
-    assert response.status_code == 200
-    assert response.json()["preferences"]["language"] == "es"
-    assert client.get("/api/auth/me").json()["preferences"]["language"] == "es"
-    assert stored_users(client)[0]["preferences"]["language"] == "es"
-    assert client.patch("/api/auth/me/preferences", json={"language": None}).status_code == 200
-    assert client.patch("/api/auth/me/preferences", json={"language": "xx"}).status_code == 422
-
-
-def test_preferences_need_a_signed_in_user(client: TestClient):
-    assert client.patch("/api/auth/me/preferences", json={"language": "es"}).status_code == 401

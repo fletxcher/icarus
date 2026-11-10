@@ -1,6 +1,7 @@
 import json
 
 import httpx
+import openai
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
@@ -105,13 +106,13 @@ def test_send_message_to_missing_thread_is_404(client: TestClient):
 
 def test_models_endpoint_lists_only_configured_providers(client: TestClient):
     ids = [model["id"] for model in client.get("/api/models").json()]
-    assert ids == ["mistral-medium-3-5", "mistral-small-latest"]
+    assert ids == ["openrouter/free"]
 
 
 def test_send_message_with_unconfigured_provider_model_is_422(client: TestClient):
     use_scripted_agent(client, [])
     thread_id = create_thread(client)
-    body = {"content": "hi", "model": "openrouter/free"}
+    body = {"content": "hi", "model": "gpt-5"}  # OpenAI needs the user's key
     response = client.post(f"/api/threads/{thread_id}/messages", json=body)
     assert response.status_code == 422
 
@@ -126,14 +127,12 @@ def test_send_message_without_any_provider_is_503(client: TestClient):
 def test_provider_errors_are_explained_to_the_user(client: TestClient):
     class RateLimitedModel(ScriptedModel):
         async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
-            request = httpx.Request("POST", "https://api.mistral.ai/v1/chat/completions")
+            request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
             response = httpx.Response(429, request=request)
-            raise httpx.HTTPStatusError("rate limited", request=request, response=response)
+            raise openai.RateLimitError("rate limited", response=response, body=None)
 
     model = RateLimitedModel(replies=[], seen=[])
-    use_agent(
-        client, build_agent({"mistral-medium-3-5": model}, [], default_model="mistral-medium-3-5")
-    )
+    use_agent(client, build_agent({"openrouter/free": model}, [], default_model="openrouter/free"))
     thread_id = create_thread(client)
 
     events = read_events(client, thread_id, {"content": "hi"})
@@ -160,7 +159,7 @@ def test_failing_tool_is_reported_to_the_model_and_the_turn_completes(client: Te
     )
     use_agent(
         client,
-        build_agent({"mistral-medium-3-5": model}, [explode], default_model="mistral-medium-3-5"),
+        build_agent({"openrouter/free": model}, [explode], default_model="openrouter/free"),
     )
     thread_id = create_thread(client)
 
@@ -201,9 +200,7 @@ def test_openrouter_errors_are_explained_with_the_providers_reason(client: TestC
             )
 
     model = DailyQuotaModel(replies=[], seen=[])
-    use_agent(
-        client, build_agent({"mistral-medium-3-5": model}, [], default_model="mistral-medium-3-5")
-    )
+    use_agent(client, build_agent({"openrouter/free": model}, [], default_model="openrouter/free"))
     thread_id = create_thread(client)
 
     events = read_events(client, thread_id, {"content": "hi"})

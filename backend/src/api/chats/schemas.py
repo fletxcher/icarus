@@ -4,7 +4,6 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field
 
 from ..files.schemas import Attachment
-from ..languages import Language
 from ..mongo import MongoModel
 
 # "notice" is an automatic note (e.g. that a simulation finished): the agent reads it as if the
@@ -80,5 +79,3 @@ class MessageCreate(BaseModel):
     model: str | None = None
     # Ids from POST /api/files, sent along with `content`.
     attachments: list[str] = Field(default=[], max_length=10)
-    # The language to reply in (the user's setting); omit to leave it to the model.
-    language: Language | None = None

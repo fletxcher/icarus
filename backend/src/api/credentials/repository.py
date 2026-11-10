@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, get_args
 from uuid import uuid4
 
 from pydantic import SecretStr
@@ -68,7 +68,10 @@ class CredentialRepository:
         await self._put(user_id, MODEL_KEY, "ollama", base_url, {"last4": "", "url": base_url})
 
     async def list_model_keys(self, user_id: str) -> list[ModelKeyInfo]:
-        cursor = self._credentials.find({"user_id": user_id, "kind": MODEL_KEY}).sort("name", 1)
+        # Keys of a provider the app no longer offers (e.g. Mistral's) stay in the database, unused.
+        cursor = self._credentials.find(
+            {"user_id": user_id, "kind": MODEL_KEY, "name": {"$in": list(get_args(Provider))}}
+        ).sort("name", 1)
         return [
             ModelKeyInfo(
                 provider=doc["name"],
@@ -82,7 +85,10 @@ class CredentialRepository:
     async def model_keys(self, user_id: str) -> dict[Provider, SecretStr]:
         """The user's decrypted keys by provider. A key that can't be opened is skipped."""
         keys: dict[Provider, SecretStr] = {}
-        async for doc in self._credentials.find({"user_id": user_id, "kind": MODEL_KEY}):
+        cursor = self._credentials.find(
+            {"user_id": user_id, "kind": MODEL_KEY, "name": {"$in": list(get_args(Provider))}}
+        )
+        async for doc in cursor:
             try:
                 value = self.vault.open(user_id, MODEL_KEY, doc["name"], doc["sealed"])
             except (SealedValueRejected, VaultUnavailable) as error:

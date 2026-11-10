@@ -59,9 +59,7 @@ def test_create_plot_sends_the_figure_to_the_ui_but_only_a_summary_to_the_model(
     model = ScriptedModel(replies=[AIMessage("", tool_calls=[call]), AIMessage("Done.")], seen=[])
     use_agent(
         client,
-        build_agent(
-            {"mistral-medium-3-5": model}, plot_tools(), default_model="mistral-medium-3-5"
-        ),
+        build_agent({"openrouter/free": model}, plot_tools(), default_model="openrouter/free"),
     )
     thread_id = create_thread(client)
 
@@ -184,9 +182,7 @@ def test_malformed_figures_models_really_sent_still_plot_through_the_agent(
     model = ScriptedModel(replies=[AIMessage("", tool_calls=[call]), AIMessage("Done.")], seen=[])
     use_agent(
         client,
-        build_agent(
-            {"mistral-medium-3-5": model}, plot_tools(), default_model="mistral-medium-3-5"
-        ),
+        build_agent({"openrouter/free": model}, plot_tools(), default_model="openrouter/free"),
     )
     thread_id = create_thread(client)
 

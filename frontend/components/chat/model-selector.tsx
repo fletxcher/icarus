@@ -15,7 +15,8 @@ import type { Model, Provider } from "@/lib/chat/types";
 import { useChatStore } from "@/stores/chat-store";
 
 const PROVIDER_LABELS: Record<Provider, string> = {
-  mistral: "Mistral",
+  anthropic: "Anthropic",
+  openai: "OpenAI",
   openrouter: "OpenRouter",
   ollama: "Ollama (local)",
 };

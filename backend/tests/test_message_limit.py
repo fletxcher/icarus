@@ -145,9 +145,9 @@ def test_a_failed_reply_is_given_back(client: TestClient):
     use_agent(
         client,
         build_agent(
-            {"mistral-medium-3-5": Failing(replies=[], seen=[])},
+            {"openrouter/free": Failing(replies=[], seen=[])},
             [],
-            default_model="mistral-medium-3-5",
+            default_model="openrouter/free",
         ),
     )
     events = read_events(client, create_thread(client), {"content": "hi"})
@@ -190,7 +190,7 @@ def test_admins_are_not_counted(limited: TestClient):
 
 def test_a_model_reached_with_the_users_own_key_is_not_counted(limited: TestClient):
     credentials = limited.app.state.services.credentials
-    limited.portal.call(credentials.set_model_key, user_id(limited), "mistral", "sk-mine-1234")
+    limited.portal.call(credentials.set_model_key, user_id(limited), "openrouter", "sk-mine-1234")
     thread_id = create_thread(limited)
 
     for _ in range(LIMIT + 2):
@@ -198,7 +198,7 @@ def test_a_model_reached_with_the_users_own_key_is_not_counted(limited: TestClie
 
     body = limited.get("/api/usage/messages").json()
     assert body["used"] == 0
-    assert body["own_key_providers"] == ["mistral"]
+    assert body["own_key_providers"] == ["openrouter"]
 
 
 def test_no_limit_when_it_is_set_to_zero(limited: TestClient):

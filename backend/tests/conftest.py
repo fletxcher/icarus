@@ -89,8 +89,8 @@ def anon_client(mongo_db_name: str, monkeypatch: pytest.MonkeyPatch) -> Iterator
     monkeypatch.setenv("MONGODB_TARGET", "local")
     monkeypatch.setenv("MONGODB_LOCAL_URI", MONGODB_URI)
     monkeypatch.setenv("MONGODB_LOCAL_NAME", mongo_db_name)
-    monkeypatch.setenv("MISTRAL_API_TOKEN", "test-token")
-    monkeypatch.setenv("DEFAULT_MODEL", "mistral-medium-3-5")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-token")
+    monkeypatch.setenv("DEFAULT_MODEL", "openrouter/free")
     # Off unless a test plugs in a scripted title model (see use_scripted_titles).
     monkeypatch.setenv("AUTO_TITLE", "false")
     # A key of its own, so tests never use (or write with) the developer's.
@@ -132,9 +132,9 @@ def use_agent(
     client: TestClient, agent: CompiledStateGraph | None, titles: TitleGenerator | None = None
 ) -> None:
     """Every user gets this agent (None: no model is available) instead of one built from keys."""
-    models = available_models({"mistral": SecretStr("test-token")}) if agent else []
+    models = available_models({"openrouter": SecretStr("test-token")}) if agent else []
     client.app.state.services.agents.override = UserAgent(
-        models, "mistral-medium-3-5" if agent else None, agent, titles
+        models, "openrouter/free" if agent else None, agent, titles
     )
 
 
@@ -142,7 +142,7 @@ def use_scripted_agent(client: TestClient, replies: list[AIMessage]) -> Scripted
     model = ScriptedModel(replies=replies, seen=[])
     use_agent(
         client,
-        build_agent({"mistral-medium-3-5": model}, [add], default_model="mistral-medium-3-5"),
+        build_agent({"openrouter/free": model}, [add], default_model="openrouter/free"),
     )
     return model
 
@@ -150,5 +150,5 @@ def use_scripted_agent(client: TestClient, replies: list[AIMessage]) -> Scripted
 def use_scripted_titles(client: TestClient, replies: list[AIMessage]) -> ScriptedModel:
     services = client.app.state.services
     model = ScriptedModel(replies=replies, seen=[])
-    services.agents.override.titles = TitleGenerator(services.chats, {"mistral-medium-3-5": model})
+    services.agents.override.titles = TitleGenerator(services.chats, {"openrouter/free": model})
     return model

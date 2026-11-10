@@ -102,7 +102,7 @@ async def test_documents_from_the_models_pass_the_database_validators(db: AsyncD
         identities=[Identity(provider="google", subject="g-1", linked_at=NOW)],
         email_verified_at=NOW,
         last_login_at=NOW,
-        preferences=Preferences(default_model="mistral-medium-3-5", theme="dark"),
+        preferences=Preferences(default_model="openrouter/free", theme="dark"),
     )
     session = make_session(revoked_at=NOW, user_agent="Mozilla/5.0", ip="203.0.113.7")
 

@@ -25,10 +25,16 @@ const PROVIDERS: {
   address?: boolean;
 }[] = [
   {
-    id: "mistral",
-    name: "Mistral",
-    models: "Mistral Medium 3.5 and Mistral Small",
-    keysUrl: "https://console.mistral.ai/api-keys",
+    id: "anthropic",
+    name: "Anthropic",
+    models: "Claude Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5",
+    keysUrl: "https://console.anthropic.com/settings/keys",
+  },
+  {
+    id: "openai",
+    name: "OpenAI",
+    models: "GPT-5 and GPT-5 mini",
+    keysUrl: "https://platform.openai.com/api-keys",
   },
   {
     id: "openrouter",
@@ -39,8 +45,7 @@ const PROVIDERS: {
   {
     id: "ollama",
     name: "Ollama",
-    models:
-      "Local models installed on an Ollama server (they need tool calling)",
+    models: "Local models installed on an Ollama server",
     keysUrl: "https://ollama.com/download",
     address: true,
   },

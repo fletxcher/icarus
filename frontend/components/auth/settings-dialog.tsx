@@ -2,8 +2,6 @@
 
 import {
   ActivityIcon,
-  CheckIcon,
-  GlobeIcon,
   KeyRoundIcon,
   LogOutIcon,
   MonitorIcon,
@@ -16,7 +14,6 @@ import {
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useState } from "react";
-import { toast } from "sonner";
 import { ModelKeysPanel } from "@/components/auth/model-keys-panel";
 import { UsageBody } from "@/components/auth/usage-summary";
 import { WorkstationPanel } from "@/components/auth/workstation-panel";
@@ -37,9 +34,7 @@ import {
 } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { CurrentUser } from "@/lib/api";
-import { LANGUAGES, type LanguageCode, languageName } from "@/lib/languages";
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/stores/auth-store";
 import { useChatStore } from "@/stores/chat-store";
 import {
   type Motion,
@@ -49,7 +44,7 @@ import {
 } from "@/stores/settings-store";
 
 export type SettingsSection =
-  "general" | "account" | "language" | "model-keys" | "workstation" | "usage";
+  "general" | "account" | "model-keys" | "workstation" | "usage";
 
 const SECTIONS: {
   id: SettingsSection;
@@ -58,7 +53,6 @@ const SECTIONS: {
 }[] = [
   { id: "general", label: "General", icon: SettingsIcon },
   { id: "account", label: "Account", icon: UserIcon },
-  { id: "language", label: "Language", icon: GlobeIcon },
   { id: "model-keys", label: "API keys", icon: KeyRoundIcon },
   { id: "workstation", label: "Work station", icon: ServerIcon },
   { id: "usage", label: "Usage", icon: ActivityIcon },
@@ -255,61 +249,6 @@ function GeneralPanel({ groups }: { groups: Group[] }) {
   );
 }
 
-function LanguagePanel() {
-  const { language, setLanguage } = useAuth();
-  const options: { code: LanguageCode | null; name: string }[] = [
-    { code: null, name: languageName(null) },
-    ...LANGUAGES,
-  ];
-
-  async function choose(code: LanguageCode | null) {
-    try {
-      await setLanguage(code);
-    } catch {
-      toast.error(
-        "Couldn't save your language. It will apply in this browser only.",
-      );
-    }
-  }
-
-  return (
-    <section>
-      <Heading>Language</Heading>
-      <p className="mb-4 text-sm text-muted-foreground">
-        The language Icarus replies in. &ldquo;Automatic&rdquo; answers in
-        whatever language you write in.
-      </p>
-      <div
-        role="radiogroup"
-        aria-label="Reply language"
-        className="grid grid-cols-2 gap-2"
-      >
-        {options.map(({ code, name }) => {
-          const selected = language === code;
-          return (
-            <Button
-              key={code ?? "auto"}
-              type="button"
-              role="radio"
-              aria-checked={selected}
-              variant="outline"
-              onClick={() => void choose(code)}
-              className={cn(
-                "justify-between",
-                code === null && "col-span-2",
-                selected && "border-primary bg-accent",
-              )}
-            >
-              {name}
-              {selected && <CheckIcon />}
-            </Button>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
 function AccountPanel({
   user,
   onLogout,
@@ -346,7 +285,7 @@ function AccountPanel({
           id: "signed-out",
           label: "You aren't signed in",
           description:
-            "Log in to save your language and see your account here.",
+            "Log in to see your account here.",
           control: (
             <Button asChild variant="outline">
               <a href="/login">Log in</a>
@@ -484,8 +423,6 @@ export function SettingsDialog({
               <GeneralPanel groups={general} />
             ) : section === "account" ? (
               <AccountPanel user={user} onLogout={onLogout} />
-            ) : section === "language" ? (
-              <LanguagePanel />
             ) : section === "model-keys" ? (
               <section>
                 <Heading>API keys</Heading>

@@ -3,15 +3,20 @@
 from collections.abc import Mapping
 from typing import Literal
 
+from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
-from langchain_mistralai import ChatMistralAI
 from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
 from langchain_openrouter import ChatOpenRouter
 from pydantic import BaseModel, SecretStr
 
 from ..config import Settings
 
-Provider = Literal["mistral", "openrouter", "ollama"]
+Provider = Literal["anthropic", "openai", "openrouter", "ollama"]
+
+# Tokens the model may think with, and the room left for its answer, when reasoning is on.
+THINKING_BUDGET_TOKENS = 2048
+ANSWER_MAX_TOKENS = 8192
 
 
 class ModelOption(BaseModel):
@@ -22,20 +27,44 @@ class ModelOption(BaseModel):
 
 
 MODELS: list[ModelOption] = [
-    # Mistral models with tool calling and adjustable reasoning (`reasoning_effort`).
-    # Mistral's reasoning docs name these exact ids. Mistral Large isn't offered: the
-    # project's subscription tier doesn't include it.
+    # Claude models, with the user's own Anthropic key. With reasoning on they think before
+    # answering (extended thinking).
     ModelOption(
-        id="mistral-medium-3-5",
-        label="Mistral Medium 3.5",
-        description="Frontier-class, optimized for agentic use",
-        provider="mistral",
+        id="claude-fable-5-1",
+        label="Claude Fable 5.1",
+        description="Anthropic's most capable model",
+        provider="anthropic",
     ),
     ModelOption(
-        id="mistral-small-latest",
-        label="Mistral Small",
-        description="Fast and efficient",
-        provider="mistral",
+        id="claude-opus-5-5",
+        label="Claude Opus 5.5",
+        description="Deep reasoning on hard problems",
+        provider="anthropic",
+    ),
+    ModelOption(
+        id="claude-sonnet-5-5",
+        label="Claude Sonnet 5.5",
+        description="Balances speed and intelligence",
+        provider="anthropic",
+    ),
+    ModelOption(
+        id="claude-haiku-5-5",
+        label="Claude Haiku 5.5",
+        description="Fastest and cheapest",
+        provider="anthropic",
+    ),
+    # OpenAI models, with the user's own OpenAI key.
+    ModelOption(
+        id="gpt-5",
+        label="GPT-5",
+        description="OpenAI's flagship reasoning model",
+        provider="openai",
+    ),
+    ModelOption(
+        id="gpt-5-mini",
+        label="GPT-5 mini",
+        description="Faster and cheaper",
+        provider="openai",
     ),
     # Routes each request to a free model. Free models allow 50 requests a day
     # (1,000 after buying $10 of credits), and an agent turn makes several requests.
@@ -56,8 +85,6 @@ def server_keys(settings: Settings) -> dict[Provider, SecretStr]:
     """The keys the server itself supplies (from the environment), used until a user adds
     their own."""
     keys: dict[Provider, SecretStr] = {}
-    if settings.mistral_api_token:
-        keys["mistral"] = settings.mistral_api_token
     if settings.openrouter_api_key:
         keys["openrouter"] = settings.openrouter_api_key
     if settings.ollama_base_url:
@@ -74,12 +101,25 @@ def available_models(keys: ProviderKeys) -> list[ModelOption]:
 def create_chat_model(
     option: ModelOption, keys: ProviderKeys, *, reasoning_effort: Literal["high", "none"]
 ) -> BaseChatModel:
-    if option.provider == "mistral":
-        return ChatMistralAI(
+    if option.provider == "anthropic":
+        thinking = reasoning_effort == "high"
+        return ChatAnthropic(
             model_name=option.id,
-            api_key=keys["mistral"],
-            temperature=0.3,
-            model_kwargs={"reasoning_effort": reasoning_effort},
+            api_key=keys["anthropic"],
+            max_tokens=ANSWER_MAX_TOKENS,
+            # Extended thinking only runs at the default temperature.
+            **(
+                {"thinking": {"type": "enabled", "budget_tokens": THINKING_BUDGET_TOKENS}}
+                if thinking
+                else {"temperature": 0.3}
+            ),
+        )
+    if option.provider == "openai":
+        # The reasoning models only run at their default temperature.
+        return ChatOpenAI(
+            model=option.id,
+            api_key=keys["openai"],
+            reasoning_effort="high" if reasoning_effort == "high" else "minimal",
         )
     if option.provider == "openrouter":
         return ChatOpenRouter(

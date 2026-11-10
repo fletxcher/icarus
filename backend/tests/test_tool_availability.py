@@ -85,9 +85,7 @@ def test_calling_a_tool_that_does_not_exist_reports_an_error_to_the_model(client
     )
     use_agent(
         client,
-        build_agent(
-            {"mistral-medium-3-5": model}, plot_tools(), default_model="mistral-medium-3-5"
-        ),
+        build_agent({"openrouter/free": model}, plot_tools(), default_model="openrouter/free"),
     )
     thread_id = create_thread(client)
 

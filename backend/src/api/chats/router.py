@@ -17,7 +17,6 @@ from ..compute.describe import running_note
 from ..dependencies import ServicesDep
 from ..design.service import designs_note
 from ..files.schemas import StoredFile
-from ..languages import Language
 from ..limits.repository import WINDOW, LimitReached
 from .schemas import (
     MessageCreate,
@@ -95,7 +94,6 @@ async def truncate_messages(
 class Turn:
     agent: CompiledStateGraph
     model: str
-    language: Language | None = None
     # What the agent is told about this chat's running simulations and designed parts (see
     # compute/describe.py and design/service.py).
     situation: str | None = None
@@ -213,9 +211,7 @@ async def store_and_build_turn(
     title = None
     if setup.titles and thread.auto_title and len(messages) == 1:
         title = setup.titles.start(thread_id, model, messages[0].content)
-    return Turn(
-        agent=setup.agent, model=model, language=body.language, situation=situation, title=title
-    )
+    return Turn(agent=setup.agent, model=model, situation=situation, title=title)
 
 
 @router.post("/{thread_id}/messages", response_class=EventSourceResponse)
@@ -229,7 +225,6 @@ async def send_message(
         services.files,
         thread_id=thread_id,
         model=turn.model,
-        language=turn.language,
         situation=turn.situation,
         on_error=turn.refund,
     )
