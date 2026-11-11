@@ -1,4 +1,4 @@
-"""Gives the chats, files and simulations made before accounts existed to one account.
+"""Gives the chats and files made before accounts existed to one account.
 
     uv run claim-data you@example.com             assign them
     uv run claim-data you@example.com --dry-run   only count them
@@ -13,15 +13,15 @@ import sys
 from pymongo import MongoClient
 from pymongo.database import Database
 
-from .catalog import FILES, SIMULATIONS, THREADS, USERS
+from .catalog import FILES, THREADS, USERS
 from .config import get_settings
 
-OWNED = [THREADS, FILES, SIMULATIONS]
+OWNED = [THREADS, FILES]
 UNOWNED = {"user_id": {"$exists": False}}
 
 
 def claim(db: Database, email: str, *, dry_run: bool = False) -> dict[str, int]:
-    """Assigns every unowned chat, file and simulation to the user with this email.
+    """Assigns every unowned chat and file to the user with this email.
 
     Returns how many of each were (or, with `dry_run`, would be) assigned.
     Raises LookupError if there's no such user."""

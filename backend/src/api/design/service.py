@@ -1,8 +1,8 @@
-"""Parts the agent designs with build123d code, built on the user's work station.
+"""Parts the agent designs with build123d code, built on the compute host.
 
 The code runs in `workstation/cad_build.py`, which checks and fences it in. A built part is kept
-as an ordinary STL file (so the FEA and CFD tools, the 3D viewer and downloads all take it as they
-take an upload) together with the code that made it, which exports it again in any format asked for.
+as an ordinary STL file (so it downloads like an upload) together
+with the code that made it, which exports it again in any format asked for.
 """
 
 import json
@@ -67,8 +67,7 @@ def designs_note(parts: list[StoredFile]) -> str | None:
         for part in parts
     ]
     return (
-        "Parts you designed in this chat, with the geometry_file_id to give export_geometry, "
-        "submit_fea_simulation or submit_cfd3d_simulation:\n"
+        "Parts you designed in this chat, with the geometry_file_id to give export_geometry:\n"
         + "\n".join(lines)
         + "\nUse these ids yourself; never ask the user for one. To change a part, call "
         "get_geometry to read its code, then create_geometry with the edited code."
@@ -85,7 +84,7 @@ class DesignService:
         self._user_id = user_id
 
     async def _run(self, code: str, *args: str) -> tuple[dict, str]:
-        """Runs the code on the work station; returns cad_build's report and the scratch folder.
+        """Runs the code on the compute host; returns cad_build's report and the scratch folder.
         The caller removes the folder."""
         if len(code) > MAX_CODE_CHARS:
             raise DesignError(f"the code is over {MAX_CODE_CHARS} characters; simplify it")

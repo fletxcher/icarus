@@ -59,10 +59,22 @@ class Settings(BaseSettings):
     api_public_url: str = "http://localhost:8000"
     frontend_url: str = "http://localhost:3000"
 
-    @field_validator("google_client_id", "google_client_secret", mode="before")
+    @field_validator(
+        "google_client_id",
+        "google_client_secret",
+        "ws_host",
+        "ws_ssh_key",
+        "ws_host_key",
+        "ws_workdir",
+        mode="before",
+    )
     @classmethod
     def _blank_is_unset(cls, value: object) -> object:
         return None if isinstance(value, str) and not value.strip() else value
+
+    @property
+    def compute_workdir(self) -> str:
+        return self.ws_workdir or f"/home/{self.ws_user}/icarus"
 
     @property
     def google_enabled(self) -> bool:
@@ -80,24 +92,25 @@ class Settings(BaseSettings):
     # Request/response bodies and tool payloads longer than this are truncated in logs.
     log_body_max_chars: int = 2000
 
-    # Simulation work station, reached over SSH
+    # The compute host (where XFOIL and part builds run), reached over SSH. All three of
+    # ws_host, ws_ssh_key and ws_host_key are needed. The key and the host key are the text
+    # itself, not file paths, so they can be set as environment variables anywhere.
     ws_host: str | None = None
+    # The private key Icarus logs in with (the file's contents; "\n" can stand for line breaks).
+    ws_ssh_key: SecretStr | None = None
+    # The host's public key, from `ssh-keyscan -t ed25519 <host>`: the connection is refused
+    # unless the host presents exactly this key.
+    ws_host_key: str | None = None
     ws_port: int = 22
-    ws_user: str = "ubuntu"
-    ws_ssh_key_path: str | None = None
-    ws_known_hosts_path: str | None = None
-    ws_workdir: str = "/home/ubuntu/icarus"
-    ws_cfd_script: str = "/home/ubuntu/icarus/bin/run_cfd2d.sh"
-    # Whether a user may connect their own work station at a loopback, private-network or
-    # link-local address (a VM or machine on their network). Turn it off for a server
-    # on the public internet, where those addresses are the server's own network.
+    ws_user: str = "icarus"
+    # Where Icarus's files are on the host; ~/icarus of ws_user when not set.
+    ws_workdir: str | None = None
+    # Whether a user may give an Ollama address on a loopback, private-network or link-local
+    # address (a machine on their own network). Turn it off for a server on the public
+    # internet, where those addresses are the server's own network.
     allow_private_workstations: bool = True
 
-    # How often (seconds) the backend checks the work station for finished simulations, to tell
-    # their chats; 0 turns the check off.
-    simulation_watch_s: float = 10.0
-
-    # XFOIL: run on this server ("local") or on the simulation work station ("ws")
+    # XFOIL: run on this server ("local") or on the compute host ("ws")
     xfoil_runner: Literal["local", "ws"] = "ws"
     xfoil_path: str = "xfoil"
     # "xvfb": run under a virtual display (needs the xvfb package); required by the

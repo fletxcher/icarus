@@ -3,7 +3,6 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
 from api.agent.capabilities import (
-    CFD_CAPABILITY,
     DESIGN_CAPABILITY,
     NO_WORKSTATION,
     XFOIL_CAPABILITY,
@@ -25,18 +24,16 @@ def test_capabilities_follow_the_setup(monkeypatch: pytest.MonkeyPatch):
     installed = {"xfoil", "xvfb-run"}
     monkeypatch.setattr("shutil.which", lambda name: name if name in installed else None)
 
-    # Local XFOIL with xvfb, no work station: only CFD is missing.
+    # Local XFOIL with xvfb, no compute host: only part design is missing.
     local = settings(xfoil_runner="local")
     assert unavailable_capabilities(local, workstation=False) == {
-        CFD_CAPABILITY: NO_WORKSTATION,
         DESIGN_CAPABILITY: NO_WORKSTATION,
     }
-    # A work station makes both available.
+    # A compute host makes both available.
     assert unavailable_capabilities(settings(xfoil_runner="ws"), workstation=True) == {}
-    # XFOIL on the work station without a work station: neither.
+    # XFOIL on the compute host without one: neither.
     assert set(unavailable_capabilities(settings(xfoil_runner="ws"), workstation=False)) == {
         XFOIL_CAPABILITY,
-        CFD_CAPABILITY,
         DESIGN_CAPABILITY,
     }
 
@@ -50,12 +47,12 @@ def test_capabilities_follow_the_setup(monkeypatch: pytest.MonkeyPatch):
 
 def test_prompt_lists_available_tools_and_missing_capabilities():
     prompt = build_system_prompt(
-        plot_tools(), {CFD_CAPABILITY: "the work station isn't configured"}
+        plot_tools(), {DESIGN_CAPABILITY: "the compute host isn't configured"}
     )
 
     assert "- create_plot: Draw a plot in the chat" in prompt
     assert "Not available right now" in prompt
-    assert f"- {CFD_CAPABILITY}: the work station isn't configured" in prompt
+    assert f"- {DESIGN_CAPABILITY}: the compute host isn't configured" in prompt
     assert "Never invent tool names" in prompt
 
 
@@ -64,14 +61,14 @@ def test_prompt_without_missing_capabilities_has_no_unavailable_section():
 
 
 def test_unconfigured_tools_are_not_given_to_the_model(client: TestClient):
-    # The test user has no work station of their own and the server has none.
+    # The server has no compute host in the tests.
     services = client.app.state.services
     user_id = client.get("/api/auth/me").json()["id"]
     agent = client.portal.call(services.agents.for_user, user_id).agent
     graph = agent.get_graph()
     tool_names = set(graph.nodes["tools"].data.tools_by_name)
     assert "create_plot" in tool_names
-    assert "submit_cfd_simulation" not in tool_names
+    assert "create_geometry" not in tool_names
 
 
 def test_calling_a_tool_that_does_not_exist_reports_an_error_to_the_model(client: TestClient):

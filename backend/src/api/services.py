@@ -9,7 +9,7 @@ from .agent.factory import AgentFactory
 from .agent.models import Provider, server_keys
 from .auth.repository import SessionRepository, UserRepository
 from .chats.repository import ChatRepository
-from .compute.pool import ComputePool
+from .compute.station import Compute
 from .config import Settings
 from .credentials.repository import CredentialRepository
 from .credentials.vault import Vault
@@ -28,9 +28,9 @@ class Services:
     # The daily limit on messages.
     limiter: MessageLimiter
     credentials: CredentialRepository
-    # Each user's work station: their own, or the shared one.
-    compute: ComputePool
-    # Each user's agent: their model keys (or the server's) and their work station.
+    # The compute host where XFOIL and part builds run.
+    compute: Compute
+    # Each user's agent: their model keys (or the server's) and the compute host.
     agents: AgentFactory
     # The models the server itself supplies keys for, offered until a user adds their own.
     server_providers: list[Provider]
@@ -42,13 +42,17 @@ class Services:
 def build_services(settings: Settings, db: AsyncDatabase) -> Services:
     vault = Vault(settings.credentials_key)
     if not vault.available:
-        logger.warning("CREDENTIALS_KEY is not set; users can't save their own keys or machines")
+        logger.warning("CREDENTIALS_KEY is not set; users can't save their own keys")
     credentials = CredentialRepository(db, vault)
-    compute = ComputePool(db, settings, credentials)
+    compute = Compute(db, settings)
     chats = ChatRepository(db)
     providers = sorted(server_keys(settings))
     logger.info("server model providers: %s", ", ".join(providers) or "none")
-    logger.info("shared work station: %s", settings.ws_host or "not configured")
+    station = compute.station
+    logger.info(
+        "compute host: %s",
+        settings.ws_host if station.available else station.reason or "not configured",
+    )
     return Services(
         chats=chats,
         files=FileRepository(db),

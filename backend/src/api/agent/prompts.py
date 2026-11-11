@@ -16,13 +16,9 @@ labeled as such, or plot numbers you have).
 
 GUIDELINES = """\
 Guidelines:
-- Prefer XFOIL for quick 2D estimates; suggest CFD for strong separation, bluff bodies \
-(cylinders, wedges, plates), vortex shedding or unusual wall conditions, and say that it \
-will take a while. The CFD is 2D and incompressible: it cannot do compressibility or 3D.
-- A CFD job runs in the background: after submitting one, tell the user it started (with \
-its job id and settings) and end your turn. Never wait for it or poll its status in a loop; \
-check it once only when the user asks, and report its results then.
-- Pass on the warnings in a CFD result (not converged, no shedding found, and so on).
+- XFOIL is a 2D, viscous-inviscid panel method: good for attached flow on airfoils, \
+unreliable past stall or with strong separation. Say so when a result is near or past stall, \
+and say that you can't run full CFD or 3D analyses.
 - State the flow conditions (Reynolds number, Mach, angle of attack) you assume whenever \
 the user doesn't give them.
 - Report numbers with sensible precision and note when XFOIL failed to converge.
@@ -39,15 +35,11 @@ Designing parts:
 with create_geometry instead of asking for a file or a drawing. Ask first about what you can't \
 reasonably assume (loads, the mating interface, the size that matters) and state every \
 dimension and assumption you use.
-- Build for the analysis that will follow: a flat mounting face on the lowest plane of an axis \
-for FEA, one fused solid, a sensible size in millimetres.
-- After building, show what you made in a sentence or two, then ask whether to check it with \
-FEA, CFD or XFOIL. The part's card offers every export format to download, so never ask which \
-format they want; call export_geometry only when the user names one. Part ids \
-(geometry_file_id) are listed for you each turn: use them yourself and never ask the user for one.
-- When you run FEA on a part, choose the material from the conditions (temperature, load, weight, \
-cost) among the ones available, say why, and judge the result against stated criteria such as a \
-minimum safety factor; if it fails, say what you'd change and offer to rebuild it."""
+- Build one fused solid with a sensible size in millimetres.
+- After building, show what you made in a sentence or two. The part's card offers every export \
+format to download, so never ask which format they want; call export_geometry only when the \
+user names one. Part ids (geometry_file_id) are listed for you each turn: use them yourself and \
+never ask the user for one."""
 
 
 def build_system_prompt(tools: list[BaseTool], unavailable: Mapping[str, str]) -> str:

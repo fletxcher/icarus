@@ -21,14 +21,12 @@ from .chats.definitions import (
     THREADS_INDEXES,
     THREADS_VALIDATOR,
 )
-from .compute.definitions import SIMULATIONS_INDEXES, SIMULATIONS_VALIDATOR
 from .credentials.definitions import CREDENTIALS_INDEXES, CREDENTIALS_VALIDATOR
 from .files.definitions import FILES_INDEXES, FILES_VALIDATOR
 from .limits.definitions import MESSAGE_USAGE_INDEXES, MESSAGE_USAGE_VALIDATOR
 
 THREADS = "threads"
 MESSAGES = "messages"
-SIMULATIONS = "simulations"
 FILES = "files"
 USERS = "users"
 SESSIONS = "sessions"
@@ -72,13 +70,6 @@ COLLECTIONS = [
         enforced=False,
     ),
     CollectionSpec(
-        SIMULATIONS,
-        "CFD jobs submitted to the simulation work station, with their status and results.",
-        SIMULATIONS_VALIDATOR,
-        SIMULATIONS_INDEXES,
-        enforced=False,
-    ),
-    CollectionSpec(
         USERS,
         "Accounts: email, credentials (password hash and/or OAuth identities), role and "
         "preferences.",
@@ -96,7 +87,7 @@ COLLECTIONS = [
     ),
     CollectionSpec(
         CREDENTIALS,
-        "Each user's own model API keys and work station. The secrets are encrypted with "
+        "Each user's own model API keys. The secrets are encrypted with "
         "CREDENTIALS_KEY; `details` holds what can be shown without decrypting.",
         CREDENTIALS_VALIDATOR,
         CREDENTIALS_INDEXES,

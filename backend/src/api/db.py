@@ -3,14 +3,13 @@ import logging
 from pymongo import AsyncMongoClient
 from pymongo.asynchronous.database import AsyncDatabase
 
-from .catalog import COLLECTIONS, FILES, MESSAGES, SESSIONS, SIMULATIONS, THREADS, USERS
+from .catalog import COLLECTIONS, FILES, MESSAGES, SESSIONS, THREADS, USERS
 from .config import Settings
 
 __all__ = [
     "FILES",
     "MESSAGES",
     "SESSIONS",
-    "SIMULATIONS",
     "THREADS",
     "USERS",
     "create_client",

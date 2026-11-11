@@ -6,9 +6,7 @@ from pydantic import BaseModel, Field
 from ..files.schemas import Attachment
 from ..mongo import MongoModel
 
-# "notice" is an automatic note (e.g. that a simulation finished): the agent reads it as if the
-# user had said it, and the chat shows it as an event.
-Role = Literal["user", "assistant", "notice"]
+Role = Literal["user", "assistant"]
 MessageStatus = Literal["streaming", "done", "stopped", "error"]
 
 

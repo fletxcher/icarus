@@ -14,8 +14,8 @@ function errorMessage(error: unknown): string {
 }
 
 // Whether the app has been opened in this browser tab since the page loaded or since signing
-// out. The first time it opens on a new chat; moving between pages afterwards (a simulation's
-// page and back) keeps the chat you were in.
+// out. The first time it opens on a new chat; moving between pages afterwards keeps the chat
+// you were in.
 let landed = false;
 
 /** The next time the app opens it opens on a new chat (after signing out or in, say). */
@@ -67,44 +67,6 @@ async function loadMessages(threadId: string) {
   }
 }
 
-/** Reloads a chat's messages from the server (e.g. a notice that arrived while it was open). */
-export async function refreshThread(threadId: string) {
-  await loadMessages(threadId);
-}
-
-/** Has the assistant look at the latest notice (a simulation that finished), as if asked. */
-export async function discussNotice(threadId: string) {
-  if (store().controller) return;
-  await runTurn(threadId);
-}
-
-/** Puts a simulation back on the list. */
-export async function showSimulation(jobId: string): Promise<boolean> {
-  try {
-    await api.setSimulationHidden(jobId, false);
-    store().setSimulations(await api.listSimulations());
-    return true;
-  } catch (error) {
-    toast.error(errorMessage(error));
-    return false;
-  }
-}
-
-/** Takes a simulation off the list. The job, its results and its files are all kept. */
-export async function hideSimulation(jobId: string): Promise<boolean> {
-  try {
-    await api.setSimulationHidden(jobId, true);
-    store().setSimulations(store().simulations.filter((job) => job.id !== jobId));
-    toast.success("Removed from the simulations list", {
-      action: { label: "Undo", onClick: () => void showSimulation(jobId) },
-    });
-    return true;
-  } catch (error) {
-    toast.error(errorMessage(error));
-    return false;
-  }
-}
-
 export function newChat() {
   store().setActiveThread(null);
   store().requestChatView();
@@ -138,8 +100,6 @@ export async function deleteThread(threadId: string) {
   try {
     await api.deleteThread(threadId);
     store().removeThread(threadId);
-    // The chat's simulations are deleted with it.
-    store().setSimulations(store().simulations.filter((job) => job.thread_id !== threadId));
   } catch (error) {
     toast.error(errorMessage(error));
   }

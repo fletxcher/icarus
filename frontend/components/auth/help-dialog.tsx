@@ -15,7 +15,7 @@ import { api, type StatusCheck } from "@/lib/api";
 
 const EXAMPLES = [
   "Plot the lift polar of a NACA 2412 at Re = 1e6.",
-  "Simulate flow around a cylinder at Re = 150 and show the vortex shedding.",
+  "Design an L-shaped bracket with two holes and let me download it as STEP.",
   "Compare NACA 0012 and NACA 4412 at 6° angle of attack.",
   "Which airfoils are good for a low-speed glider?",
 ];
@@ -23,11 +23,8 @@ const EXAMPLES = [
 const CAPABILITIES = [
   "Airfoil polars and pressure distributions with XFOIL",
   "NACA airfoil search and comparison",
-  "2D CFD (OpenFOAM) around airfoils, cylinders, ellipses, wedges and rectangles, with wall conditions",
-  "Stress, deflection and frequencies of an uploaded STL solid (CalculiX), under spin, pressure and heat",
-  "3D CFD (OpenFOAM) of an uploaded STL solid: external flow, blade passages and rotating blades, with forces and surface pressure",
-  "Designing parts from a description (build123d CAD), previewed in 3D and exported as STEP, STL, 3MF, OBJ, GLB or BREP",
-  "Plots, and flow images and video from finished simulations",
+  "Designing parts from a description (build123d CAD), exported as STEP, STL, 3MF, OBJ, GLB or BREP",
+  "Plots of the results",
 ];
 
 const SHORTCUTS: { keys: string[]; label: string }[] = [
@@ -153,10 +150,6 @@ export function HelpDialog({
               <li key={capability}>{capability}</li>
             ))}
           </ul>
-          <p className="text-muted-foreground">
-            CFD runs in the background: follow it from the chart button at the
-            top right.
-          </p>
         </Section>
 
         <Section title="Keyboard shortcuts">

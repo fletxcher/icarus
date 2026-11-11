@@ -151,7 +151,7 @@ class XfoilService:
         command_prefix: str = "",
     ) -> None:
         self._runner = runner
-        # In front of the command that runs XFOIL: runs it inside the work station's solver image.
+        # In front of the command that runs XFOIL (the compute host's icarus-exec wrapper).
         self._prefix = command_prefix
         self._xfoil_path = xfoil_path
         self._display = display

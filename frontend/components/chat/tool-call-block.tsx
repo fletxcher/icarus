@@ -1,14 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import {
-  ActivityIcon,
   BoxIcon,
   ChartLineIcon,
   ChevronRightIcon,
   CircleCheckIcon,
   CircleXIcon,
-  CpuIcon,
   DownloadIcon,
   LoaderCircleIcon,
   PlaneIcon,
@@ -27,12 +24,8 @@ import { Markdown } from "./markdown";
 const TOOLS: Record<string, { label: string; icon: LucideIcon }> = {
   run_xfoil_polar: { label: "XFOIL analysis", icon: PlaneIcon },
   search_naca4_airfoils: { label: "Airfoil search", icon: SearchIcon },
-  submit_cfd_simulation: { label: "CFD simulation", icon: CpuIcon },
-  submit_fea_simulation: { label: "FEA simulation", icon: CpuIcon },
-  submit_cfd3d_simulation: { label: "3D CFD simulation", icon: CpuIcon },
   create_geometry: { label: "CAD design", icon: BoxIcon },
   export_geometry: { label: "Export geometry", icon: BoxIcon },
-  get_simulation_status: { label: "Simulation status", icon: CpuIcon },
   create_plot: { label: "Plot", icon: ChartLineIcon },
 };
 
@@ -55,26 +48,9 @@ function summarizeArgs(args: Record<string, unknown>): string {
   return parts.join(" · ");
 }
 
-const JOB_ID = /Job ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
-
-/** The CFD job a tool call started or asked about, once its id is known. */
-function jobIdOf(part: ToolPart): string | null {
-  if (part.name === "get_simulation_status" && typeof part.args.job_id === "string") {
-    return part.args.job_id;
-  }
-  if ((part.name === "submit_cfd_simulation" ||
-      part.name === "submit_fea_simulation" ||
-      part.name === "submit_cfd3d_simulation") &&
-    part.result) {
-    return JOB_ID.exec(part.result)?.[1] ?? null;
-  }
-  return null;
-}
-
 const FILE_ID = /File id: ([0-9a-f-]{36})/i;
 
 export function ToolCallBlock({ part }: { part: ToolPart }) {
-  const jobId = jobIdOf(part);
   const designId =
     part.name === "create_geometry" && part.result ? FILE_ID.exec(part.result)?.[1] : null;
   const exported =
@@ -100,14 +76,6 @@ export function ToolCallBlock({ part }: { part: ToolPart }) {
             <DownloadIcon />
             Download {exported.format.toUpperCase()}
           </a>
-        </Button>
-      )}
-      {jobId && (
-        <Button variant="outline" size="sm" className="self-start" asChild>
-          <Link href={`/simulations/${jobId}`}>
-            <ActivityIcon />
-            Open simulation
-          </Link>
         </Button>
       )}
     </div>

@@ -1,13 +1,11 @@
 "use client";
 
 import {
-  ActivityIcon,
   KeyRoundIcon,
   LogOutIcon,
   MonitorIcon,
   MoonIcon,
   SearchIcon,
-  ServerIcon,
   SettingsIcon,
   SunIcon,
   UserIcon,
@@ -15,8 +13,6 @@ import {
 import { useTheme } from "next-themes";
 import { useState } from "react";
 import { ModelKeysPanel } from "@/components/auth/model-keys-panel";
-import { UsageBody } from "@/components/auth/usage-summary";
-import { WorkstationPanel } from "@/components/auth/workstation-panel";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -44,7 +40,7 @@ import {
 } from "@/stores/settings-store";
 
 export type SettingsSection =
-  "general" | "account" | "model-keys" | "workstation" | "usage";
+  "general" | "account" | "model-keys";
 
 const SECTIONS: {
   id: SettingsSection;
@@ -54,8 +50,6 @@ const SECTIONS: {
   { id: "general", label: "General", icon: SettingsIcon },
   { id: "account", label: "Account", icon: UserIcon },
   { id: "model-keys", label: "API keys", icon: KeyRoundIcon },
-  { id: "workstation", label: "Work station", icon: ServerIcon },
-  { id: "usage", label: "Usage", icon: ActivityIcon },
 ];
 
 /** One setting: its name (and what it does) on the left, its control on the right. */
@@ -356,7 +350,7 @@ export function SettingsDialog({
           Settings
         </DialogTitle>
         <DialogDescription className="sr-only">
-          Preferences, account, keys, work station and usage.
+          Preferences, account and API keys.
         </DialogDescription>
         <div className="grid min-h-0 flex-1 grid-cols-[13rem_1fr] max-sm:grid-cols-1">
           <nav className="flex flex-col gap-1 overflow-y-auto border-r p-3 max-sm:border-r-0 max-sm:border-b">
@@ -423,7 +417,7 @@ export function SettingsDialog({
               <GeneralPanel groups={general} />
             ) : section === "account" ? (
               <AccountPanel user={user} onLogout={onLogout} />
-            ) : section === "model-keys" ? (
+            ) : (
               <section>
                 <Heading>API keys</Heading>
                 <p className="mb-3 text-sm text-muted-foreground">
@@ -431,22 +425,6 @@ export function SettingsDialog({
                   Icarus&apos;s own key is used where it has one.
                 </p>
                 <ModelKeysPanel />
-              </section>
-            ) : section === "workstation" ? (
-              <section>
-                <Heading>Work station</Heading>
-                <p className="mb-3 text-sm text-muted-foreground">
-                  The machine that runs XFOIL and the CFD simulations for you.
-                </p>
-                <WorkstationPanel />
-              </section>
-            ) : (
-              <section>
-                <Heading>Usage</Heading>
-                <p className="mb-3 text-sm text-muted-foreground">
-                  CFD simulations run on the work station. Time is approximate.
-                </p>
-                <UsageBody />
               </section>
             )}
           </div>

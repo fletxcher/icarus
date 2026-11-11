@@ -1,4 +1,4 @@
-"""Where shell commands run: this server, or the simulation work station over SSH.
+"""Where shell commands run: this server, or the compute host over SSH.
 
 Tools depend on the `CommandRunner` protocol, so XFOIL can move between machines by
 changing `XFOIL_RUNNER` without touching tool code.
@@ -50,12 +50,8 @@ def _log_result(where: str, command: str, result: "CommandResult", started: floa
         )
 
 
-def _expand(path: str) -> str:
-    return str(Path(path).expanduser())
-
-
 def via_exec(workdir: str) -> str:
-    """The prefix that runs a command where the solvers are on a work station: its
+    """The prefix that runs a command where the tools are on the compute host: its
     `bin/icarus-exec`, which uses the solver image in Docker mode and runs the command directly
     otherwise. Empty on a machine whose runner files predate it, so those keep working."""
     path = shlex.quote(f"{workdir}/bin/icarus-exec")
@@ -131,51 +127,87 @@ class LocalRunner:
 CONNECT_TIMEOUT_S = 15.0
 
 
+class HostNotConfigured(ValueError):
+    """The compute host's settings are missing or unusable; the message names what to fix."""
+
+
+def _host_key_parts(text: str) -> tuple[str, str]:
+    """The key type and key from what `ssh-keyscan` prints (`host type key`, with `#` comment
+    lines) or from just `type key`."""
+    for line in text.splitlines():
+        words = line.split()
+        if not words or words[0].startswith("#"):
+            continue
+        if len(words) >= 3 and not words[0].startswith(("ssh-", "ecdsa-", "sk-")):
+            words = words[1:]  # the host name or address in front
+        if len(words) >= 2:
+            return words[0], words[1]
+    raise HostNotConfigured("WS_HOST_KEY isn't a host key: use the output of ssh-keyscan")
+
+
 @dataclass(frozen=True)
 class WorkstationTarget:
-    """Where and how to reach a work station, and where the CFD files live on it."""
+    """Where and how to reach the compute host, and where Icarus's files live on it."""
 
     host: str
     port: int
     username: str
     workdir: str
-    cfd_script: str
-    # The server's own work station reads ~/.ssh (keys, config, agent); a user's connects
-    # with only the key they gave and the host key they approved.
-    own_key: asyncssh.SSHKey | None = None
-    host_keys: asyncssh.SSHKnownHosts | None = None
-    key_path: str | None = None
-    known_hosts_path: str | None = None
+    key: asyncssh.SSHKey
+    host_keys: asyncssh.SSHKnownHosts
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "WorkstationTarget":
-        if not settings.ws_host:
-            raise ValueError("WS_HOST must be set to run commands on the simulation work station")
+        """Raises HostNotConfigured, saying what is missing, if the settings can't reach a host."""
+        missing = [
+            name
+            for name, value in (
+                ("WS_HOST", settings.ws_host),
+                ("WS_SSH_KEY", settings.ws_ssh_key),
+                ("WS_HOST_KEY", settings.ws_host_key),
+            )
+            if not value
+        ]
+        if missing:
+            raise HostNotConfigured(f"not set up on the server: {', '.join(missing)}")
+        assert settings.ws_host and settings.ws_ssh_key and settings.ws_host_key
+        pem = settings.ws_ssh_key.get_secret_value().strip()
+        if "\n" not in pem:
+            pem = pem.replace("\\n", "\n")  # a key written on one line, with \n for line breaks
+        try:
+            key = asyncssh.import_private_key(pem + "\n")
+        except (asyncssh.KeyImportError, asyncssh.KeyEncryptionError, ValueError):
+            raise HostNotConfigured(
+                "WS_SSH_KEY isn't a usable private key (it must not have a passphrase)"
+            ) from None
+        key_type, host_key = _host_key_parts(settings.ws_host_key)
+        entry = (
+            settings.ws_host
+            if settings.ws_port == 22
+            else f"[{settings.ws_host}]:{settings.ws_port}"
+        )
+        try:
+            host_keys = asyncssh.import_known_hosts(f"{entry} {key_type} {host_key}\n")
+        except (asyncssh.KeyImportError, ValueError):
+            raise HostNotConfigured("WS_HOST_KEY isn't a usable host key") from None
         return cls(
             host=settings.ws_host,
             port=settings.ws_port,
             username=settings.ws_user,
-            workdir=settings.ws_workdir,
-            cfd_script=settings.ws_cfd_script,
-            key_path=settings.ws_ssh_key_path,
-            known_hosts_path=settings.ws_known_hosts_path,
+            workdir=settings.compute_workdir,
+            key=key,
+            host_keys=host_keys,
         )
 
     def connect_options(self) -> dict[str, Any]:
-        if self.own_key is not None:
-            return {
-                "client_keys": [self.own_key],
-                "known_hosts": self.host_keys,
-                "preferred_auth": "publickey",
-                "config": None,
-                "agent_path": None,
-                "agent_forwarding": False,
-            }
-        # For both options () means the ~/.ssh defaults, while None would
-        # disable key auth / host key checking, so never pass None.
+        """The key given and the host key approved, and nothing from ~/.ssh on this server."""
         return {
-            "client_keys": [_expand(self.key_path)] if self.key_path else (),
-            "known_hosts": _expand(self.known_hosts_path) if self.known_hosts_path else (),
+            "client_keys": [self.key],
+            "known_hosts": self.host_keys,
+            "preferred_auth": "publickey",
+            "config": None,
+            "agent_path": None,
+            "agent_forwarding": False,
         }
 
 
@@ -191,7 +223,7 @@ async def connect(target: WorkstationTarget) -> asyncssh.SSHClientConnection:
 
 
 class SSHRunner:
-    """Runs commands on a work station, reusing one SSH connection."""
+    """Runs commands on the compute host, reusing one SSH connection."""
 
     def __init__(self, target: WorkstationTarget) -> None:
         self.target = target
@@ -202,9 +234,9 @@ class SSHRunner:
         async with self._lock:
             if self._connection is None or self._connection.is_closed():
                 t = self.target
-                logger.info("connecting to work station %s@%s:%d", t.username, t.host, t.port)
+                logger.info("connecting to compute host %s@%s:%d", t.username, t.host, t.port)
                 self._connection = await connect(t)
-                logger.info("connected to work station %s", t.host)
+                logger.info("connected to compute host %s", t.host)
             return self._connection
 
     async def run(
@@ -213,17 +245,14 @@ class SSHRunner:
         *,
         cwd: str | None = None,
         timeout_s: float | None = None,
-        stdin: str | None = None,
     ) -> CommandResult:
-        """`stdin` is sent to the command's standard input and never logged (it may be a
-        password for `sudo -S`)."""
         connection = await self._connect()
         if cwd:
             command = f"cd {shlex.quote(cwd)} && {command}"
         logger.debug("ws run: %s", command)
         started = time.perf_counter()
         try:
-            completed = await connection.run(command, check=False, timeout=timeout_s, input=stdin)
+            completed = await connection.run(command, check=False, timeout=timeout_s)
         except (asyncssh.Error, TimeoutError):
             logger.exception("ws command failed (connection error or timeout): %s", command)
             raise
@@ -265,7 +294,7 @@ class SSHRunner:
         result = await self.run("mktemp -d -t icarus-XXXXXX")
         if not result.ok:
             raise RuntimeError(
-                f"could not create temp dir on work station: {result.stderr.strip()}"
+                f"could not create temp dir on compute host: {result.stderr.strip()}"
             )
         return result.stdout.strip()
 

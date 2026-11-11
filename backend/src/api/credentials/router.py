@@ -1,41 +1,23 @@
-"""`/api/credentials`: the signed-in user's own model API keys and work station.
+"""`/api/credentials`: the signed-in user's own model API keys.
 
 Secrets only go in. They're stored encrypted (see `vault.py`) and no endpoint returns them;
-the user sees the last characters of a key, and a work station's host, user and fingerprint.
+the user sees the last characters of a key.
 """
 
 import logging
 from urllib.parse import urlsplit
 
-import asyncssh
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import SecretStr
 
 from ..agent import ollama
 from ..agent.models import Provider
 from ..auth.router import CurrentUser
-from ..compute.pool import target_for
-from ..compute.runner import SSHRunner
 from ..config import get_settings
 from ..dependencies import ServicesDep
-from . import cleanup, providers, provision, workstation
-from .schemas import (
-    Hardware,
-    HostKey,
-    HostKeyRequest,
-    ModelKeyIn,
-    ModelKeyInfo,
-    OllamaIn,
-    Overview,
-    SetupIn,
-    SetupPlan,
-    SetupProgress,
-    WorkstationDetails,
-    WorkstationIn,
-    WorkstationInfo,
-    WorkstationReport,
-)
-from .workstation import ConnectionProblem
+from . import providers
+from .addresses import AddressProblem, check_address
+from .schemas import ModelKeyIn, ModelKeyInfo, OllamaIn, Overview
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +43,7 @@ def _unprocessable(message: str) -> HTTPException:
 async def overview(services: ServicesDep, user: CurrentUser) -> Overview:
     return Overview(
         model_keys=await services.credentials.list_model_keys(user.id),
-        workstations=await services.credentials.list_workstations(user.id),
         default_providers=services.server_providers,
-        default_workstation=services.compute.shared_available,
         storage_available=services.credentials.vault.available,
     )
 
@@ -98,13 +78,13 @@ async def save_ollama(body: OllamaIn, services: ServicesDep, user: CurrentUser) 
         )
     base_url = f"{url.scheme}://{url.netloc}"
     try:
-        await workstation.check_address(
+        await check_address(
             url.hostname,
             url.port or (443 if url.scheme == "https" else 80),
             allow_private=get_settings().allow_private_workstations,
         )
         await ollama.installed_models(base_url)
-    except ConnectionProblem as problem:
+    except AddressProblem as problem:
         raise _unprocessable(str(problem)) from None
     except ollama.OllamaUnavailable:
         raise _unprocessable(f"{base_url} didn't answer like an Ollama server.") from None
@@ -118,242 +98,3 @@ async def save_ollama(body: OllamaIn, services: ServicesDep, user: CurrentUser) 
 async def remove_model_key(provider: Provider, services: ServicesDep, user: CurrentUser) -> None:
     if not await services.credentials.delete_model_key(user.id, provider):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No key saved for that provider")
-
-
-@router.post("/workstation/host-key")
-async def look_up_host_key(body: HostKeyRequest, user: CurrentUser) -> HostKey:
-    """Fetches the machine's SSH host key so the user can confirm it's theirs."""
-    _ = user  # signed in only; the lookup itself touches nothing of the user's
-    try:
-        await workstation.check_address(
-            body.host, body.port, allow_private=get_settings().allow_private_workstations
-        )
-        return await workstation.fetch_host_key(body.host, body.port)
-    except ConnectionProblem as problem:
-        raise _unprocessable(str(problem)) from None
-
-
-@router.put("/workstation", dependencies=[Storage])
-async def save_workstation(
-    body: WorkstationIn, services: ServicesDep, user: CurrentUser
-) -> WorkstationReport:
-    """Connects to the machine, installs the runner scripts there and, if that works, saves it.
-
-    With a private key it connects with that key. With a password, Icarus makes a key of its own,
-    adds it to the machine using the password (for this one login) and then connects with it;
-    if the machine then lacks what Icarus needs, setup starts in the background using the same
-    password for sudo. The password is never stored or logged."""
-    if not 1 <= body.port <= 65535:
-        raise _unprocessable("The port must be between 1 and 65535.")
-    if body.id and await services.credentials.workstation_info(user.id, body.id) is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such machine")
-    private_key = body.private_key.get_secret_value() if body.private_key else None
-    password = body.password.get_secret_value() if body.password else None
-    if bool(private_key) == bool(password):
-        raise _unprocessable("Give either the machine's password or a private key.")
-    if private_key and len(private_key.strip()) < 32:
-        raise _unprocessable("That doesn't look like a private key.")
-    try:
-        await workstation.check_address(
-            body.host, body.port, allow_private=get_settings().allow_private_workstations
-        )
-        approved = workstation.parse_host_key(body.host_key)
-        if password:
-            key = asyncssh.generate_private_key("ssh-ed25519", comment="icarus")
-            await workstation.install_public_key(
-                body.host,
-                body.port,
-                body.username,
-                password,
-                approved,
-                f"{workstation.public_key_line(key)} icarus",
-            )
-        else:
-            key = workstation.load_private_key(
-                private_key or "",
-                body.passphrase.get_secret_value() if body.passphrase else None,
-            )
-        target, checks, machine = await workstation.inspect(
-            workstation.make_target(body.host, body.port, body.username, key, approved),
-            body.workdir.rstrip("/") if body.workdir else None,
-        )
-    except ConnectionProblem as problem:
-        raise _unprocessable(str(problem)) from None
-
-    details = WorkstationDetails(
-        name=body.name or body.host,
-        hardware=hardware_of(machine),
-        host=target.host,
-        port=target.port,
-        username=target.username,
-        workdir=target.workdir,
-        host_key=workstation.public_key_line(approved),
-        fingerprint=approved.get_fingerprint("sha256"),
-        public_key=workstation.public_key_line(key),
-    )
-    # Saved without a passphrase: the encrypted copy in the database is what protects it.
-    saved = await services.credentials.add_workstation(
-        user.id, details, key.export_private_key("openssh").decode(), machine_id=body.id
-    )
-    await services.compute.forget(user.id)
-    logger.info("user %s saved their work station %s@%s", user.id, body.username, body.host)
-    report = WorkstationReport(workstation=saved, checks=checks, machine=machine)
-    if password and any(not check.ok for check in checks):
-        await _start_setup(services, user.id, machine, password, report)
-    return report
-
-
-async def _start_setup(
-    services: ServicesDep,
-    user_id: str,
-    machine: workstation.MachineInfo,
-    password: str,
-    report: WorkstationReport,
-) -> None:
-    """Starts setting the new machine up, with the password it was connected with as the sudo
-    password if root is needed. Leaves a note instead when it can't."""
-    plan = provision.plan_for(machine)
-    if not plan.can_run:
-        report.setup_note = plan.reason
-        return
-    runner = await _own_station(services, user_id)
-    try:
-        await provision.start(
-            runner, machine, runner.target.username, password if plan.needs_password else None
-        )
-        report.setup = await provision.progress(runner)
-    except (OSError, TimeoutError, asyncssh.Error, ConnectionProblem) as problem:
-        report.setup_note = (
-            f"The machine is connected, but setup didn't start: {problem} "
-            "Use Set up this machine to try again."
-        )
-
-
-@router.post("/workstation/check")
-async def check_workstation(services: ServicesDep, user: CurrentUser) -> WorkstationReport:
-    """Re-checks the connected machine (and refreshes the runner scripts on it)."""
-    stored = await services.credentials.workstation(user.id)
-    if stored is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "No machine is connected")
-    try:
-        _, checks, machine = await workstation.inspect(target_for(stored), stored.details.workdir)
-    except ConnectionProblem as problem:
-        raise _unprocessable(str(problem)) from None
-    await services.credentials.set_hardware(user.id, stored.id, hardware_of(machine))
-    info = await services.credentials.workstation_info(user.id, stored.id)
-    assert info is not None
-    return WorkstationReport(workstation=info, checks=checks, machine=machine)
-
-
-def hardware_of(machine: workstation.MachineInfo) -> Hardware:
-    """What a machine's card shows of it."""
-    return Hardware(cpus=machine.cpus, cpu_model=machine.cpu_model, gpu=machine.gpu)
-
-
-async def _own_station(services: ServicesDep, user_id: str) -> SSHRunner:
-    """The runner of the user's saved machine, or 404 if they haven't added one."""
-    station = await services.compute.workstation(user_id)
-    if station.source != "own" or not isinstance(station.runner, SSHRunner):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "You haven't added a work station")
-    return station.runner
-
-
-def _unreachable(problem: Exception, runner: SSHRunner) -> HTTPException:
-    target = runner.target
-    if isinstance(problem, ConnectionProblem):
-        return _unprocessable(str(problem))
-    return _unprocessable(workstation.describe(problem, target.host, target.port))
-
-
-@router.get("/workstation/setup/plan")
-async def setup_plan(services: ServicesDep, user: CurrentUser) -> SetupPlan:
-    """What the setup button would install on the saved machine, for the confirmation dialog."""
-    runner = await _own_station(services, user.id)
-    try:
-        return provision.plan_for(await workstation.probe_machine(runner))
-    except (OSError, TimeoutError, asyncssh.Error, ConnectionProblem) as problem:
-        raise _unreachable(problem, runner) from None
-
-
-@router.post("/workstation/setup", status_code=status.HTTP_202_ACCEPTED)
-async def start_setup(body: SetupIn, services: ServicesDep, user: CurrentUser) -> SetupProgress:
-    """Starts installing Docker and the solver image on the saved machine, in the background.
-
-    The sudo password, when needed, is used for this one request and never stored or logged."""
-    runner = await _own_station(services, user.id)
-    password = body.password.get_secret_value() if body.password else None
-    try:
-        await provision.start(
-            runner, await workstation.probe_machine(runner), runner.target.username, password
-        )
-        return await provision.progress(runner)
-    except (OSError, TimeoutError, asyncssh.Error, ConnectionProblem) as problem:
-        raise _unreachable(problem, runner) from None
-
-
-@router.delete("/workstation/setup")
-async def cancel_setup(services: ServicesDep, user: CurrentUser) -> SetupProgress:
-    """Stops setup of the connected machine and removes the solver image it built."""
-    runner = await _own_station(services, user.id)
-    try:
-        return await provision.cancel(runner)
-    except (OSError, TimeoutError, asyncssh.Error, ConnectionProblem) as problem:
-        raise _unreachable(problem, runner) from None
-
-
-@router.get("/workstation/setup")
-async def setup_progress(services: ServicesDep, user: CurrentUser) -> SetupProgress:
-    """How setup is going on the saved machine."""
-    runner = await _own_station(services, user.id)
-    try:
-        return await provision.progress(runner)
-    except (OSError, TimeoutError, asyncssh.Error) as problem:
-        raise _unreachable(problem, runner) from None
-
-
-async def _saved(services: ServicesDep, user_id: str, machine_id: str) -> WorkstationInfo:
-    info = await services.credentials.workstation_info(user_id, machine_id)
-    if info is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such machine")
-    return info
-
-
-@router.post("/workstations/{machine_id}/connect")
-async def connect_workstation(
-    machine_id: str, services: ServicesDep, user: CurrentUser
-) -> WorkstationInfo:
-    """Makes this machine the one jobs run on, disconnecting any other."""
-    await _saved(services, user.id, machine_id)
-    if not await services.credentials.connect_workstation(user.id, machine_id):
-        raise _unprocessable("That machine is being removed.")
-    await services.compute.forget(user.id)
-    return await _saved(services, user.id, machine_id)
-
-
-@router.post("/workstations/{machine_id}/disconnect", status_code=status.HTTP_204_NO_CONTENT)
-async def disconnect_workstation(machine_id: str, services: ServicesDep, user: CurrentUser) -> None:
-    """Disconnects the machine; it stays saved. Jobs already running stay on it."""
-    await _saved(services, user.id, machine_id)
-    await services.credentials.disconnect_workstations(user.id)
-    await services.compute.forget(user.id)
-
-
-@router.delete(
-    "/workstations/{machine_id}",
-    status_code=status.HTTP_202_ACCEPTED,
-    response_model=WorkstationInfo | None,
-)
-async def remove_workstation(
-    machine_id: str, services: ServicesDep, user: CurrentUser, force: bool = False
-) -> WorkstationInfo | Response:
-    """Removes a machine. Its files and SSH key are cleaned off the machine in the background
-    first, and only then does it leave the database. `force` skips the cleanup and forgets the
-    machine at once, for one that can't be reached."""
-    info = await _saved(services, user.id, machine_id)
-    if force:
-        await services.credentials.delete_workstation(user.id, machine_id)
-        await services.compute.machine_removed(user.id, machine_id)
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
-    if info.status != "removing":
-        await cleanup.start_removal(services, user.id, machine_id)
-    return await _saved(services, user.id, machine_id)

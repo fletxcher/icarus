@@ -32,7 +32,7 @@ def build_agent(
         model_id = config.get("configurable", {}).get("model", default_model)
         model = bound.get(model_id, bound[default_model])
         preface = [prompt]
-        # What's going on right now (e.g. simulations still running), refreshed every turn.
+        # What's going on right now (e.g. the parts designed so far), refreshed every turn.
         if situation := config.get("configurable", {}).get("situation"):
             preface.append(SystemMessage(situation))
         response = await model.ainvoke([*preface, *state["messages"]], config)

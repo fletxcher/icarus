@@ -105,8 +105,7 @@ export function ThreadItem({ thread, isActive }: { thread: Thread; isActive: boo
           <AlertDialogHeader>
             <AlertDialogTitle>Delete chat?</AlertDialogTitle>
             <AlertDialogDescription>
-              &ldquo;{thread.title}&rdquo; will be permanently deleted, along with any simulations
-              started in it and their results.
+              &ldquo;{thread.title}&rdquo; will be permanently deleted.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -1,12 +1,12 @@
 # Icarus
 
 An AI engineering assistant. Describe what you need (a NACA profile, a polar at some Reynolds
-number, a CFD run, a bracket to design and check) and Icarus runs the real solvers and shows its
-reasoning, every tool call with its result, and the answer.
+number, a part to design) and Icarus runs the tools and shows its reasoning, every tool call with
+its result, and the answer.
 
 - `frontend/`: Next.js + shadcn/ui chat interface
 - `backend/`: FastAPI service that stores chats in MongoDB and runs a LangGraph agent with tools
-- `workstation/`: scripts and the Docker image that run the solvers on a remote machine
+- `workstation/`: the scripts the compute host needs
 
 Configuration for both lives in the `.env` at the repo root.
 
@@ -15,14 +15,12 @@ Configuration for both lives in the `.env` at the repo root.
 | Tool | Used for | Links |
 |---|---|---|
 | XFOIL | Fast 2D airfoil polars | [Home page](https://web.mit.edu/drela/Public/web/xfoil/) |
-| OpenFOAM (ESI) | 2D and 3D CFD (incompressible RANS) | [openfoam.com](https://www.openfoam.com) · [Documentation](https://www.openfoam.com/documentation) |
-| CalculiX | Finite element analysis (structural and thermal) of uploaded solids | [calculix.de](https://www.calculix.de) |
-| gmsh | Meshing for the CFD cases | [gmsh.info](https://gmsh.info) |
-| ParaView, ffmpeg | Flow images and video | [paraview.org](https://www.paraview.org) · [ffmpeg.org](https://ffmpeg.org) |
-| build123d | Designing parts from code | [build123d](https://github.com/gumyr/build123d) |
+| build123d | Designing parts from code, exported as STEP, STL and more | [build123d](https://github.com/gumyr/build123d) |
 
 Plots are drawn from Plotly specs, and users can attach text, CSV, STL, OBJ, STEP and PDF files.
-Simulations run on a machine the user connects; the chat is told when a job ends.
+The tools run on one compute host that the server reaches over SSH, not on the user's computer.
+(The earlier version also ran OpenFOAM, CalculiX and ParaView on machines users connected; that
+code is in the git history at the commit `checkpoint: full solvers`.)
 
 ## Running it
 
@@ -55,8 +53,9 @@ Main `.env` settings:
 | `CREDENTIALS_KEY` | Encrypts users' saved keys and SSH keys. Keep a copy: losing it makes them unreadable |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional "Sign in with Google" (see below) |
 | `DAILY_MESSAGE_LIMIT` | Messages each user may send in any 24 hours (default 5; a prompt and its reply is one; 0 means no limit) |
-| `XFOIL_RUNNER` | `ws` (a connected machine) or `local` (this server, needs `xfoil` and `xvfb`) |
-| `ALLOW_PRIVATE_WORKSTATIONS` | Set `false` on a public server to refuse private network addresses |
+| `WS_HOST`, `WS_SSH_KEY`, `WS_HOST_KEY` | The compute host the tools run on, reached over SSH. All three are needed (see below). `WS_USER` (default `icarus`), `WS_PORT` (22) and `WS_WORKDIR` (`~/icarus`) are optional |
+| `XFOIL_RUNNER` | `ws` (the compute host) or `local` (this server, needs `xfoil` and `xvfb`) |
+| `ALLOW_PRIVATE_WORKSTATIONS` | Set `false` on a public server so a user's Ollama address can't point at private networks |
 
 Generate a credentials key with
 `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
@@ -76,64 +75,46 @@ and the composer shows how many messages are left (`GET /api/usage/messages`).
 **MongoDB.** A local MongoDB or a remote one such as Atlas both work. A local `icarus-db`
 container doesn't publish its port by default, so start it with `-p 27017:27017`.
 
-## Connecting a machine
+## The compute host
 
-Icarus runs simulations on a machine the user already owns, reached over SSH. It doesn't run them on
-the server or on the computer the browser is on. The machine must be Linux (x86-64 or ARM64) with at
-least 4 GB of memory and 15 GB of free disk.
-
-In Settings → Work station, add a machine with its user, address, port and password, and approve its
-SSH fingerprint. The backend then:
-
-1. logs in once with the password and installs an SSH key it made itself, so the password isn't kept;
-2. pins the machine's host key, and connects only with that key from then on;
-3. copies the runner scripts to `~/icarus` and checks what's installed;
-4. offers **Set up this machine**, which installs Docker if needed and gets the solver image.
-
-Users can save several machines and connect one at a time. Each job is saved with the machine it
-started on and stays there. Removing a machine cleans it up over SSH (removes the image, job folders
-and Icarus's key) before forgetting it.
-
-Secrets (API keys, SSH private keys) are encrypted with `CREDENTIALS_KEY`, never returned by the
-API, and never logged. The setup password is used for the login and for `sudo` during setup and then
-discarded.
-
-### The solver image
-
-All solvers run in one Docker image (`workstation/Dockerfile`), tagged
-`icarus-solvers:<hash of the Dockerfile>`. Setup first tries to pull it from
-`ghcr.io/fletxcher/icarus-solvers` and builds it on the machine only if the pull fails (set
-`ICARUS_REGISTRY=none` to always build).
-
-The `solver-image` GitHub workflow builds and publishes the image whenever `workstation/Dockerfile`
-changes, or on demand from the Actions tab (ARM64 is optional, because it's slow). The package needs to
-be public so machines can pull it without a login.
-
-To set a machine up by hand, run this on it:
+XFOIL and part builds run on one Debian or Ubuntu machine that the server reaches over SSH with a
+key (the `WS_*` settings). Users don't connect machines of their own. Set it up by running this on
+it, as the user the server logs in as:
 
 ```bash
-./setup.sh --install     # installs Docker if needed, then gets the solver image
-./setup.sh --uninstall   # removes what an install added (asks before deleting job data)
+./setup.sh --install     # xfoil, xvfb, build123d and the runner scripts in ~/icarus
+./setup.sh --check       # what is and isn't in place
+./setup.sh --uninstall   # removes ~/icarus (the apt packages stay)
 ```
 
-Everything that runs a solver goes through `bin/icarus-exec`, which runs the command in the container
-as the calling user.
+Then give the server the three settings. They are text, not file paths, so they work the same
+locally and on Vercel (mark the key Sensitive there). Print the two values and paste them:
 
-## How a simulation runs
+```bash
+awk '{printf "%s\\n", $0}' ~/.ssh/icarus_vm      # WS_SSH_KEY: the private key, on one line
+ssh-keyscan -t ed25519 203.0.113.7 2>/dev/null   # WS_HOST_KEY: the host's public key
+```
 
-Jobs are submit-and-poll, because they outlast any HTTP request: the backend writes `case.json` in a
-job folder on the machine and starts a script detached (`run_cfd2d.sh`, `run_cfd3d.sh` or
-`run_fea.sh`). The script keeps `status.json` up to date, and the backend reads it back. A watcher
-adds a notice to the chat when a job ends, so the agent never has to wait. Each job has its own
-page with progress, residuals, logs, results, images and flow video.
+```
+WS_HOST=203.0.113.7
+WS_SSH_KEY="-----BEGIN OPENSSH PRIVATE KEY-----\nb3Bl...\n-----END OPENSSH PRIVATE KEY-----\n"
+WS_HOST_KEY="203.0.113.7 ssh-ed25519 AAAAC3Nz..."
+```
+
+The matching public key
+(`icarus_vm.pub`) goes in the host's `~/.ssh/authorized_keys`. The server only connects when the
+host presents exactly `WS_HOST_KEY`.
+
+On a machine with under 2 GB of memory and no swap it also adds a swap file. It was tested on
+Debian 12 (ARM64) in a container; the swap step and Ubuntu are untested.
 
 ## Deployment
 
 The root `vercel.json` deploys `frontend/` and `backend/` as two services on one domain (`/api/*` goes
 to the backend). In production leave `NEXT_PUBLIC_API_URL` and `CORS_ORIGINS` unset, use a remote
 MongoDB (`MONGODB_TARGET=remote`), set `CREDENTIALS_KEY` and `ALLOW_PRIVATE_WORKSTATIONS=false`, and
-use `XFOIL_RUNNER=ws`, since XFOIL can't be installed on Vercel. Vercel functions have a maximum
-duration, so long-running work (CFD, machine setup) must stay on the connected machine.
+use `XFOIL_RUNNER=ws`, since XFOIL can't be installed on Vercel, and point `WS_HOST` at a machine
+the server can reach over the internet.
 
 ## Development
 

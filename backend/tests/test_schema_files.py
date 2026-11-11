@@ -1,6 +1,5 @@
 import json
 from datetime import UTC, datetime
-from functools import partial
 from typing import Any
 
 import httpx
@@ -13,17 +12,11 @@ from pymongo.database import Database
 from api.agent.graph import build_agent
 from api.agent.tools import plot_tools
 from api.auth.schemas import Identity, Preferences
-from api.catalog import COLLECTIONS, SESSIONS, SIMULATIONS, THREADS, USERS
-from api.compute.runner import CommandResult
-from api.compute.schemas import Cfd3dCase, CfdCase, FeaCase
-from api.compute.simulations import SimulationService
-from api.credentials.schemas import WorkstationDetails
-from api.files.repository import FileRepository
+from api.catalog import COLLECTIONS, SESSIONS, THREADS, USERS
 from api.schema_export import DATABASE_DIR, collection_document, stale_files
 from tests.conftest import MONGODB_URI, ScriptedModel, use_agent
 from tests.test_auth_schema import make_session, make_user
 from tests.test_chats_api import create_thread, read_events
-from tests.test_file_kinds import binary_stl, cube_triangles
 from tests.test_files import AIRFOIL, upload
 from tests.test_plots import POLAR
 
@@ -81,63 +74,13 @@ def _run_app_flows(client: TestClient) -> None:
     )
     read_events(client, create_thread(client), {"content": "This one fails"})
 
-    # An unsent file, and CFD jobs: one launched, one that failed to launch.
+    # An unsent file.
     upload(client, "draft.txt", b"draft")
-    db = client.app.state.db
 
-    class Runner:
-        def __init__(self, fail: bool) -> None:
-            self.fail = fail
-
-        async def run(self, command, *, cwd=None, timeout_s=None):
-            if self.fail:
-                raise RuntimeError("ssh: connection refused")
-            return CommandResult(0, "", "")
-
-        async def write_file(self, path, content):
-            return None
-
-        async def write_bytes(self, path, content):
-            return None
-
+    # The user's own model key, sealed.
     user_id = client.get("/api/auth/me").json()["id"]
-
-    def simulations(fail: bool) -> SimulationService:
-        return SimulationService(
-            db,
-            Runner(fail),
-            user_id=user_id,
-            workdir="/w",
-            script="/w/run.sh",
-            files=FileRepository(db),
-        )
-
-    case = CfdCase(naca="2412", alpha=4, reynolds=3e6)
-    for fail in (False, True):
-        client.portal.call(partial(simulations(fail).submit, case, thread_id=thread_id))
-    client.portal.call(simulations(False).submit, case)  # not tied to a chat
-    # An FEA job on an uploaded solid.
-    solid = upload(client, "cube.stl", binary_stl(cube_triangles())).json()
-    fea = FeaCase(geometry_file_id=solid["id"], support_axis="z", support_side="min", spin_rpm=1000)
-    client.portal.call(partial(simulations(False).submit, fea, thread_id=thread_id))
-    cfd3d = Cfd3dCase(
-        geometry_file_id=solid["id"], domain="external", speed_ms=20, flow_direction=[0, -1, 0]
-    )
-    client.portal.call(partial(simulations(False).submit, cfd3d, thread_id=thread_id))
-
-    # The user's own model key and work station, sealed.
     credentials = client.app.state.services.credentials
     client.portal.call(credentials.set_model_key, user_id, "anthropic", "sk-test-1234")
-    station = WorkstationDetails(
-        host="10.0.0.5",
-        port=22,
-        username="ubuntu",
-        workdir="/home/ubuntu/icarus",
-        host_key="ssh-ed25519 AAAA",
-        fingerprint="SHA256:abc",
-        public_key="ssh-ed25519 BBBB",
-    )
-    client.portal.call(credentials.add_workstation, user_id, station, "PRIVATE KEY")
 
     # A counted message, for the daily limit.
     limiter = client.app.state.services.limiter
@@ -202,14 +145,12 @@ def test_documents_the_app_really_writes_pass_every_written_schema(client: TestC
 
 
 def test_the_flows_cover_optional_fields_too(client: TestClient):
-    """A pinned thread, a thread-less job and a failed job exist, so those branches ran."""
+    """A pinned thread and a failed message exist, so those branches ran."""
     _run_app_flows(client)
     source = MongoClient(MONGODB_URI)
     app_db = source[client.app.state.db.name]
     try:
         assert app_db[THREADS].count_documents({"pinned_at": {"$type": "date"}}) == 1
-        assert app_db[SIMULATIONS].count_documents({"thread_id": None}) == 1
-        assert app_db[SIMULATIONS].count_documents({"status": "failed"}) == 1
         assert app_db["messages"].count_documents({"status": "error", "error": {"$ne": None}}) == 1
         assert app_db["messages"].count_documents({"parts.type": "reasoning"}) == 1
     finally:

@@ -7,8 +7,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.agent.tools import design_tools
-from api.compute.pool import Workstation
 from api.compute.runner import CommandResult
+from api.compute.station import Workstation
 from api.design.service import DesignError
 from tests.conftest import sign_up_and_in
 from tests.test_chats_api import create_thread
@@ -53,15 +53,13 @@ class FakeBuilder:
 @pytest.fixture
 def builder(client: TestClient) -> FakeBuilder:
     fake = FakeBuilder()
-    client.app.state.services.compute.set_shared(
-        Workstation(fake, "/w", "/w/bin/run_cfd2d.sh", "shared")
-    )
+    client.app.state.services.compute.set_station(Workstation(fake, "/w", True))
     return fake
 
 
 def designs_for_current_user(client: TestClient):
     user_id = client.get("/api/auth/me").json()["id"]
-    return client.portal.call(client.app.state.services.compute.designs_for, user_id)
+    return client.app.state.services.compute.designs(user_id)
 
 
 def tools_for_current_user(client: TestClient):
@@ -105,23 +103,6 @@ def test_a_failed_build_says_why_and_leaves_nothing_behind(client, builder):
 
     assert text == "The part wasn't built: line 3: ValueError: radius too large"
     assert builder.removed
-
-
-def test_the_geometry_can_be_analysed_like_an_upload(client, builder):
-    text = client.portal.call(
-        tools_for_current_user(client)["create_geometry"].ainvoke, {"name": "cube", "code": CODE}
-    )
-    file_id = text.split("File id: ")[1].split("\n")[0]
-
-    user_id = client.get("/api/auth/me").json()["id"]
-    service = client.portal.call(client.app.state.services.compute.simulations_for, user_id)
-    from api.compute.schemas import FeaCase
-
-    job = client.portal.call(
-        service.submit, FeaCase(geometry_file_id=file_id, support_axis="z", support_side="min")
-    )
-
-    assert job.case.geometry_name == "cube.stl"
 
 
 def test_export_builds_again_in_the_chosen_format_and_downloads(client, builder):

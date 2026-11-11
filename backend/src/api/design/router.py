@@ -25,7 +25,7 @@ async def export_design(
     """A part the agent designed, built again from its code in the asked-for format, to download."""
     if format.lower() not in FORMATS:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"unknown format {format!r}")
-    designs = await services.compute.designs_for(user.id)
+    designs = services.compute.designs(user.id)
     try:
         exported = await designs.export(file_id, format)
     except DesignError as problem:

@@ -13,7 +13,6 @@ from ..agent.factory import UserAgent
 from ..agent.stream import stream_turn, title_first
 from ..auth.router import CurrentUser
 from ..auth.schemas import User
-from ..compute.describe import running_note
 from ..dependencies import ServicesDep
 from ..design.service import designs_note
 from ..files.schemas import StoredFile
@@ -74,9 +73,6 @@ async def delete_thread(thread_id: str, services: ServicesDep, user: CurrentUser
     if not await services.chats.delete_thread(thread_id, user.id):
         raise _not_found()
     await services.files.delete_for_thread(thread_id)
-    # The one way a simulation is really deleted: with the chat it was started in.
-    simulations = await services.compute.simulations_for(user.id)
-    await simulations.delete_for_thread(thread_id)
 
 
 @router.delete("/{thread_id}/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -94,8 +90,7 @@ async def truncate_messages(
 class Turn:
     agent: CompiledStateGraph
     model: str
-    # What the agent is told about this chat's running simulations and designed parts (see
-    # compute/describe.py and design/service.py).
+    # What the agent is told about this chat's designed parts (see design/service.py).
     situation: str | None = None
     # Running when this turn starts a chat that still has a placeholder title.
     title: asyncio.Task[str | None] | None = None
@@ -200,12 +195,7 @@ async def store_and_build_turn(
         raise HTTPException(
             status.HTTP_409_CONFLICT, "Nothing to regenerate: the last message isn't a user's"
         )
-    simulations = await services.compute.simulations_for(user.id)
-    notes = [
-        running_note(await simulations.running_in_thread(thread_id)),
-        designs_note(await services.files.designs_in_thread(thread_id, user.id)),
-    ]
-    situation = "\n\n".join(note for note in notes if note) or None
+    situation = designs_note(await services.files.designs_in_thread(thread_id, user.id))
 
     # Name the chat from its first message, alongside the reply.
     title = None

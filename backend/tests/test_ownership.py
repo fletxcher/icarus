@@ -1,16 +1,12 @@
-"""Chats, files and simulations belong to the user who made them."""
-
-from functools import partial
+"""Chats and files belong to the user who made them."""
 
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
-from api.compute.schemas import CfdCase
 from tests.conftest import sign_up_and_in, use_scripted_agent
 from tests.test_chats_api import create_thread, read_events
 from tests.test_files import upload
-from tests.test_simulation_monitor import FakeWorkStation, submit_job
 
 SIGNED_IN_ONLY = [
     ("get", "/api/threads"),
@@ -20,13 +16,6 @@ SIGNED_IN_ONLY = [
     ("delete", "/api/threads/x"),
     ("post", "/api/threads/x/messages"),
     ("delete", "/api/threads/x/messages/y"),
-    ("get", "/api/simulations"),
-    ("get", "/api/simulations/usage"),
-    ("get", "/api/simulations/x"),
-    ("patch", "/api/simulations/x"),
-    ("get", "/api/simulations/x/info"),
-    ("get", "/api/simulations/x/progress"),
-    ("get", "/api/simulations/x/files/flow.mp4"),
     ("post", "/api/files"),
     ("delete", "/api/files/x"),
     ("get", "/api/models"),
@@ -107,31 +96,3 @@ def test_a_user_cant_attach_or_remove_anothers_file(two_users):
     )
     assert send.status_code == 422
     assert two_users("ada").delete(f"/api/files/{uploaded['id']}").status_code == 204
-
-
-def test_a_user_only_sees_their_own_simulations(two_users):
-    ada = two_users("ada")
-    job_id = submit_job(ada, FakeWorkStation())
-
-    grace = two_users("grace")
-
-    assert grace.get("/api/simulations").json() == []
-    assert grace.get("/api/simulations/usage").json()["all_time"]["runs"] == 0
-    for path in ("", "/info", "/progress", "/files/flow.mp4"):
-        assert grace.get(f"/api/simulations/{job_id}{path}").status_code == 404, path
-    assert grace.patch(f"/api/simulations/{job_id}", json={"hidden": True}).status_code == 404
-    assert two_users("ada").get(f"/api/simulations/{job_id}").status_code == 200
-
-
-def test_deleting_a_chat_never_reaches_another_users_simulations(two_users):
-    ada = two_users("ada")
-    station = FakeWorkStation()
-    thread_id = create_thread(ada, "Ada's CFD")
-    service_job = submit_job(ada, station)  # also pins the fake station for everyone
-    case = CfdCase(shape="cylinder", reynolds=100)
-    ada.portal.call(partial(ada.simulations.submit, case, thread_id=thread_id))
-
-    grace = two_users("grace")
-
-    assert grace.delete(f"/api/threads/{thread_id}").status_code == 404
-    assert two_users("ada").get(f"/api/simulations/{service_job}").status_code == 200

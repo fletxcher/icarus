@@ -5,10 +5,9 @@ import shutil
 from ..config import Settings
 
 XFOIL_CAPABILITY = "XFOIL airfoil analysis and airfoil search"
-CFD_CAPABILITY = "CFD and FEA simulations"
 DESIGN_CAPABILITY = "CAD design of parts (build123d)"
 
-NO_WORKSTATION = "no simulation work station is set up (the user can add one in Settings)"
+NO_WORKSTATION = "the compute host isn't set up on the server"
 
 
 def xfoil_unavailable(settings: Settings, *, workstation: bool) -> str | None:
@@ -27,6 +26,5 @@ def unavailable_capabilities(settings: Settings, *, workstation: bool) -> dict[s
     if reason := xfoil_unavailable(settings, workstation=workstation):
         unavailable[XFOIL_CAPABILITY] = reason
     if not workstation:
-        unavailable[CFD_CAPABILITY] = NO_WORKSTATION
         unavailable[DESIGN_CAPABILITY] = NO_WORKSTATION
     return unavailable

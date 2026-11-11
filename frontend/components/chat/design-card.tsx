@@ -11,7 +11,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
-import { ModelViewer } from "./model-viewer";
 
 /** The formats a designed part can be exported in (backend/src/api/design/service.py). */
 export const DESIGN_FORMATS: { id: string; label: string }[] = [
@@ -27,12 +26,11 @@ export function designDownloadUrl(fileId: string, format: string): string {
   return format === "stl" ? api.fileDownloadUrl(fileId) : api.designExportUrl(fileId, format);
 }
 
-/** A part the agent designed: drawn in 3D, with its code, and downloadable in any format. */
+/** A part the agent designed: its code, and a download in any format. */
 export function DesignCard({ fileId, code }: { fileId: string; code?: string }) {
   const [format, setFormat] = useState("step");
   return (
     <div className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-3">
-      <ModelViewer source={{ type: "stl", url: api.fileOriginalUrl(fileId) }} />
       <div className="flex flex-wrap items-center gap-2">
         <Select value={format} onValueChange={setFormat}>
           <SelectTrigger size="sm" aria-label="Download format" className="w-40">

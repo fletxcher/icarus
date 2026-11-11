@@ -7,10 +7,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, BeforeValidator, Field
 
-from ..compute.describe import format_simulation
 from ..compute.plots import describe_figure, validate_figure
-from ..compute.schemas import Cfd3dCase, CfdCase, FeaCase
-from ..compute.simulations import GeometryUnavailable, SimulationService
 from ..compute.xfoil import Polar, PolarRequest, XfoilService
 from ..design.service import DesignError, DesignService
 
@@ -24,10 +21,6 @@ class NacaSearchRequest(BaseModel):
     alpha_end: float = Field(default=10.0, ge=-10, le=20)
     min_thickness: int = Field(default=10, ge=6, le=24, description="Percent chord")
     max_thickness: int = Field(default=16, ge=6, le=24, description="Percent chord")
-
-
-class SimulationLookup(BaseModel):
-    job_id: str = Field(description="Job id returned by submit_cfd_simulation")
 
 
 class GeometryRequest(BaseModel):
@@ -127,124 +120,6 @@ def xfoil_tools(xfoil: XfoilService) -> list[BaseTool]:
     ]
 
 
-def simulation_tools(simulations: SimulationService) -> list[BaseTool]:
-    async def submit_cfd_simulation(config: RunnableConfig, **fields) -> str:
-        thread_id = config.get("configurable", {}).get("thread_id")
-        simulation = await simulations.submit(CfdCase(**fields), thread_id=thread_id)
-        text = format_simulation(simulation)
-        if simulation.status == "running":
-            text += (
-                "\n\nThe simulation is now running in the background and will take a while. "
-                "Tell the user the job id and what was submitted, then end your turn. You will be "
-                "told in this chat when it finishes, so never call get_simulation_status to wait "
-                "for it."
-            )
-        return text
-
-    async def submit_fea_simulation(config: RunnableConfig, **fields) -> str:
-        thread_id = config.get("configurable", {}).get("thread_id")
-        try:
-            simulation = await simulations.submit(FeaCase(**fields), thread_id=thread_id)
-        except GeometryUnavailable as problem:
-            return f"Not started: {problem}."
-        text = format_simulation(simulation)
-        if simulation.status == "running":
-            text += (
-                "\n\nThe analysis is now running in the background (meshing the solid, then "
-                "solving). Tell the user the job id and what was submitted, then end your turn. "
-                "You will be told in this chat when it finishes, so never call "
-                "get_simulation_status to wait for it."
-            )
-        return text
-
-    async def submit_cfd3d_simulation(config: RunnableConfig, **fields) -> str:
-        thread_id = config.get("configurable", {}).get("thread_id")
-        try:
-            simulation = await simulations.submit(Cfd3dCase(**fields), thread_id=thread_id)
-        except GeometryUnavailable as problem:
-            return f"Not started: {problem}."
-        text = format_simulation(simulation)
-        if simulation.status == "running":
-            text += (
-                "\n\nThe 3D simulation is now running in the background (meshing, then solving; "
-                "this takes tens of minutes). Tell the user the job id and what was submitted, "
-                "then end your turn. You will be told in this chat when it finishes, so never "
-                "call get_simulation_status to wait for it."
-            )
-        return text
-
-    async def get_simulation_status(job_id: str) -> str:
-        simulation = await simulations.get(job_id)
-        return format_simulation(simulation) if simulation else f"No job with id {job_id}."
-
-    return [
-        StructuredTool.from_function(
-            coroutine=submit_cfd_simulation,
-            name="submit_cfd_simulation",
-            description=(
-                "Start a 2D CFD simulation (OpenFOAM, incompressible) of a body in a uniform flow "
-                "on the simulation work station: an airfoil, cylinder, ellipse, wedge or "
-                "rectangle, with a choice of wall condition (no-slip, slip, moving, rotating, "
-                "rough). Airfoils run steady RANS; "
-                " the other shapes run time-accurate and report vortex shedding "
-                "(Strouhal number). Runs for minutes to an hour or more; returns a job id to check "
-                "with get_simulation_status. Results: Cl, Cd, Cm, the coefficient history for "
-                "plotting, and warnings (e.g. not converged) that should be passed on to the user."
-            ),
-            args_schema=CfdCase,
-        ),
-        StructuredTool.from_function(
-            coroutine=submit_fea_simulation,
-            name="submit_fea_simulation",
-            description=(
-                "Start a finite-element (CalculiX) analysis of a solid the user uploaded as an "
-                "STL file: stress, deflection and optionally natural frequencies of the part, "
-                "under rotation (centrifugal load), pressure and, if a gas temperature is given, "
-                "heating (a coupled thermal-stress analysis). The part is meshed with tetrahedra "
-                "and clamped on one end; materials: Inconel 718, Ti-6Al-4V, aluminium 7075 and "
-                "steel 4340. Take geometry_file_id from the id shown with the attached file, and "
-                "ask the user for anything that matters and isn't clear (which end is fixed, the "
-                "STL's units, the rotation axis, temperatures). Runs for minutes; returns a job "
-                "id to check with get_simulation_status. Results include peak and typical von "
-                "Mises stress (judge the part by the values away from the support: stress at the "
-                "clamp is an artefact), safety factor against yield, and warnings that must be "
-                "passed on to the user."
-            ),
-            args_schema=FeaCase,
-        ),
-        StructuredTool.from_function(
-            coroutine=submit_cfd3d_simulation,
-            name="submit_cfd3d_simulation",
-            description=(
-                "Start a 3D CFD analysis (OpenFOAM, steady incompressible RANS) of a solid the "
-                "user uploaded as an STL file. domain='external': the solid in open flow, giving "
-                "drag, cross force and surface pressure. domain='passage': one blade of a "
-                "cascade, periodic in the pitch direction, giving total-pressure loss and flow "
-                "turning. domain='rotating': a propeller, fan or rotor (frozen-rotor), giving "
-                "thrust, torque, power and efficiency. Take geometry_file_id from the id shown "
-                "with the attached file, and ask the user for what isn't given and matters: the "
-                "STL's units, the flow speed and direction in the file's axes, the pitch, or the "
-                "spin axis and speed. The part's small holes and cavities are filled by default. "
-                "Reliable up to about Mach 0.3 (the result warns above that). A job meshes the "
-                "solid (a too fine mesh is coarsened to fit the work station), then solves; it "
-                "takes tens of minutes. Returns a job id; results come with warnings that must be "
-                "passed on to the user."
-            ),
-            args_schema=Cfd3dCase,
-        ),
-        StructuredTool.from_function(
-            coroutine=get_simulation_status,
-            name="get_simulation_status",
-            description=(
-                "Look up a CFD or FEA simulation job's status and results, for a job you weren't "
-                "told about (you are told in the chat when a job finishes, and each turn lists "
-                "those still running). Never call it to wait for a job."
-            ),
-            args_schema=SimulationLookup,
-        ),
-    ]
-
-
 class PlotFigure(BaseModel):
     """A Plotly figure; typed as a list of traces so models produce the right shape."""
 
@@ -327,17 +202,14 @@ def plot_tools() -> list[BaseTool]:
 
 
 GEOMETRY_DESCRIPTION = """\
-Design a part by writing build123d code, which runs on the work station and returns a preview.
+Design a part by writing build123d code, which runs on the compute host.
 The code runs as a script: `from build123d import *`, build the solid (builder mode, \
 `with BuildPart() as part: ...`, or algebra mode, `Box(...) - Cylinder(...)`), and finish with \
 `result = part.part` (or the Part itself). Rules: millimetres; put the dimensions in named \
 variables at the top; make one fused solid, not several; no files, network or other imports \
-than build123d, math and numpy. Orient it for the analysis it will get: for FEA put the \
-mounting or clamped face flat on the lowest (or highest) plane of an axis, e.g. z = 0; for \
-flow, align the flow with an axis. A failure returns the error and the line, so fix the code \
-and call again. Each call makes a new part with a new id; the part is also saved as an STL \
-the FEA and CFD tools take as geometry_file_id. It appears in the chat as a 3D view the user \
-download in any format from its card, so don't ask which format they want."""
+than build123d, math and numpy. A failure returns the error and the line, so fix the code \
+and call again. Each call makes a new part with a new id. It appears in the chat as a card the \
+user can download in any format, so don't ask which format they want."""
 
 EXPORT_DESCRIPTION = """\
 Export a part from create_geometry in a format the user named in their message. step (editable \
@@ -363,9 +235,8 @@ def design_tools(designs: DesignService) -> list[BaseTool]:
             f"Bounding box (min, max): {report['bounding_box_mm']} mm.",
             *[f"Warning: {note}" for note in report["notes"]],
             "",
-            "The part is shown to the user as a 3D view with download buttons. Describe what you "
-            "built and the assumptions you made, then ask whether to analyse it (FEA, or CFD) "
-            "with this geometry_file_id. The card already offers every export format to "
+            "The part is shown to the user as a card with download buttons. Describe what you "
+            "built and the assumptions you made. The card already offers every export format to "
             "download, so don't ask which format they want or export it unless they name one.",
         ]
         return "\n".join(lines)
@@ -413,17 +284,11 @@ def design_tools(designs: DesignService) -> list[BaseTool]:
     ]
 
 
-def build_tools(
-    xfoil: XfoilService | None,
-    simulations: SimulationService | None,
-    designs: DesignService | None = None,
-) -> list[BaseTool]:
+def build_tools(xfoil: XfoilService | None, designs: DesignService | None = None) -> list[BaseTool]:
     """The tools that can actually run with the current setup."""
     tools = plot_tools()
     if xfoil is not None:
         tools += xfoil_tools(xfoil)
-    if simulations is not None:
-        tools += simulation_tools(simulations)
     if designs is not None:
         tools += design_tools(designs)
     return tools

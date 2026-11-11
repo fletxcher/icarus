@@ -48,7 +48,7 @@ def with_attachments(message: Message, texts: dict[str, FileText], max_chars: in
     """The user's text followed by each attached file's contents.
 
     A mesh, CAD file or PDF is given as a summary (see files/extract.py). Its id is shown too,
-    since tools such as the FEA one take the file by id.
+    so the agent can refer to the file.
     """
     blocks = [message.content]
     for attachment in message.attachments:
@@ -81,14 +81,10 @@ def to_langchain(
     """
     history: list[BaseMessage] = []
     for message in messages:
-        if message.role in ("user", "notice"):
-            text = (
-                with_attachments(message, file_texts, file_max_chars)
-                if message.role == "user"
-                else f"[Automatic notice, not written by the user]\n{message.content}"
-            )
-            # Providers want the roles to alternate, so a notice and the user's next message
-            # (or two notices) are read as one message.
+        if message.role == "user":
+            text = with_attachments(message, file_texts, file_max_chars)
+            # Providers want the roles to alternate, so two user messages in a row (an
+            # assistant reply that was never stored between them) are read as one.
             if history and isinstance(history[-1], HumanMessage):
                 history[-1] = HumanMessage(f"{history[-1].content}\n\n{text}")
             else:

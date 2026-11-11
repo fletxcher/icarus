@@ -1,12 +1,4 @@
 import type {
-  FeaProgress,
-  Simulation,
-  SimulationInfo,
-  SimulationProgress,
-  SimulationSummary,
-  SimulationUsage,
-} from "@/lib/chat/simulation-types";
-import type {
   Attachment,
   Model,
   Provider,
@@ -92,118 +84,12 @@ export type ModelKeyInfo = {
   updated_at: string;
 };
 
-/** What a machine's card shows, remembered from when it was last checked. */
-export type Hardware = {
-  cpus: number | null;
-  cpu_model: string | null;
-  gpu: string | null;
-};
-
-export type WorkstationInfo = {
-  id: string;
-  name: string;
-  hardware: Hardware;
-  /** The machine jobs run on; at most one of a person's machines is connected. */
-  active: boolean;
-  /** "removing": being cleaned up in the background; "removal_failed": see status_message. */
-  status: "ready" | "removing" | "removal_failed";
-  status_message: string;
-  host: string;
-  port: number;
-  username: string;
-  workdir: string;
-  host_key: string;
-  fingerprint: string;
-  /** The public half of the saved key, for the machine's authorized_keys. */
-  public_key: string;
-  updated_at: string;
-};
-
-export type HostKey = {
-  key_type: string;
-  fingerprint: string;
-  host_key: string;
-};
-
-export type WorkstationCheck = {
-  id: string;
-  label: string;
-  ok: boolean;
-  detail: string;
-};
-
-/** What the machine is, read over SSH when it's connected or re-checked. */
-export type MachineInfo = {
-  hostname: string;
-  os: string;
-  arch: string;
-  cpus: number | null;
-  cpu_model: string | null;
-  memory_gb: number | null;
-  disk_free_gb: number | null;
-  gpu: string | null;
-  /** Docker runs the solvers: usable by this user, installed but not usable, or missing. */
-  docker: "usable" | "installed" | "missing";
-  /** How setup can get root: logged in as root, sudo without a password, with one, or none. */
-  privilege: "root" | "passwordless_sudo" | "password_sudo" | "none";
-  /** False when Icarus can't run its solvers here; `problems` says why. */
-  supported: boolean;
-  problems: string[];
-};
-
-export type WorkstationReport = {
-  workstation: WorkstationInfo;
-  checks: WorkstationCheck[];
-  machine: MachineInfo | null;
-  /** Set when connecting with a password also started setting the machine up. */
-  setup: SetupProgress | null;
-  /** Why setup wasn't started, when something was missing and it couldn't be. */
-  setup_note: string | null;
-};
-
-/** What the setup button would install on the machine, shown before the person confirms. */
-export type SetupPlan = {
-  installs: string[];
-  needs_root: boolean;
-  /** Root comes from a sudo password the person types; it is used once and never stored. */
-  needs_password: boolean;
-  can_run: boolean;
-  reason: string | null;
-};
-
-export type SetupProgress = {
-  state: "idle" | "running" | "completed" | "failed" | "cancelled";
-  stage: string;
-  message: string;
-  log_tail: string;
-  updated: number | null;
-};
-
 export type CredentialsOverview = {
   model_keys: ModelKeyInfo[];
-  workstations: WorkstationInfo[];
   /** Providers the server supplies a key for until the person adds their own. */
   default_providers: ModelProvider[];
-  /** Whether the server has a shared work station used until they add one. */
-  default_workstation: boolean;
   /** False when the server can't store credentials (no CREDENTIALS_KEY). */
   storage_available: boolean;
-};
-
-export type WorkstationInput = {
-  /** Set to replace a saved machine instead of adding one. */
-  id?: string;
-  name?: string;
-  host: string;
-  port: number;
-  username: string;
-  /** The machine's password, for this one login: Icarus adds a key of its own with it. */
-  password?: string;
-  /** Instead of the password: the person's own key. */
-  private_key?: string;
-  passphrase?: string;
-  host_key: string;
-  workdir?: string;
 };
 
 /** One part of the app, as the backend sees it. */
@@ -236,47 +122,6 @@ export const api = {
     }),
   removeModelKey: (provider: ModelProvider) =>
     request<void>(`/credentials/model-keys/${provider}`, { method: "DELETE" }),
-  /** The machine's SSH host key, to confirm it's the right one before connecting. */
-  lookUpHostKey: (host: string, port: number) =>
-    request<HostKey>("/credentials/workstation/host-key", {
-      method: "POST",
-      body: JSON.stringify({ host, port }),
-    }),
-  saveWorkstation: (input: WorkstationInput) =>
-    request<WorkstationReport>("/credentials/workstation", {
-      method: "PUT",
-      body: JSON.stringify(input),
-    }),
-  checkWorkstation: () =>
-    request<WorkstationReport>("/credentials/workstation/check", {
-      method: "POST",
-    }),
-  setupPlan: () => request<SetupPlan>("/credentials/workstation/setup/plan"),
-  setupProgress: () => request<SetupProgress>("/credentials/workstation/setup"),
-  /** Stops setup and removes the solver image it built. */
-  cancelSetup: () =>
-    request<SetupProgress>("/credentials/workstation/setup", { method: "DELETE" }),
-  startSetup: (password: string | null) =>
-    request<SetupProgress>("/credentials/workstation/setup", {
-      method: "POST",
-      body: JSON.stringify({ password }),
-    }),
-  connectWorkstation: (id: string) =>
-    request<WorkstationInfo>(`/credentials/workstations/${id}/connect`, {
-      method: "POST",
-    }),
-  disconnectWorkstation: (id: string) =>
-    request<void>(`/credentials/workstations/${id}/disconnect`, {
-      method: "POST",
-    }),
-  /** Starts cleaning the machine up and forgetting it; `force` forgets it at once, for a
-   * machine that can't be reached. */
-  removeWorkstation: (id: string, force = false) =>
-    request<WorkstationInfo | undefined>(
-      `/credentials/workstations/${id}${force ? "?force=true" : ""}`,
-      { method: "DELETE" },
-    ),
-  simulationUsage: () => request<SimulationUsage>("/simulations/usage"),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
   /** Signs in: the backend answers with the session cookie, which the browser then keeps. */
   login: (credentials: { email: string; password: string }) =>
@@ -318,27 +163,6 @@ export const api = {
     if (!response.ok) throw await toApiError(response);
     return response.json();
   },
-  listSimulations: () => request<SimulationSummary[]>("/simulations"),
-  /** Takes a job off the simulations list, or puts it back. Nothing is deleted. */
-  setSimulationHidden: (id: string, hidden: boolean) =>
-    request<Simulation>(`/simulations/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ hidden }),
-    }),
-  getSimulation: (id: string) => request<Simulation>(`/simulations/${id}`),
-  simulationInfo: (id: string) => request<SimulationInfo>(`/simulations/${id}/info`),
-  /** What the run did since the given offsets (0, 0 for everything). */
-  /** An FEA job's stage and latest log lines. */
-  feaProgress: (id: string) =>
-    request<FeaProgress>(`/simulations/${id}/progress?log_offset=0&coeff_offset=0`),
-  simulationProgress: (id: string, logOffset: number, coeffOffset: number) =>
-    request<SimulationProgress>(
-      `/simulations/${id}/progress?log_offset=${logOffset}&coeff_offset=${coeffOffset}`,
-    ),
-  /** URL of a file a finished job rendered (flow.mp4 / flow.png). */
-  simulationFileUrl: (id: string, name: string) => `${API_URL}/api/simulations/${id}/files/${name}`,
-  /** URL of an uploaded mesh, CAD file or PDF as it was sent (what the 3D viewer draws). */
-  fileOriginalUrl: (id: string) => `${API_URL}/api/files/${id}/original`,
   /** A designed part saved as a file (the STL it was built as). */
   fileDownloadUrl: (id: string) => `${API_URL}/api/files/${id}/original?download=true`,
   /** A designed part built again in another format (STEP, 3MF, BREP, OBJ, GLB), to download. */

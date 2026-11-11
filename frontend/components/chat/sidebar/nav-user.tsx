@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ActivityIcon,
   ChevronsUpDownIcon,
   CircleHelpIcon,
   LogInIcon,
@@ -125,15 +124,6 @@ export function NavUser() {
               <SettingsIcon />
               Settings
               <DropdownMenuShortcut>Ctrl+Shift+,</DropdownMenuShortcut>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => {
-                setSection("usage");
-                setDialog("settings");
-              }}
-            >
-              <ActivityIcon />
-              Usage
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setDialog("help")}>
               <CircleHelpIcon />

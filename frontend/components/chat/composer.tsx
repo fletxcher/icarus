@@ -89,7 +89,6 @@ export function Composer({ placeholder = "Ask anything" }: { placeholder?: strin
               key={file.localId}
               name={file.name}
               size={file.size}
-              fileId={file.attachment?.id}
               status={file.status}
               error={file.error}
               onRemove={() => void removeFile(file.localId)}

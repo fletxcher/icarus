@@ -1,4 +1,4 @@
-"""Builds the agent for one user: their model keys (or the server's), their work station."""
+"""Builds the agent for one user: their model keys (or the server's) and the compute host."""
 
 import logging
 from dataclasses import dataclass
@@ -7,15 +7,10 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import SecretStr
 
 from ..chats.repository import ChatRepository
-from ..compute.pool import ComputePool
+from ..compute.station import Compute
 from ..config import Settings
 from ..credentials.repository import CredentialRepository
-from .capabilities import (
-    CFD_CAPABILITY,
-    DESIGN_CAPABILITY,
-    XFOIL_CAPABILITY,
-    unavailable_capabilities,
-)
+from .capabilities import DESIGN_CAPABILITY, XFOIL_CAPABILITY, unavailable_capabilities
 from .graph import build_agent
 from .models import ModelOption, Provider, available_models, create_chat_model, server_keys
 from .ollama import model_options
@@ -42,7 +37,7 @@ class AgentFactory:
         settings: Settings,
         chats: ChatRepository,
         credentials: CredentialRepository,
-        compute: ComputePool,
+        compute: Compute,
     ) -> None:
         self._settings = settings
         self._chats = chats
@@ -86,25 +81,13 @@ class AgentFactory:
         if default_model is None:
             return UserAgent(models, None, None, None)
 
-        station = await self._compute.workstation(user_id)
-        unavailable = unavailable_capabilities(settings, workstation=station.available)
-        xfoil = (
-            await self._compute.xfoil_for(user_id, station)
-            if XFOIL_CAPABILITY not in unavailable
-            else None
+        unavailable = unavailable_capabilities(
+            settings, workstation=self._compute.station.available
         )
-        simulations = (
-            await self._compute.simulations_for(user_id)
-            if CFD_CAPABILITY not in unavailable
-            else None
-        )
-        designs = (
-            await self._compute.designs_for(user_id)
-            if DESIGN_CAPABILITY not in unavailable
-            else None
-        )
+        xfoil = self._compute.xfoil() if XFOIL_CAPABILITY not in unavailable else None
+        designs = self._compute.designs(user_id) if DESIGN_CAPABILITY not in unavailable else None
         # Only tools that can run are given to the model; the prompt names the rest as missing.
-        tools = build_tools(xfoil, simulations, designs)
+        tools = build_tools(xfoil, designs)
         chat_models = {
             option.id: create_chat_model(option, keys, reasoning_effort=settings.reasoning_effort)
             for option in models
