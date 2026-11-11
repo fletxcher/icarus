@@ -8,6 +8,7 @@ from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, BeforeValidator, Field
 
 from ..compute.plots import describe_figure, validate_figure
+from ..compute.python_exec import PythonError, PythonService, format_result
 from ..compute.xfoil import Polar, PolarRequest, XfoilService
 from ..design.service import DesignError, DesignService
 
@@ -284,11 +285,57 @@ def design_tools(designs: DesignService) -> list[BaseTool]:
     ]
 
 
-def build_tools(xfoil: XfoilService | None, designs: DesignService | None = None) -> list[BaseTool]:
+PYTHON_DESCRIPTION = """\
+Write and run Python code, and get what it prints. Use it for calculations, fitting a model to \
+data, parameter sweeps and anything else you would do with a script. Available: the standard \
+library, numpy, scipy, pandas, scikit-learn and Cantera (chemical kinetics, equilibrium and \
+flame temperatures: `import cantera as ct`; mechanisms such as "gri30.yaml" are built in). \
+Rules: it runs in a sandbox with no internet and no access to the machine, only to a scratch \
+directory that is its working directory; to read a file the user attached, pass its id in \
+file_ids and open it by its name. Print the results you want to see: only what the script prints \
+comes back (long output is cut). A script is stopped after about a minute, and the memory is \
+small, so keep problems modest. Nothing is kept between calls: each call starts fresh, so \
+include everything the code needs. The user sees the code you wrote and its output."""
+
+
+class PythonRequest(BaseModel):
+    code: str = Field(description="A complete Python script. Print the results.")
+    file_ids: list[str] = Field(
+        default_factory=list,
+        description="Ids of attached text or CSV files to make readable by name in the script",
+    )
+
+
+def python_tools(python: PythonService) -> list[BaseTool]:
+    async def exec_python(**fields) -> str:
+        request = PythonRequest(**fields)
+        try:
+            result, files = await python.run(request.code, request.file_ids)
+        except PythonError as problem:
+            return f"Not run: {problem}"
+        return format_result(result, files)
+
+    return [
+        StructuredTool.from_function(
+            coroutine=exec_python,
+            name="exec_python",
+            description=PYTHON_DESCRIPTION,
+            args_schema=PythonRequest,
+        )
+    ]
+
+
+def build_tools(
+    xfoil: XfoilService | None,
+    designs: DesignService | None = None,
+    python: PythonService | None = None,
+) -> list[BaseTool]:
     """The tools that can actually run with the current setup."""
     tools = plot_tools()
     if xfoil is not None:
         tools += xfoil_tools(xfoil)
     if designs is not None:
         tools += design_tools(designs)
+    if python is not None:
+        tools += python_tools(python)
     return tools

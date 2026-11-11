@@ -1,5 +1,6 @@
 """The compute host: the one machine, reached over SSH, where XFOIL and part builds run."""
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import NoReturn
@@ -9,6 +10,7 @@ from pymongo.asynchronous.database import AsyncDatabase
 from ..config import Settings
 from ..design.service import DesignService
 from ..files.repository import FileRepository
+from .python_exec import PythonService
 from .runner import (
     CommandResult,
     CommandRunner,
@@ -70,6 +72,8 @@ class Compute:
         self._db = db
         self._settings = settings
         self._station = self._build_station(settings)
+        # One queue for every user: the host runs few scripts at once.
+        self._python_slots = asyncio.Semaphore(max(1, settings.python_max_concurrency))
 
     @staticmethod
     def _build_station(settings: Settings) -> Workstation:
@@ -94,6 +98,17 @@ class Compute:
             workdir=self._station.workdir,
             files=FileRepository(self._db),
             user_id=user_id,
+        )
+
+    def python(self, user_id: str) -> PythonService:
+        return PythonService(
+            self._station.runner,
+            workdir=self._station.workdir,
+            files=FileRepository(self._db),
+            user_id=user_id,
+            timeout_s=self._settings.python_timeout_s,
+            output_max_chars=self._settings.python_output_max_chars,
+            slots=self._python_slots,
         )
 
     def xfoil(self) -> XfoilService:

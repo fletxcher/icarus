@@ -10,7 +10,12 @@ from ..chats.repository import ChatRepository
 from ..compute.station import Compute
 from ..config import Settings
 from ..credentials.repository import CredentialRepository
-from .capabilities import DESIGN_CAPABILITY, XFOIL_CAPABILITY, unavailable_capabilities
+from .capabilities import (
+    DESIGN_CAPABILITY,
+    PYTHON_CAPABILITY,
+    XFOIL_CAPABILITY,
+    unavailable_capabilities,
+)
 from .graph import build_agent
 from .models import ModelOption, Provider, available_models, create_chat_model, server_keys
 from .ollama import model_options
@@ -86,8 +91,9 @@ class AgentFactory:
         )
         xfoil = self._compute.xfoil() if XFOIL_CAPABILITY not in unavailable else None
         designs = self._compute.designs(user_id) if DESIGN_CAPABILITY not in unavailable else None
+        python = self._compute.python(user_id) if PYTHON_CAPABILITY not in unavailable else None
         # Only tools that can run are given to the model; the prompt names the rest as missing.
-        tools = build_tools(xfoil, designs)
+        tools = build_tools(xfoil, designs, python)
         chat_models = {
             option.id: create_chat_model(option, keys, reasoning_effort=settings.reasoning_effort)
             for option in models

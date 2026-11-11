@@ -120,6 +120,12 @@ class Settings(BaseSettings):
     xfoil_timeout_s: float = 60.0
     xfoil_max_concurrency: int = 4
 
+    # Python the agent writes, run in a sandbox on the compute host: a script's time limit, how many
+    # run at once (the host is small), and how much of its output the agent gets to see.
+    python_timeout_s: float = 60.0
+    python_max_concurrency: int = 1
+    python_output_max_chars: int = 8000
+
     @model_validator(mode="after")
     def _remote_mongodb_needs_uri(self) -> "Settings":
         if self.mongodb_target == "remote" and self.mongodb_remote_uri is None:

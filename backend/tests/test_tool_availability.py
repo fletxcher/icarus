@@ -5,6 +5,7 @@ from langchain_core.messages import AIMessage
 from api.agent.capabilities import (
     DESIGN_CAPABILITY,
     NO_WORKSTATION,
+    PYTHON_CAPABILITY,
     XFOIL_CAPABILITY,
     unavailable_capabilities,
 )
@@ -24,10 +25,11 @@ def test_capabilities_follow_the_setup(monkeypatch: pytest.MonkeyPatch):
     installed = {"xfoil", "xvfb-run"}
     monkeypatch.setattr("shutil.which", lambda name: name if name in installed else None)
 
-    # Local XFOIL with xvfb, no compute host: only part design is missing.
+    # Local XFOIL with xvfb, no compute host: part design and Python are missing.
     local = settings(xfoil_runner="local")
     assert unavailable_capabilities(local, workstation=False) == {
         DESIGN_CAPABILITY: NO_WORKSTATION,
+        PYTHON_CAPABILITY: NO_WORKSTATION,
     }
     # A compute host makes both available.
     assert unavailable_capabilities(settings(xfoil_runner="ws"), workstation=True) == {}
@@ -35,6 +37,7 @@ def test_capabilities_follow_the_setup(monkeypatch: pytest.MonkeyPatch):
     assert set(unavailable_capabilities(settings(xfoil_runner="ws"), workstation=False)) == {
         XFOIL_CAPABILITY,
         DESIGN_CAPABILITY,
+        PYTHON_CAPABILITY,
     }
 
     installed.discard("xvfb-run")

@@ -16,6 +16,7 @@ Configuration for both lives in the `.env` at the repo root.
 |---|---|---|
 | XFOIL | Fast 2D airfoil polars | [Home page](https://web.mit.edu/drela/Public/web/xfoil/) |
 | build123d | Designing parts from code, exported as STEP, STL and more | [build123d](https://github.com/gumyr/build123d) |
+| Python | Code the agent writes and runs in a sandbox: numpy, scipy, pandas, scikit-learn and Cantera (combustion, equilibrium, flame temperatures) | [Cantera](https://cantera.org) |
 
 Plots are drawn from Plotly specs, and users can attach text, CSV, STL, OBJ, STEP and PDF files.
 The tools run on one compute host that the server reaches over SSH, not on the user's computer.
@@ -55,6 +56,7 @@ Main `.env` settings:
 | `DAILY_MESSAGE_LIMIT` | Messages each user may send in any 24 hours (default 5; a prompt and its reply is one; 0 means no limit) |
 | `WS_HOST`, `WS_SSH_KEY`, `WS_HOST_KEY` | The compute host the tools run on, reached over SSH. All three are needed (see below). `WS_USER` (default `icarus`), `WS_PORT` (22) and `WS_WORKDIR` (`~/icarus`) are optional |
 | `XFOIL_RUNNER` | `ws` (the compute host) or `local` (this server, needs `xfoil` and `xvfb`) |
+| `PYTHON_TIMEOUT_S`, `PYTHON_MAX_CONCURRENCY`, `PYTHON_OUTPUT_MAX_CHARS` | Limits on the Python the agent runs: time per script (60 s), how many run at once (1) and how much output the agent sees (8000 characters) |
 | `ALLOW_PRIVATE_WORKSTATIONS` | Set `false` on a public server so a user's Ollama address can't point at private networks |
 
 Generate a credentials key with
@@ -82,7 +84,7 @@ key (the `WS_*` settings). Users don't connect machines of their own. Set it up 
 it, as the user the server logs in as:
 
 ```bash
-./setup.sh --install     # xfoil, xvfb, build123d and the runner scripts in ~/icarus
+./setup.sh --install     # xfoil, xvfb, the Python packages, bubblewrap and the scripts in ~/icarus
 ./setup.sh --check       # what is and isn't in place
 ./setup.sh --uninstall   # removes ~/icarus (the apt packages stay)
 ```
@@ -104,6 +106,12 @@ WS_HOST_KEY="203.0.113.7 ssh-ed25519 AAAAC3Nz..."
 The matching public key
 (`icarus_vm.pub`) goes in the host's `~/.ssh/authorized_keys`. The server only connects when the
 host presents exactly `WS_HOST_KEY`.
+
+The agent's Python runs in a `bubblewrap` sandbox (`workstation/run-sandboxed`): no network (so no
+internet, and not a cloud provider's metadata server either), no view of the machine's files
+beyond a scratch directory, no environment variables, and limits on time, memory and processes.
+If the sandbox can't start, for example where unprivileged user namespaces are turned off
+(Ubuntu 24.04 restricts them by default), nothing is run: `./setup.sh --check` says so.
 
 On a machine with under 2 GB of memory and no swap it also adds a swap file. It was tested on
 Debian 12 (ARM64) in a container; the swap step and Ubuntu are untested.

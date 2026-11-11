@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Sets up the compute host: the machine the Icarus server reaches over SSH to run XFOIL and to
-# build parts with build123d. For a small Debian or Ubuntu machine (an e2-micro is enough).
+# Sets up the compute host: the machine the Icarus server reaches over SSH to run XFOIL, to build
+# parts with build123d, and to run the Python the agent writes (numpy, scipy, pandas,
+# scikit-learn and Cantera) inside a sandbox. For a small Debian or Ubuntu machine (an e2-micro is enough).
 #
 #   ./setup.sh --install     installs what's missing and copies Icarus's scripts to $ICARUS_HOME
 #   ./setup.sh --check       says what is and isn't in place, changing nothing
@@ -19,7 +20,9 @@ SWAP_MARKER="$ICARUS_HOME/.made-swap"
 # need more than 1 GB at their peak.
 SWAP_BELOW_MB=2048
 SWAP_SIZE=2G
-APT_PACKAGES=(xfoil xvfb python3-venv libgl1 libglu1-mesa)
+APT_PACKAGES=(xfoil xvfb python3-venv libgl1 libglu1-mesa bubblewrap)
+# Installed with pip into $ICARUS_HOME/venv, as "pip name:import name".
+PYTHON_PACKAGES=(build123d:build123d cantera:cantera numpy:numpy scipy:scipy pandas:pandas scikit-learn:sklearn)
 
 log() { printf '%s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -84,23 +87,47 @@ install_python_environment() {
     log "Creating the Python environment in $ICARUS_HOME/venv"
     python3 -m venv "$ICARUS_HOME/venv"
   fi
-  if "$ICARUS_HOME/venv/bin/python" -c "import build123d" 2> /dev/null; then
-    log "build123d is already installed"
+  local entry package module missing=()
+  for entry in "${PYTHON_PACKAGES[@]}"; do
+    package="${entry%%:*}"
+    module="${entry##*:}"
+    "$ICARUS_HOME/venv/bin/python" -c "import $module" 2> /dev/null || missing+=("$package")
+  done
+  if ((${#missing[@]} == 0)); then
+    log "Python packages already installed: ${PYTHON_PACKAGES[*]%%:*}"
     return
   fi
-  log "Installing build123d (a few minutes on a small machine)"
+  log "Installing ${missing[*]} (a few minutes on a small machine)"
   "$ICARUS_HOME/venv/bin/pip" install --quiet --no-cache-dir --upgrade pip
-  "$ICARUS_HOME/venv/bin/pip" install --quiet --no-cache-dir build123d
+  "$ICARUS_HOME/venv/bin/pip" install --quiet --no-cache-dir "${missing[@]}"
 }
 
 install_scripts() {
   mkdir -p "$ICARUS_HOME/bin"
   local name
-  for name in cad_build.py icarus-exec; do
+  for name in cad_build.py icarus-exec run-sandboxed; do
     [[ -f "$SCRIPT_DIR/$name" ]] || die "$name is missing next to setup.sh"
     install -m 755 "$SCRIPT_DIR/$name" "$ICARUS_HOME/bin/$name"
   done
   log "Copied the runner scripts to $ICARUS_HOME/bin"
+}
+
+# Runs a throwaway script in the sandbox and checks that it has no network.
+sandbox_works() {
+  [[ -x "$ICARUS_HOME/bin/run-sandboxed" ]] || return 1
+  local job out
+  job="$(mktemp -d)"
+  cat > "$job/main.py" << 'PY'
+import os, socket
+try:
+    socket.create_connection(("1.1.1.1", 53), timeout=2)
+    print("network-open")
+except OSError:
+    print("no-network")
+PY
+  out="$("$ICARUS_HOME/bin/run-sandboxed" "$job" 20 2> /dev/null)" || out=""
+  rm -rf "$job"
+  [[ $out == *no-network* ]]
 }
 
 # Whether each piece works, not only whether it is installed.
@@ -112,16 +139,27 @@ check() {
   log "Checking this machine:"
   if command -v xfoil > /dev/null; then report ok "xfoil ($(command -v xfoil))"; else report no "xfoil"; fi
   if command -v xvfb-run > /dev/null; then report ok "xvfb-run"; else report no "xvfb-run (package xvfb)"; fi
-  if [[ -x "$ICARUS_HOME/venv/bin/python" ]] &&
-    "$ICARUS_HOME/venv/bin/python" -c "import build123d" 2> /dev/null; then
-    report ok "build123d in $ICARUS_HOME/venv"
-  else
-    report no "build123d in $ICARUS_HOME/venv"
-  fi
-  if [[ -x "$ICARUS_HOME/bin/cad_build.py" && -x "$ICARUS_HOME/bin/icarus-exec" ]]; then
+  local entry package module
+  for entry in "${PYTHON_PACKAGES[@]}"; do
+    package="${entry%%:*}"
+    module="${entry##*:}"
+    if [[ -x "$ICARUS_HOME/venv/bin/python" ]] &&
+      "$ICARUS_HOME/venv/bin/python" -c "import $module" 2> /dev/null; then
+      report ok "$package in $ICARUS_HOME/venv"
+    else
+      report no "$package in $ICARUS_HOME/venv"
+    fi
+  done
+  if [[ -x "$ICARUS_HOME/bin/cad_build.py" && -x "$ICARUS_HOME/bin/icarus-exec" &&
+    -x "$ICARUS_HOME/bin/run-sandboxed" ]]; then
     report ok "runner scripts in $ICARUS_HOME/bin"
   else
     report no "runner scripts in $ICARUS_HOME/bin"
+  fi
+  if sandbox_works; then
+    report ok "sandbox for the agent's Python (no network, no access to your files)"
+  else
+    report no "sandbox for the agent's Python (needs bubblewrap and unprivileged user namespaces)"
   fi
   log "  memory   $(memory_mb) MB, swap $(swap_mb) MB"
   return "$failed"

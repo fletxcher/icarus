@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Runs <job_dir>/main.py, which is code the agent wrote, inside a sandbox.
+#
+# Usage: run-sandboxed <job_dir> <timeout_s>
+#
+# What the code can see and do:
+#   - no network at all (so no internet, and not the cloud provider's metadata server either)
+#   - the system and Icarus's Python environment, read-only; nothing else of the machine: not
+#     the home directory, not ~/.ssh, not other jobs
+#   - the job directory, read-write, as /work, and a private /tmp; both are removed after the job
+#   - no environment variables from the machine, one CPU thread per library
+#   - limits on time, memory, processes and file size
+#
+# If the sandbox can't be started it exits with 97 and runs nothing: the code is never run
+# without it. Exit status 124 means the time limit was hit.
+set -uo pipefail
+
+job="${1:?usage: run-sandboxed <job_dir> <timeout_s>}"
+timeout_s="${2:?usage: run-sandboxed <job_dir> <timeout_s>}"
+home="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+python="$home/venv/bin/python"
+
+refuse() { echo "sandbox unavailable: $*" >&2; exit 97; }
+
+command -v bwrap > /dev/null || refuse "bubblewrap (bwrap) isn't installed"
+[[ -x $python ]] || refuse "$python doesn't exist"
+[[ -f $job/main.py ]] || refuse "$job/main.py doesn't exist"
+job="$(cd "$job" && pwd)"
+
+# Memory: 80% of memory plus swap, at most 4 GB (a limit on address space, which is generous
+# for numpy and Cantera but stops a runaway allocation).
+mem_kb="$(awk '/^(MemTotal|SwapTotal):/ { sum += $2 } END { printf "%d", sum }' /proc/meminfo)"
+limit_kb=$((mem_kb * 8 / 10))
+((limit_kb > 4194304)) && limit_kb=4194304
+ulimit -v "$limit_kb"
+ulimit -u 256
+ulimit -f 204800 # 200 MB per file (1 KB blocks)
+ulimit -c 0
+
+args=(--unshare-all --die-with-parent --new-session --cap-drop ALL)
+# /bin, /lib and friends are symlinks into /usr on current systems and real directories on old.
+for dir in /usr /bin /sbin /lib /lib32 /lib64 /libx32; do
+  if [[ -L $dir ]]; then
+    args+=(--symlink "$(readlink "$dir")" "$dir")
+  elif [[ -d $dir ]]; then
+    args+=(--ro-bind "$dir" "$dir")
+  fi
+done
+[[ -f /etc/ld.so.cache ]] && args+=(--ro-bind /etc/ld.so.cache /etc/ld.so.cache)
+args+=(
+  --ro-bind "$home/venv" "$home/venv"
+  --bind "$job" /work
+  --proc /proc --dev /dev --tmpfs /tmp
+  --chdir /work
+  --clearenv
+  --setenv PATH "$home/venv/bin:/usr/local/bin:/usr/bin:/bin"
+  --setenv HOME /work
+  --setenv TMPDIR /tmp
+  --setenv LANG C.UTF-8
+  --setenv OMP_NUM_THREADS 1
+  --setenv OPENBLAS_NUM_THREADS 1
+  --setenv MKL_NUM_THREADS 1
+)
+
+# A sandbox that can't start (user namespaces disabled) must not fall through to running
+# the code unprotected.
+bwrap "${args[@]}" true 2> /dev/null || refuse "this machine doesn't allow unprivileged namespaces"
+
+exec timeout --kill-after=3 "$timeout_s" bwrap "${args[@]}" "$python" -I -B main.py

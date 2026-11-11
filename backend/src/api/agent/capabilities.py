@@ -6,6 +6,7 @@ from ..config import Settings
 
 XFOIL_CAPABILITY = "XFOIL airfoil analysis and airfoil search"
 DESIGN_CAPABILITY = "CAD design of parts (build123d)"
+PYTHON_CAPABILITY = "Running Python code (numpy, scipy, pandas, scikit-learn, Cantera)"
 
 NO_WORKSTATION = "the compute host isn't set up on the server"
 
@@ -27,4 +28,5 @@ def unavailable_capabilities(settings: Settings, *, workstation: bool) -> dict[s
         unavailable[XFOIL_CAPABILITY] = reason
     if not workstation:
         unavailable[DESIGN_CAPABILITY] = NO_WORKSTATION
+        unavailable[PYTHON_CAPABILITY] = NO_WORKSTATION
     return unavailable

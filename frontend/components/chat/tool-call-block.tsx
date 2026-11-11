@@ -10,6 +10,7 @@ import {
   LoaderCircleIcon,
   PlaneIcon,
   SearchIcon,
+  TerminalIcon,
   WrenchIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -27,6 +28,7 @@ const TOOLS: Record<string, { label: string; icon: LucideIcon }> = {
   create_geometry: { label: "CAD design", icon: BoxIcon },
   export_geometry: { label: "Export geometry", icon: BoxIcon },
   create_plot: { label: "Plot", icon: ChartLineIcon },
+  exec_python: { label: "Python", icon: TerminalIcon },
 };
 
 const STATUS = {
@@ -38,6 +40,10 @@ const STATUS = {
 /** One-line summary of the most telling arguments, e.g. "NACA 2412 · Re 1e+6". */
 function summarizeArgs(args: Record<string, unknown>): string {
   const parts: string[] = [];
+  if (typeof args.code === "string") {
+    const lines = args.code.trimEnd().split("\n").length;
+    parts.push(`${lines} ${lines === 1 ? "line" : "lines"}`);
+  }
   if (typeof args.naca === "string") parts.push(`NACA ${args.naca}`);
   if (typeof args.reynolds === "number") parts.push(`Re ${args.reynolds.toExponential(1)}`);
   if (typeof args.alpha === "number") parts.push(`α ${args.alpha}°`);
@@ -86,9 +92,11 @@ function ToolCallCard({ part }: { part: ToolPart }) {
   const tool = TOOLS[part.name] ?? { label: part.name, icon: WrenchIcon };
   const status = STATUS[part.status];
   const summary = summarizeArgs(part.args);
+  // The code the agent ran and what it printed are the point of this tool, so they start open.
+  const isPython = part.name === "exec_python" && typeof part.args.code === "string";
 
   return (
-    <Collapsible className="rounded-lg border bg-muted/30">
+    <Collapsible defaultOpen={isPython} className="rounded-lg border bg-muted/30">
       <CollapsibleTrigger className="group flex w-full items-center gap-2 px-3 py-2 text-left text-sm">
         <tool.icon className="size-4 shrink-0 text-muted-foreground" />
         <span className="font-medium">{tool.label}</span>
@@ -102,9 +110,11 @@ function ToolCallCard({ part }: { part: ToolPart }) {
       <CollapsibleContent>
         <div className="flex flex-col gap-3 border-t px-3 py-3">
           <section>
-            <h4 className="mb-1 text-xs font-medium text-muted-foreground">Arguments</h4>
+            <h4 className="mb-1 text-xs font-medium text-muted-foreground">
+              {isPython ? "Code" : "Arguments"}
+            </h4>
             <pre className="overflow-x-auto rounded-md bg-muted/60 p-2 font-mono text-xs">
-              {JSON.stringify(part.args, null, 2)}
+              {isPython ? String(part.args.code) : JSON.stringify(part.args, null, 2)}
             </pre>
           </section>
           <section>
@@ -113,6 +123,10 @@ function ToolCallCard({ part }: { part: ToolPart }) {
               <p className="text-xs text-muted-foreground">Waiting for the tool to finish…</p>
             ) : part.status === "error" ? (
               <pre className="overflow-x-auto rounded-md bg-destructive/10 p-2 font-mono text-xs whitespace-pre-wrap text-destructive">
+                {part.result}
+              </pre>
+            ) : isPython ? (
+              <pre className="max-h-96 overflow-auto rounded-md bg-muted/60 p-2 font-mono text-xs whitespace-pre-wrap">
                 {part.result}
               </pre>
             ) : (
