@@ -16,6 +16,7 @@ Configuration for both lives in the `.env` at the repo root.
 |---|---|---|
 | XFOIL | Fast 2D airfoil polars | [Home page](https://web.mit.edu/drela/Public/web/xfoil/) |
 | build123d | Designing parts from code, exported as STEP, STL and more | [build123d](https://github.com/gumyr/build123d) |
+| Web search | Searches the web and reads pages, and cites what it used with links that are checked (see below) | [Tavily](https://tavily.com) or [Brave Search](https://brave.com/search/api/) |
 | Python | Code the agent writes and runs in a sandbox: numpy, scipy, pandas, scikit-learn and Cantera (combustion, equilibrium, flame temperatures) | [Cantera](https://cantera.org) |
 
 Plots are drawn from Plotly specs, and users can attach text, CSV, STL, OBJ, STEP and PDF files.
@@ -56,6 +57,7 @@ Main `.env` settings:
 | `DAILY_MESSAGE_LIMIT` | Messages each user may send in any 24 hours (default 5; a prompt and its reply is one; 0 means no limit) |
 | `WS_HOST`, `WS_SSH_KEY`, `WS_HOST_KEY` | The compute host the tools run on, reached over SSH. All three are needed (see below). `WS_USER` (default `icarus`), `WS_PORT` (22) and `WS_WORKDIR` (`~/icarus`) are optional |
 | `XFOIL_RUNNER` | `ws` (the compute host) or `local` (this server, needs `xfoil` and `xvfb`) |
+| `TAVILY_API_KEY` or `BRAVE_API_KEY` | Turns on web search for the agent (Tavily is used if both are set). Without one the agent has no web tools. `WEB_MAX_RESULTS` (6), `WEB_TIMEOUT_S` (8), `WEB_FETCH_MAX_BYTES` and `WEB_FETCH_MAX_CHARS` bound what it fetches |
 | `PYTHON_TIMEOUT_S`, `PYTHON_MAX_CONCURRENCY`, `PYTHON_OUTPUT_MAX_CHARS` | Limits on the Python the agent runs: time per script (60 s), how many run at once (1) and how much output the agent sees (8000 characters) |
 | `ALLOW_PRIVATE_WORKSTATIONS` | Set `false` on a public server so a user's Ollama address can't point at private networks |
 
@@ -76,6 +78,17 @@ and the composer shows how many messages are left (`GET /api/usage/messages`).
 
 **MongoDB.** A local MongoDB or a remote one such as Atlas both work. A local `icarus-db`
 container doesn't publish its port by default, so start it with `-p 27017:27017`.
+
+## Web search and cited links
+
+The agent's `web_search` and `fetch_page` tools run on the API server, not the compute host. Every
+link in a search result is requested before the agent sees it, and dead ones are dropped. When the
+agent finishes, every link in its answer is checked again (code blocks excluded): a link it got from
+its tools in that chat is kept, any other is requested, and one that doesn't load (or points
+at an address the server refuses to open) is replaced with "(link removed)" in the saved answer.
+Sites that answer but refuse automated visitors (401, 403, 429) count as live. Pages are fetched
+over http(s) on ports 80 and 443 only, never from a private, loopback or link-local address, and the
+address is checked again at each redirect.
 
 ## The compute host
 

@@ -39,6 +39,7 @@ from ..chats.schemas import (
 from ..config import get_settings
 from ..files.extract import BINARY_KINDS
 from ..files.repository import FileRepository, FileText
+from ..web.links import LinkChecker, SourceLog, link_checker_from, normalize, urls_in, verify_text
 from .logging_callbacks import AgentLoggingHandler
 
 logger = logging.getLogger(__name__)
@@ -187,6 +188,11 @@ class ReplyBuilder:
             if isinstance(message.artifact, dict):
                 part.artifact = message.artifact
 
+    def replace_text(self, index: int, text: str) -> None:
+        part = self.parts[index]
+        assert isinstance(part, TextPart)
+        part.text = text
+
     @property
     def content(self) -> str:
         """The answer text alone, used for history, copying and search."""
@@ -198,6 +204,38 @@ class ReplyBuilder:
             if part.status == "running":
                 part.status = "error"
                 part.result = part.result or "Interrupted before the tool finished."
+
+
+async def verify_links(
+    builder: ReplyBuilder,
+    sources: SourceLog,
+    earlier: set[str],
+    checker: LinkChecker,
+) -> AsyncIterator[ServerSentEvent]:
+    """Takes the links that don't load out of the reply, and sends the corrected text.
+
+    A link the agent got from a tool this turn, or that an earlier answer in the chat already had
+    checked, is kept as it is; any other link is requested, and removed if the page isn't there.
+    Never raises: if the check itself fails the reply is left as it was."""
+    known = sources.urls | earlier
+    for index, part in enumerate(builder.parts):
+        if not isinstance(part, TextPart) or "http" not in part.text:
+            continue
+        try:
+            verified = await verify_text(part.text, known=known, checker=checker)
+        except Exception:
+            logger.warning("couldn't check the links of a reply", exc_info=True)
+            return
+        if verified.changed:
+            logger.warning(
+                "removed %d link(s) from a reply: %s",
+                len(verified.removed),
+                "; ".join(f"{link.url} ({link.reason or link.state})" for link in verified.removed),
+            )
+            builder.replace_text(index, verified.text)
+            yield ServerSentEvent(
+                event="replace_text", data={"index": index, "text": verified.text}
+            )
 
 
 async def stream_turn(
@@ -226,6 +264,14 @@ async def stream_turn(
     )
     started = time.perf_counter()
     yield ServerSentEvent(event="start", data={"message_id": reply.id})
+    sources = SourceLog()
+    # Links in earlier answers of this chat were checked when those were written.
+    earlier = {
+        normalize(url)
+        for message in messages
+        if message.role == "assistant"
+        for url in urls_in(message.content)
+    }
 
     builder = ReplyBuilder()
     status: MessageStatus = "error"
@@ -235,6 +281,7 @@ async def stream_turn(
             "thread_id": thread_id,
             "model": model,
             "situation": situation,
+            "sources": sources,
         },
         "callbacks": [AgentLoggingHandler(payload_max_chars=settings.log_body_max_chars)],
     }
@@ -278,6 +325,8 @@ async def stream_turn(
                             },
                         )
 
+        async for event in verify_links(builder, sources, earlier, link_checker_from(settings)):
+            yield event
         status = "done"
         yield ServerSentEvent(event="done", data={"message_id": reply.id})
     except asyncio.CancelledError:

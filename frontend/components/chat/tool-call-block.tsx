@@ -7,6 +7,8 @@ import {
   CircleCheckIcon,
   CircleXIcon,
   DownloadIcon,
+  FileTextIcon,
+  GlobeIcon,
   LoaderCircleIcon,
   PlaneIcon,
   SearchIcon,
@@ -29,6 +31,8 @@ const TOOLS: Record<string, { label: string; icon: LucideIcon }> = {
   export_geometry: { label: "Export geometry", icon: BoxIcon },
   create_plot: { label: "Plot", icon: ChartLineIcon },
   exec_python: { label: "Python", icon: TerminalIcon },
+  web_search: { label: "Web search", icon: GlobeIcon },
+  fetch_page: { label: "Read page", icon: FileTextIcon },
 };
 
 const STATUS = {
@@ -44,6 +48,8 @@ function summarizeArgs(args: Record<string, unknown>): string {
     const lines = args.code.trimEnd().split("\n").length;
     parts.push(`${lines} ${lines === 1 ? "line" : "lines"}`);
   }
+  if (typeof args.query === "string") parts.push(args.query);
+  if (typeof args.url === "string") parts.push(args.url.replace(/^https?:\/\//, ""));
   if (typeof args.naca === "string") parts.push(`NACA ${args.naca}`);
   if (typeof args.reynolds === "number") parts.push(`Re ${args.reynolds.toExponential(1)}`);
   if (typeof args.alpha === "number") parts.push(`α ${args.alpha}°`);

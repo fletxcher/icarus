@@ -83,5 +83,7 @@ export type StreamEvent =
       artifact: Record<string, unknown> | null;
     }
   | { type: "title"; title: string }
+  /** The server took links that don't load out of a text part: its corrected text. */
+  | { type: "replace_text"; index: number; text: string }
   | { type: "done"; message_id: string }
   | { type: "error"; message: string };

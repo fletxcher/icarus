@@ -4,8 +4,10 @@ from langchain_core.messages import AIMessage
 
 from api.agent.capabilities import (
     DESIGN_CAPABILITY,
+    NO_SEARCH_KEY,
     NO_WORKSTATION,
     PYTHON_CAPABILITY,
+    WEB_CAPABILITY,
     XFOIL_CAPABILITY,
     unavailable_capabilities,
 )
@@ -18,6 +20,8 @@ from tests.test_chats_api import create_thread, read_events
 
 
 def settings(**values) -> Settings:
+    # A search key is set unless a test says otherwise.
+    values = {"tavily_api_key": "test-key"} | values
     return Settings(_env_file=None, **values)
 
 
@@ -46,6 +50,14 @@ def test_capabilities_follow_the_setup(monkeypatch: pytest.MonkeyPatch):
     installed.discard("xfoil")
     reason = unavailable_capabilities(local, workstation=True)[XFOIL_CAPABILITY]
     assert reason == "XFOIL isn't installed on the server"
+
+
+def test_web_search_needs_a_search_key():
+    assert unavailable_capabilities(settings(), workstation=True) == {}
+    without = settings(tavily_api_key=None)
+    assert unavailable_capabilities(without, workstation=True) == {WEB_CAPABILITY: NO_SEARCH_KEY}
+    assert not settings(tavily_api_key="  ").web_search_configured
+    assert settings(tavily_api_key=None, brave_api_key="k").web_search_configured
 
 
 def test_prompt_lists_available_tools_and_missing_capabilities():

@@ -66,11 +66,17 @@ class Settings(BaseSettings):
         "ws_ssh_key",
         "ws_host_key",
         "ws_workdir",
+        "tavily_api_key",
+        "brave_api_key",
         mode="before",
     )
     @classmethod
     def _blank_is_unset(cls, value: object) -> object:
         return None if isinstance(value, str) and not value.strip() else value
+
+    @property
+    def web_search_configured(self) -> bool:
+        return bool(self.tavily_api_key or self.brave_api_key)
 
     @property
     def compute_workdir(self) -> str:
@@ -119,6 +125,17 @@ class Settings(BaseSettings):
     xfoil_display: Literal["xvfb", "none"] = "xvfb"
     xfoil_timeout_s: float = 60.0
     xfoil_max_concurrency: int = 4
+
+    # Web search for the agent: Tavily if its key is set, else Brave. Without either the agent has
+    # no web tools. Pages it opens are fetched by this server, within these limits.
+    tavily_api_key: SecretStr | None = None
+    brave_api_key: SecretStr | None = None
+    web_max_results: int = 6
+    web_timeout_s: float = 8.0
+    web_fetch_max_bytes: int = 2_000_000
+    # PDFs (papers, reports) are bigger than web pages, and can't be read when cut off.
+    web_fetch_max_pdf_bytes: int = 15_000_000
+    web_fetch_max_chars: int = 12_000
 
     # Python the agent writes, run in a sandbox on the compute host: a script's time limit, how many
     # run at once (the host is small), and how much of its output the agent gets to see.

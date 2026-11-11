@@ -10,9 +10,13 @@ from ..chats.repository import ChatRepository
 from ..compute.station import Compute
 from ..config import Settings
 from ..credentials.repository import CredentialRepository
+from ..web.fetch import Fetcher
+from ..web.links import link_checker_from
+from ..web.search import provider_for
 from .capabilities import (
     DESIGN_CAPABILITY,
     PYTHON_CAPABILITY,
+    WEB_CAPABILITY,
     XFOIL_CAPABILITY,
     unavailable_capabilities,
 )
@@ -21,7 +25,7 @@ from .models import ModelOption, Provider, available_models, create_chat_model, 
 from .ollama import model_options
 from .prompts import build_system_prompt
 from .titles import TitleGenerator
-from .tools import build_tools
+from .tools import build_tools, web_tools
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +54,24 @@ class AgentFactory:
         self._compute = compute
         # Tests plug in a scripted agent here; it's used for every user.
         self.override: UserAgent | None = None
+
+    def _web_tools(self):
+        """Search and page tools, or None when no search key is set."""
+        s = self._settings
+        search = provider_for(s.tavily_api_key, s.brave_api_key, timeout_s=s.web_timeout_s)
+        if search is None:
+            return None
+        return web_tools(
+            search,
+            Fetcher(
+                timeout_s=s.web_timeout_s,
+                max_bytes=s.web_fetch_max_bytes,
+                max_pdf_bytes=s.web_fetch_max_pdf_bytes,
+            ),
+            link_checker_from(s),
+            max_results=s.web_max_results,
+            max_chars=s.web_fetch_max_chars,
+        )
 
     async def keys_for(self, user_id: str) -> dict[Provider, SecretStr]:
         """The server's keys, replaced provider by provider by the user's own."""
@@ -93,7 +115,8 @@ class AgentFactory:
         designs = self._compute.designs(user_id) if DESIGN_CAPABILITY not in unavailable else None
         python = self._compute.python(user_id) if PYTHON_CAPABILITY not in unavailable else None
         # Only tools that can run are given to the model; the prompt names the rest as missing.
-        tools = build_tools(xfoil, designs, python)
+        web = self._web_tools() if WEB_CAPABILITY not in unavailable else None
+        tools = build_tools(xfoil, designs, python, web)
         chat_models = {
             option.id: create_chat_model(option, keys, reasoning_effort=settings.reasoning_effort)
             for option in models

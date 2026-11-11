@@ -7,6 +7,9 @@ from ..config import Settings
 XFOIL_CAPABILITY = "XFOIL airfoil analysis and airfoil search"
 DESIGN_CAPABILITY = "CAD design of parts (build123d)"
 PYTHON_CAPABILITY = "Running Python code (numpy, scipy, pandas, scikit-learn, Cantera)"
+WEB_CAPABILITY = "Web search and reading web pages"
+
+NO_SEARCH_KEY = "no search API key is set on the server (TAVILY_API_KEY or BRAVE_API_KEY)"
 
 NO_WORKSTATION = "the compute host isn't set up on the server"
 
@@ -26,6 +29,8 @@ def unavailable_capabilities(settings: Settings, *, workstation: bool) -> dict[s
     unavailable = {}
     if reason := xfoil_unavailable(settings, workstation=workstation):
         unavailable[XFOIL_CAPABILITY] = reason
+    if not settings.web_search_configured:
+        unavailable[WEB_CAPABILITY] = NO_SEARCH_KEY
     if not workstation:
         unavailable[DESIGN_CAPABILITY] = NO_WORKSTATION
         unavailable[PYTHON_CAPABILITY] = NO_WORKSTATION

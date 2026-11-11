@@ -37,6 +37,15 @@ export function applyStreamEvent(message: Message, event: StreamEvent): Message 
             : part,
         ),
       };
+    case "replace_text": {
+      const parts = message.parts.map((part, index) =>
+        index === event.index && part.type === "text" ? { ...part, text: event.text } : part,
+      );
+      const content = parts
+        .flatMap((part) => (part.type === "text" && part.text.trim() ? [part.text.trim()] : []))
+        .join("\n\n");
+      return { ...message, parts, content };
+    }
     case "done":
       return { ...message, status: "done" };
     case "error":
