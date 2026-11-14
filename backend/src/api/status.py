@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import shlex
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
@@ -44,9 +45,14 @@ async def _work_station(station: Workstation) -> Check:
             ok=False,
             detail=station.reason or "Not set up on the server.",
         )
+    # Reachable isn't enough: the scripts the tools run must have been installed by setup.sh.
+    scripts = " && ".join(
+        f"test -x {shlex.quote(f'{station.workdir}/bin/{name}')}"
+        for name in ("run-sandboxed", "cad_build.py", "icarus-exec")
+    )
     try:
         result = await asyncio.wait_for(
-            station.runner.run("true", timeout_s=WORK_STATION_TIMEOUT_S),
+            station.runner.run(f"{scripts}; echo $?", timeout_s=WORK_STATION_TIMEOUT_S),
             timeout=WORK_STATION_TIMEOUT_S + 2,
         )
     except Exception as error:
@@ -55,6 +61,13 @@ async def _work_station(station: Workstation) -> Check:
     if not result.ok:
         return Check(
             id="work_station", label=label, ok=False, detail="Reachable, but a command failed"
+        )
+    if result.stdout.strip().splitlines()[-1:] != ["0"]:
+        return Check(
+            id="work_station",
+            label=label,
+            ok=False,
+            detail="Reachable, but not fully set up: run setup.sh --install on it",
         )
     return Check(id="work_station", label=label, ok=True, detail="Reachable over SSH")
 

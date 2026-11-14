@@ -1,15 +1,17 @@
 """Tools exposed to the agent. Each wraps a service and returns compact text for the LLM."""
 
+import functools
 import json
 from typing import Annotated, Any, Literal
 
 import httpx
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from pydantic import BaseModel, BeforeValidator, Field
 
 from ..compute.plots import describe_figure, validate_figure
 from ..compute.python_exec import PythonError, PythonService, format_result
+from ..compute.redact import hide_host_paths
 from ..compute.xfoil import Polar, PolarRequest, XfoilService
 from ..design.service import DesignError, DesignService
 from ..web.fetch import Fetcher, FetchError, page_text
@@ -434,20 +436,48 @@ def web_tools(
     ]
 
 
+def hiding_host_paths(tools: list[BaseTool], workdir: str | None) -> list[BaseTool]:
+    """The tools, with the compute host's directories taken out of what they return and of the
+    errors they raise: the model never sees them, so it can't repeat them to the user."""
+
+    def wrap(run):
+        @functools.wraps(run)
+        async def hidden(*args, **kwargs):
+            try:
+                result = await run(*args, **kwargs)
+            except ToolException:
+                raise
+            except Exception as error:
+                raise ToolException(hide_host_paths(str(error), workdir)) from error
+            return hide_host_paths(result, workdir) if isinstance(result, str) else result
+
+        return hidden
+
+    for tool in tools:
+        if isinstance(tool, StructuredTool) and tool.coroutine is not None:
+            tool.coroutine = wrap(tool.coroutine)
+    return tools
+
+
 def build_tools(
     xfoil: XfoilService | None,
     designs: DesignService | None = None,
     python: PythonService | None = None,
     web: list[BaseTool] | None = None,
+    *,
+    workdir: str | None = None,
 ) -> list[BaseTool]:
-    """The tools that can actually run with the current setup."""
+    """The tools that can actually run with the current setup. `workdir` is the compute host's
+    directory, which is kept out of what the host's tools return."""
     tools = plot_tools()
+    on_host: list[BaseTool] = []
     if xfoil is not None:
-        tools += xfoil_tools(xfoil)
+        on_host += xfoil_tools(xfoil)
     if designs is not None:
-        tools += design_tools(designs)
+        on_host += design_tools(designs)
     if python is not None:
-        tools += python_tools(python)
+        on_host += python_tools(python)
+    tools += hiding_host_paths(on_host, workdir)
     if web:
         tools += web
     return tools

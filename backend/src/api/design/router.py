@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from ..auth.router import CurrentUser
+from ..compute.redact import hide_host_paths
 from ..dependencies import ServicesDep
 from .service import FORMATS, DesignError
 
@@ -31,7 +32,8 @@ async def export_design(
     except DesignError as problem:
         missing = str(problem).startswith("no designed part")
         raise HTTPException(
-            status.HTTP_404_NOT_FOUND if missing else status.HTTP_502_BAD_GATEWAY, str(problem)
+            status.HTTP_404_NOT_FOUND if missing else status.HTTP_502_BAD_GATEWAY,
+            hide_host_paths(str(problem), services.compute.station.workdir),
         ) from None
     return Response(
         exported.data,

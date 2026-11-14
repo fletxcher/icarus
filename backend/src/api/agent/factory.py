@@ -116,7 +116,7 @@ class AgentFactory:
         python = self._compute.python(user_id) if PYTHON_CAPABILITY not in unavailable else None
         # Only tools that can run are given to the model; the prompt names the rest as missing.
         web = self._web_tools() if WEB_CAPABILITY not in unavailable else None
-        tools = build_tools(xfoil, designs, python, web)
+        tools = build_tools(xfoil, designs, python, web, workdir=self._compute.station.workdir)
         chat_models = {
             option.id: create_chat_model(option, keys, reasoning_effort=settings.reasoning_effort)
             for option in models

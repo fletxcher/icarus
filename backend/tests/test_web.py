@@ -476,7 +476,10 @@ def test_fetch_page_says_why_a_page_could_not_be_opened():
 def test_the_prompt_explains_citing_only_when_the_tools_exist():
     tools = list(make_tools([], {}).values())
 
-    assert "Using the web:" in build_system_prompt(tools, {})
+    prompt = build_system_prompt(tools, {})
+    assert "Using the web:" in prompt
+    # Unsure about a library's syntax: read its documentation first, don't guess.
+    assert "Never guess the syntax" in prompt and "official docs" in prompt
     assert "Using the web:" not in build_system_prompt([], {})
 
 

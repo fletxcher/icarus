@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from api.agent.prompts import build_system_prompt
 from api.agent.tools import python_tools
 from api.compute.python_exec import PythonError, PythonResult, clip, format_result, safe_name
+from api.compute.redact import hide_host_paths
 from api.compute.runner import CommandResult
 from api.compute.station import Workstation
 from tests.conftest import sign_up_and_in
@@ -199,3 +200,56 @@ def test_file_names_are_made_safe():
     assert safe_name("data set.csv") == "data_set.csv"
     assert safe_name("...") == "file"
     assert PythonResult(0, "", "", 1.0, False).exit_code == 0
+
+
+def test_host_directories_are_replaced_by_stars():
+    text = (
+        "bash: line 1: /home/fletxcher/icarus/bin/run-sandboxed: No such file or directory\n"
+        'File "/home/fletxcher/icarus/venv/lib/python3.12/site-packages/numpy/x.py", line 3\n'
+        "also /home/someone_else/notes and /tmp/icarus-ab12cd/out"
+    )
+
+    hidden = hide_host_paths(text, "/home/fletxcher/icarus")
+
+    assert "***/bin/run-sandboxed: No such file or directory" in hidden
+    assert "***/venv/lib/python3.12/site-packages/numpy/x.py" in hidden
+    assert "also ***/notes and ***/out" in hidden
+    assert "fletxcher" not in hidden and "someone_else" not in hidden
+    assert (
+        hide_host_paths("nothing to hide: /work/main.py", None) == "nothing to hide: /work/main.py"
+    )
+    assert hide_host_paths("a /b c", "/") == "a /b c"  # a root workdir would mask everything
+
+
+def test_the_agent_never_sees_the_hosts_paths_in_results_or_errors(client, host):
+    from api.agent.tools import hiding_host_paths, python_tools
+
+    [tool] = hiding_host_paths(python_tools(service(client)), "/srv/icarus")
+    host.result = CommandResult(
+        1,
+        "",
+        "File \"/srv/icarus/venv/lib/python3.12/x.py\", line 1\nNameError: name 'q' is not defined",
+    )
+
+    failed = client.portal.call(tool.ainvoke, {"code": "print(q)"})
+
+    assert "***/venv/lib/python3.12/x.py" in failed and "NameError" in failed
+    assert "/srv/icarus" not in failed
+
+    async def broken(command, *, cwd=None, timeout_s=None):
+        raise OSError("ssh to /home/fletxcher/icarus/x: connection reset")
+
+    host.run = broken  # type: ignore[method-assign]
+    refused = client.portal.call(tool.ainvoke, {"code": "print(1)"})
+    assert "fletxcher" not in refused and "connection reset" in refused
+
+
+def test_a_host_without_the_sandbox_script_says_to_run_setup_not_a_shell_error(client, host):
+    host.result = CommandResult(
+        127, "", "bash: line 1: /w/bin/run-sandboxed: No such file or directory"
+    )
+
+    with pytest.raises(PythonError, match=r"setup\.sh --install") as error:
+        run(client, "print(1)")
+
+    assert "/w/" not in str(error.value) and host.removed

@@ -24,6 +24,7 @@ MAX_FILES = 5
 # be killed. 97 is the sandbox refusing to start (nothing was run).
 EXIT_TIMED_OUT = (124, 137)
 EXIT_NO_SANDBOX = 97
+EXIT_NOT_FOUND = 127  # the shell couldn't find the sandbox script: the host isn't set up
 
 
 class PythonError(Exception):
@@ -127,6 +128,12 @@ class PythonService:
                 await self._discard(folder)
                 raise PythonError(f"couldn't reach the compute host: {error}") from error
             await self._discard(folder)
+        if done.exit_code == EXIT_NOT_FOUND and "run-sandboxed" in done.stderr:
+            logger.error("the compute host has no run-sandboxed script: %s", done.stderr.strip())
+            raise PythonError(
+                "the compute host isn't fully set up (the sandbox script is missing), "
+                "so nothing was run. Its owner needs to run setup.sh --install on it"
+            )
         if done.exit_code == EXIT_NO_SANDBOX:
             logger.error("python sandbox unavailable: %s", done.stderr.strip())
             raise PythonError(
