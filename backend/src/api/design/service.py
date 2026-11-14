@@ -9,9 +9,12 @@ import json
 import logging
 import re
 import shlex
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from uuid import uuid4
 
+from ..compute.queue import HostBusy, HostQueue
 from ..compute.runner import CommandRunner
 from ..config import get_settings
 from ..files.extract import extract
@@ -21,6 +24,10 @@ from ..files.schemas import StoredFile
 logger = logging.getLogger(__name__)
 
 BUILD_TIMEOUT_S = 150
+# What run-sandboxed exits with when it, not the builder, is what failed.
+EXIT_NO_SANDBOX = 97
+EXIT_NOT_FOUND = 127
+EXIT_TIMED_OUT = (124, 137)
 MAX_CODE_CHARS = 20_000
 
 # format -> (media type, file extension)
@@ -76,8 +83,15 @@ def designs_note(parts: list[StoredFile]) -> str | None:
 
 class DesignService:
     def __init__(
-        self, runner: CommandRunner, *, workdir: str, files: FileRepository, user_id: str
+        self,
+        runner: CommandRunner,
+        *,
+        workdir: str,
+        files: FileRepository,
+        user_id: str,
+        queue: HostQueue | None = None,
     ) -> None:
+        self._queue = queue
         self._runner = runner
         self._workdir = workdir
         self._files = files
@@ -89,24 +103,29 @@ class DesignService:
         if len(code) > MAX_CODE_CHARS:
             raise DesignError(f"the code is over {MAX_CODE_CHARS} characters; simplify it")
         folder = f"{self._workdir}/designs/{uuid4()}"
-        try:
-            await self._runner.run(f"mkdir -p {shlex.quote(folder)}")
-            await self._runner.write_file(f"{folder}/design.py", code)
-            build = " ".join(
-                shlex.quote(part)
-                for part in (f"{self._workdir}/bin/cad_build.py", args[0], folder, *args[1:])
-            )
-            # `python3` finds the Python environment with build123d wherever icarus-exec runs it;
-            # a machine whose runner files predate icarus-exec uses its own environment directly.
-            wrapper = shlex.quote(f"{self._workdir}/bin/icarus-exec")
-            command = (
-                f"if [ -x {wrapper} ]; then {wrapper} python3 {build}; "
-                f"else {shlex.quote(f'{self._workdir}/venv/bin/python')} {build}; fi"
-            )
-            result = await self._runner.run(command, timeout_s=BUILD_TIMEOUT_S)
-        except Exception as error:
-            await self._discard(folder)
-            raise DesignError(f"couldn't reach the work station: {error}") from error
+        async with self._turn():
+            try:
+                await self._runner.run(f"mkdir -p {shlex.quote(folder)}")
+                await self._runner.write_file(f"{folder}/design.py", code)
+                # The code is the agent's, so it runs in the sandbox (no network, no view of the
+                # machine's files beyond this folder, which it sees as /work).
+                command = " ".join(
+                    shlex.quote(part)
+                    for part in (
+                        f"{self._workdir}/bin/run-sandboxed",
+                        folder,
+                        str(BUILD_TIMEOUT_S),
+                        f"{self._workdir}/bin/cad_build.py",
+                        args[0],
+                        "/work",
+                        *args[1:],
+                    )
+                )
+                result = await self._runner.run(command, timeout_s=BUILD_TIMEOUT_S + 20)
+            except Exception as error:
+                await self._discard(folder)
+                raise DesignError(f"couldn't reach the compute host: {error}") from error
+        await self._check_sandbox(result, folder)
         try:
             report = json.loads(result.stdout.strip().splitlines()[-1])
         except (ValueError, IndexError):
@@ -117,6 +136,42 @@ class DesignService:
             await self._discard(folder)
             raise DesignError(report.get("error", "the build failed"))
         return report, folder
+
+    @asynccontextmanager
+    async def _turn(self) -> AsyncIterator[None]:
+        """Waits for the compute host's turn, if there is a queue; gives up with a clear error."""
+        if self._queue is None:
+            yield
+            return
+        try:
+            async with self._queue.turn():
+                yield
+        except HostBusy as busy:
+            raise DesignError(str(busy)) from None
+
+    async def _check_sandbox(self, result, folder: str) -> None:
+        """Turns the sandbox's own failures (not the builder's) into clear errors."""
+        if result.exit_code == EXIT_NOT_FOUND and "run-sandboxed" in result.stderr:
+            logger.error("the compute host has no run-sandboxed script: %s", result.stderr.strip())
+            message = (
+                "the compute host isn't fully set up (the sandbox script is missing), so nothing "
+                "was built. Its owner needs to run setup.sh --install on it"
+            )
+        elif result.exit_code == EXIT_NO_SANDBOX:
+            logger.error("design sandbox unavailable: %s", result.stderr.strip())
+            message = (
+                "the sandbox for running design code isn't available on the compute host, "
+                "so nothing was built"
+            )
+        elif result.exit_code in EXIT_TIMED_OUT:
+            message = (
+                f"the build took longer than {BUILD_TIMEOUT_S} s and was stopped; "
+                "make the part simpler"
+            )
+        else:
+            return
+        await self._discard(folder)
+        raise DesignError(message)
 
     async def _discard(self, folder: str) -> None:
         try:

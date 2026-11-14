@@ -58,7 +58,8 @@ Main `.env` settings:
 | `WS_HOST`, `WS_SSH_KEY`, `WS_HOST_KEY` | The compute host the tools run on, reached over SSH. All three are needed (see below). `WS_USER` (default `icarus`), `WS_PORT` (22) and `WS_WORKDIR` (`~/icarus`) are optional |
 | `XFOIL_RUNNER` | `ws` (the compute host) or `local` (this server, needs `xfoil` and `xvfb`) |
 | `TAVILY_API_KEY` or `BRAVE_API_KEY` | Turns on web search for the agent (Tavily is used if both are set). Without one the agent has no web tools. `WEB_MAX_RESULTS` (6), `WEB_TIMEOUT_S` (8), `WEB_FETCH_MAX_BYTES` and `WEB_FETCH_MAX_CHARS` bound what it fetches |
-| `PYTHON_TIMEOUT_S`, `PYTHON_MAX_CONCURRENCY`, `PYTHON_OUTPUT_MAX_CHARS` | Limits on the Python the agent runs: time per script (60 s), how many run at once (1) and how much output the agent sees (8000 characters) |
+| `HOST_MAX_CONCURRENCY`, `HOST_QUEUE_WAIT_S` | How many heavy jobs (the agent's Python, part builds) run on the compute host at once (1), and how long one waits for its turn before telling the user the host is busy (30 s) |
+| `PYTHON_TIMEOUT_S`, `PYTHON_OUTPUT_MAX_CHARS` | Limits on the Python the agent runs: time per script (60 s) and how much output the agent sees (8000 characters) |
 | `ALLOW_PRIVATE_WORKSTATIONS` | Set `false` on a public server so a user's Ollama address can't point at private networks |
 
 Generate a credentials key with
@@ -154,5 +155,5 @@ Database schemas are written out in `database/<collection>.json`, generated from
 
 ## License
 
-MIT, see [LICENSE](LICENSE). The solvers in the work station image (OpenFOAM, CalculiX and the rest)
+MIT, see [LICENSE](LICENSE). The tools installed on the compute host (XFOIL, build123d, Cantera and the rest)
 keep their own licenses.

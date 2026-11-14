@@ -1,4 +1,4 @@
-"""Parts the agent designs with build123d: built on the work station (a fake here), kept as STL."""
+"""Parts the agent designs with build123d: built on the compute host (a fake), kept as STL."""
 
 import json
 from functools import partial
@@ -24,18 +24,22 @@ CODE = "from build123d import *\nresult = Box(1, 1, 1)\n"
 
 
 class FakeBuilder:
-    """A work station whose CAD builder answers with a canned report and files."""
+    """A compute host whose CAD builder answers with a canned report and files."""
 
     def __init__(self) -> None:
         self.commands: list[str] = []
         self.files: dict[str, bytes | str] = {}
         self.removed: list[str] = []
         self.report: dict = REPORT
+        # What the sandbox itself answered, when it (not the builder) is what failed.
+        self.exit_code = 0
+        self.stderr = ""
         self.outputs = {"model.stl": binary_stl(cube_triangles()), "model.step": b"ISO-10303-21;"}
 
     async def run(self, command, *, cwd=None, timeout_s=None):
         self.commands.append(command)
-        return CommandResult(0, json.dumps(self.report), "")
+        output = json.dumps(self.report) if self.exit_code == 0 else ""
+        return CommandResult(self.exit_code, output, self.stderr)
 
     async def write_file(self, path, content):
         self.files[path] = content
@@ -89,7 +93,10 @@ def test_a_built_part_is_kept_as_an_stl_with_its_code(client, builder):
     )
     assert saved == CODE
     assert builder.files[next(p for p in builder.files if p.endswith("design.py"))] == CODE
-    assert "/w/venv/bin/python /w/bin/cad_build.py build /w/designs/" in builder.commands[-1]
+    # The builder runs in the sandbox, which sees the scratch folder as /work.
+    command = builder.commands[-1]
+    assert command.startswith("/w/bin/run-sandboxed /w/designs/")
+    assert command.endswith(" 150 /w/bin/cad_build.py build /work")
     assert builder.removed  # the scratch folder is cleaned up
 
 
@@ -105,6 +112,28 @@ def test_a_failed_build_says_why_and_leaves_nothing_behind(client, builder):
     assert builder.removed
 
 
+@pytest.mark.parametrize(
+    ("exit_code", "stderr", "expected"),
+    [
+        (97, "sandbox unavailable: bubblewrap (bwrap) isn't installed", "isn't available"),
+        (127, "bash: /w/bin/run-sandboxed: No such file or directory", "setup.sh --install"),
+        (124, "", "took longer than 150 s"),
+        (137, "", "took longer than 150 s"),
+    ],
+)
+def test_a_sandbox_that_cannot_run_the_build_is_explained_and_cleaned_up(
+    client, builder, exit_code, stderr, expected
+):
+    builder.exit_code, builder.stderr = exit_code, stderr
+
+    text = client.portal.call(
+        tools_for_current_user(client)["create_geometry"].ainvoke, {"name": "x", "code": CODE}
+    )
+
+    assert text.startswith("The part wasn't built:") and expected in text
+    assert builder.removed  # the scratch folder is cleaned up
+
+
 def test_export_builds_again_in_the_chosen_format_and_downloads(client, builder):
     text = client.portal.call(
         tools_for_current_user(client)["create_geometry"].ainvoke, {"name": "cube", "code": CODE}
@@ -118,8 +147,8 @@ def test_export_builds_again_in_the_chosen_format_and_downloads(client, builder)
     download = client.get(f"/api/designs/{file_id}/export", params={"format": "step"})
 
     assert said.startswith("Exported cube.step") and "download it from the part's card" in said
-    assert "icarus-exec python3 /w/bin/cad_build.py export /w/designs/" in builder.commands[-1]
-    assert " step;" in builder.commands[-1]
+    assert builder.commands[-1].startswith("/w/bin/run-sandboxed /w/designs/")
+    assert builder.commands[-1].endswith(" 150 /w/bin/cad_build.py export /work step")
     assert download.status_code == 200 and download.content == b"ISO-10303-21;"
     assert 'filename="cube.step"' in download.headers["content-disposition"]
     saved = client.get(f"/api/files/{file_id}/original", params={"download": "true"})
@@ -178,3 +207,29 @@ def test_the_agent_is_reminded_of_the_parts_it_designed_each_turn(client, builde
     assert client.portal.call(
         tools["get_geometry"].ainvoke, {"geometry_file_id": "nope"}
     ).startswith("No designed part")
+
+
+def test_a_part_build_waits_for_its_turn_on_the_host_and_gives_up_when_it_is_busy(client, builder):
+    from api.compute.queue import HostQueue
+    from api.design.service import DesignService
+    from api.files.repository import FileRepository
+
+    queue = HostQueue(slots=1, wait_s=0.05)
+    service = DesignService(
+        builder,
+        workdir="/w",
+        files=FileRepository(client.app.state.db),
+        user_id="u",
+        queue=queue,
+    )
+
+    async def scenario():
+        async with queue.turn():  # a script is running
+            with pytest.raises(DesignError, match="busy with other jobs"):
+                await service.build("part", CODE, thread_id=None)
+        return await service.build("part", CODE, thread_id=None)
+
+    built = client.portal.call(scenario)
+
+    assert built.file.name == "part.stl"
+    assert len([c for c in builder.commands if "run-sandboxed" in c]) == 1

@@ -253,3 +253,33 @@ def test_a_host_without_the_sandbox_script_says_to_run_setup_not_a_shell_error(c
         run(client, "print(1)")
 
     assert "/w/" not in str(error.value) and host.removed
+
+
+def test_a_job_that_cannot_get_a_turn_gives_up_with_a_clear_message(client, host):
+    from api.compute.python_exec import PythonService
+    from api.compute.queue import HostQueue
+
+    queue = HostQueue(slots=1, wait_s=0.05)
+    python = PythonService(
+        host,
+        workdir="/w",
+        files=None,  # type: ignore[arg-type]
+        user_id="u",
+        timeout_s=60,
+        output_max_chars=1000,
+        queue=queue,
+    )
+
+    async def scenario():
+        async with queue.turn():  # another job is running
+            with pytest.raises(PythonError, match="busy with other jobs"):
+                await python.run("print(1)")
+        # Once it is done a job gets its turn again.
+        result, _ = await python.run("print(1)")
+        return result
+
+    result = client.portal.call(scenario)
+
+    assert result.exit_code == 0
+    assert host.commands.count("mkdir -p /w/python") == 0  # the busy job touched nothing
+    assert len([c for c in host.commands if "run-sandboxed" in c]) == 1

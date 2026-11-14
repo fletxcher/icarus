@@ -9,9 +9,9 @@ made it). Everything is millimetres. The report goes to stdout as JSON and to de
 failure has "ok": false and an "error" that names the line of design.py that went wrong.
 
 The code is the model's, so it is checked and fenced in before it runs. The fence is hygiene
-against mistakes, not a security boundary: the real limits are that the work station is the user's
-own machine, the run is capped on time (by the caller), CPU, memory and file size, and the network
-is cut off when the kernel allows it (`isolated` in the report says whether it did).
+against mistakes, not a security boundary. The boundary is the sandbox it runs in (`run-sandboxed`:
+no network, no view of the machine's files beyond the job directory, limits on time, memory and
+processes), which is how the server always runs it. `isolated` in the report says whether it is.
 """
 
 import ast
@@ -25,6 +25,7 @@ CODE_FILE = "design.py"
 REPORT_FILE = "design.json"
 EXTENSIONS = {"step": "step", "stl": "stl", "3mf": "3mf", "brep": "brep", "obj": "obj", "glb": "glb"}
 CPU_SECONDS = 120
+# An upper bound: the sandbox's own, lower limit (a share of the machine's memory) applies first.
 MEMORY_BYTES = 5 * 1024**3
 FILE_BYTES = 256 * 1024**2
 # Finer than this and a small curved part becomes millions of triangles.
@@ -97,15 +98,24 @@ def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):  # n
     return __import__(name, globals, locals, fromlist, level)
 
 
-def limit_resources() -> bool:
-    """Caps CPU, memory and file size, and cuts the network if the kernel lets us. Returns whether
-    the network is cut."""
-    resource.setrlimit(resource.RLIMIT_CPU, (CPU_SECONDS, CPU_SECONDS))
-    resource.setrlimit(resource.RLIMIT_AS, (MEMORY_BYTES, MEMORY_BYTES))
-    resource.setrlimit(resource.RLIMIT_FSIZE, (FILE_BYTES, FILE_BYTES))
-    try:
-        import os
+def _cap(which: int, wanted: int) -> None:
+    """Lowers a limit to `wanted`, never above one the sandbox already set (which would fail)."""
+    _, hard = resource.getrlimit(which)
+    value = wanted if hard == resource.RLIM_INFINITY else min(wanted, hard)
+    resource.setrlimit(which, (value, value))
 
+
+def limit_resources() -> bool:
+    """Caps CPU, memory and file size. Returns whether the network is cut: always inside the
+    sandbox, else by a network namespace if the kernel lets us."""
+    import os
+
+    _cap(resource.RLIMIT_CPU, CPU_SECONDS)
+    _cap(resource.RLIMIT_AS, MEMORY_BYTES)
+    _cap(resource.RLIMIT_FSIZE, FILE_BYTES)
+    if os.environ.get("ICARUS_SANDBOXED") == "1":
+        return True
+    try:
         os.unshare(os.CLONE_NEWUSER | os.CLONE_NEWNET)  # type: ignore[attr-defined]
         return True
     except (AttributeError, OSError):

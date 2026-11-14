@@ -37,7 +37,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-# work station: install and job directories, if ~/icarus is ever copied into the repo
+# compute host: install and job directories, if ~/icarus is ever copied into the repo
 bin/
 jobs/
 studies/

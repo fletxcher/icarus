@@ -137,10 +137,14 @@ class Settings(BaseSettings):
     web_fetch_max_pdf_bytes: int = 15_000_000
     web_fetch_max_chars: int = 12_000
 
-    # Python the agent writes, run in a sandbox on the compute host: a script's time limit, how many
-    # run at once (the host is small), and how much of its output the agent gets to see.
+    # Heavy jobs on the compute host (the Python the agent writes, and part builds) run this many
+    # at a time, since the host is small; one that can't get a turn within the wait gives up.
+    host_max_concurrency: int = 1
+    host_queue_wait_s: float = 30.0
+
+    # Python the agent writes, run in a sandbox on the compute host: a script's time limit, and
+    # how much of its output the agent gets to see.
     python_timeout_s: float = 60.0
-    python_max_concurrency: int = 1
     python_output_max_chars: int = 8000
 
     @model_validator(mode="after")

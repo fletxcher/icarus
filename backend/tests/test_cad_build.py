@@ -1,4 +1,4 @@
-"""The work station's CAD builder (workstation/cad_build.py): what code it refuses to run."""
+"""The compute host's CAD builder (workstation/cad_build.py): what code it refuses to run."""
 
 import importlib.util
 from pathlib import Path

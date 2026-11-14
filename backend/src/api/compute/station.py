@@ -1,6 +1,5 @@
 """The compute host: the one machine, reached over SSH, where XFOIL and part builds run."""
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from typing import NoReturn
@@ -11,6 +10,7 @@ from ..config import Settings
 from ..design.service import DesignService
 from ..files.repository import FileRepository
 from .python_exec import PythonService
+from .queue import HostQueue
 from .runner import (
     CommandResult,
     CommandRunner,
@@ -72,8 +72,8 @@ class Compute:
         self._db = db
         self._settings = settings
         self._station = self._build_station(settings)
-        # One queue for every user: the host runs few scripts at once.
-        self._python_slots = asyncio.Semaphore(max(1, settings.python_max_concurrency))
+        # One queue for every user: the host runs few heavy jobs at once.
+        self._queue = HostQueue(settings.host_max_concurrency, settings.host_queue_wait_s)
 
     @staticmethod
     def _build_station(settings: Settings) -> Workstation:
@@ -98,6 +98,7 @@ class Compute:
             workdir=self._station.workdir,
             files=FileRepository(self._db),
             user_id=user_id,
+            queue=self._queue,
         )
 
     def python(self, user_id: str) -> PythonService:
@@ -108,7 +109,7 @@ class Compute:
             user_id=user_id,
             timeout_s=self._settings.python_timeout_s,
             output_max_chars=self._settings.python_output_max_chars,
-            slots=self._python_slots,
+            queue=self._queue,
         )
 
     def xfoil(self) -> XfoilService:

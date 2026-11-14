@@ -98,8 +98,6 @@ def anon_client(mongo_db_name: str, monkeypatch: pytest.MonkeyPatch) -> Iterator
     monkeypatch.delenv("WS_HOST", raising=False)
     # No daily message limit unless a test sets one (see test_message_limit.py).
     monkeypatch.setenv("DAILY_MESSAGE_LIMIT", "0")
-    # No background watcher in tests: they call `watch_once` themselves.
-    monkeypatch.setenv("SIMULATION_WATCH_S", "0")
     get_settings.cache_clear()
 
     from api.app import create_app

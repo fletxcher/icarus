@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# Runs <job_dir>/main.py, which is code the agent wrote, inside a sandbox.
+# Runs code the agent wrote inside a sandbox: <job_dir>/main.py, or one of Icarus's own scripts
+# (the part builder) that works on files in <job_dir>.
 #
-# Usage: run-sandboxed <job_dir> <timeout_s>
+# Usage: run-sandboxed <job_dir> <timeout_s>                         runs <job_dir>/main.py
+#        run-sandboxed <job_dir> <timeout_s> <script> [arguments]    runs a script from ~/icarus/bin
+#                                                                    (the job directory is /work)
 #
 # What the code can see and do:
 #   - no network at all (so no internet, and not the cloud provider's metadata server either)
 #   - the system and Icarus's Python environment, read-only; nothing else of the machine: not
 #     the home directory, not ~/.ssh, not other jobs
+#   - Icarus's own scripts, read-only
 #   - the job directory, read-write, as /work, and a private /tmp; both are removed after the job
 #   - no environment variables from the machine, one CPU thread per library
 #   - limits on time, memory, processes and file size
@@ -15,8 +19,9 @@
 # without it. Exit status 124 means the time limit was hit.
 set -uo pipefail
 
-job="${1:?usage: run-sandboxed <job_dir> <timeout_s>}"
-timeout_s="${2:?usage: run-sandboxed <job_dir> <timeout_s>}"
+job="${1:?usage: run-sandboxed <job_dir> <timeout_s> [script arguments]}"
+timeout_s="${2:?usage: run-sandboxed <job_dir> <timeout_s> [script arguments]}"
+shift 2
 home="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 python="$home/venv/bin/python"
 
@@ -24,7 +29,13 @@ refuse() { echo "sandbox unavailable: $*" >&2; exit 97; }
 
 command -v bwrap > /dev/null || refuse "bubblewrap (bwrap) isn't installed"
 [[ -x $python ]] || refuse "$python doesn't exist"
-[[ -f $job/main.py ]] || refuse "$job/main.py doesn't exist"
+if (($# == 0)); then
+  [[ -f $job/main.py ]] || refuse "$job/main.py doesn't exist"
+  set -- main.py
+else
+  # Only scripts that were installed with Icarus, never a path the caller made up.
+  [[ $1 == "$home"/bin/* && $1 != *..* && -f $1 ]] || refuse "$1 isn't one of Icarus's scripts"
+fi
 job="$(cd "$job" && pwd)"
 
 # Memory: 80% of memory plus swap, at most 4 GB (a limit on address space, which is generous
@@ -49,6 +60,7 @@ done
 [[ -f /etc/ld.so.cache ]] && args+=(--ro-bind /etc/ld.so.cache /etc/ld.so.cache)
 args+=(
   --ro-bind "$home/venv" "$home/venv"
+  --ro-bind "$home/bin" "$home/bin"
   --bind "$job" /work
   --proc /proc --dev /dev --tmpfs /tmp
   --chdir /work
@@ -60,10 +72,11 @@ args+=(
   --setenv OMP_NUM_THREADS 1
   --setenv OPENBLAS_NUM_THREADS 1
   --setenv MKL_NUM_THREADS 1
+  --setenv ICARUS_SANDBOXED 1
 )
 
 # A sandbox that can't start (user namespaces disabled) must not fall through to running
 # the code unprotected.
 bwrap "${args[@]}" true 2> /dev/null || refuse "this machine doesn't allow unprivileged namespaces"
 
-exec timeout --kill-after=3 "$timeout_s" bwrap "${args[@]}" "$python" -I -B main.py
+exec timeout --kill-after=3 "$timeout_s" bwrap "${args[@]}" "$python" -I -B "$@"

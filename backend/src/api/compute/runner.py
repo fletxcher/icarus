@@ -51,9 +51,8 @@ def _log_result(where: str, command: str, result: "CommandResult", started: floa
 
 
 def via_exec(workdir: str) -> str:
-    """The prefix that runs a command where the tools are on the compute host: its
-    `bin/icarus-exec`, which uses the solver image in Docker mode and runs the command directly
-    otherwise. Empty on a machine whose runner files predate it, so those keep working."""
+    """The prefix that runs a command with the compute host's Python environment on the PATH: its
+    `bin/icarus-exec`. Empty on a machine that doesn't have it, so the command runs as it is."""
     path = shlex.quote(f"{workdir}/bin/icarus-exec")
     return f"$(test -x {path} && echo {path}) "
 

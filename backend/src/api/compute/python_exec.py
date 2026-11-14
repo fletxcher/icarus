@@ -5,7 +5,6 @@ anything but a scratch directory (see workstation/run-sandboxed). This module on
 code and files there, runs the script, and brings back a bounded amount of output.
 """
 
-import asyncio
 import logging
 import re
 import shlex
@@ -14,6 +13,7 @@ from dataclasses import dataclass
 from uuid import uuid4
 
 from ..files.repository import FileRepository
+from .queue import HostBusy, HostQueue
 from .runner import CommandRunner
 
 logger = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ class PythonService:
         user_id: str,
         timeout_s: float,
         output_max_chars: int,
-        slots: asyncio.Semaphore,
+        queue: HostQueue,
     ) -> None:
         self._runner = runner
         self._workdir = workdir
@@ -70,11 +70,13 @@ class PythonService:
         self._user_id = user_id
         self._timeout_s = timeout_s
         self._output_max = output_max_chars
-        # Shared by every user: the compute host is small, so scripts run one at a time.
-        self._slots = slots
+        # Shared by every user and by part builds: the compute host is small.
+        self._queue = queue
 
     async def _stage_files(self, folder: str, file_ids: list[str]) -> list[str]:
         """Puts the user's own text and CSV files in the folder; returns the names they have."""
+        if not file_ids:
+            return []
         if len(file_ids) > MAX_FILES:
             raise PythonError(f"at most {MAX_FILES} files can be given to a script")
         found = await self._files.get_many(file_ids, self._user_id)
@@ -105,29 +107,32 @@ class PythonService:
         if len(code) > MAX_CODE_CHARS:
             raise PythonError(f"the code is over {MAX_CODE_CHARS} characters; split it up")
         folder = f"{self._workdir}/python/{uuid4()}"
-        async with self._slots:
-            try:
-                await self._runner.run(f"mkdir -p {shlex.quote(folder)}")
-                names = await self._stage_files(folder, file_ids or [])
-                await self._runner.write_file(f"{folder}/main.py", code)
-                command = " ".join(
-                    shlex.quote(part)
-                    for part in (
-                        f"{self._workdir}/bin/run-sandboxed",
-                        folder,
-                        str(int(self._timeout_s)),
+        try:
+            async with self._queue.turn():
+                try:
+                    await self._runner.run(f"mkdir -p {shlex.quote(folder)}")
+                    names = await self._stage_files(folder, file_ids or [])
+                    await self._runner.write_file(f"{folder}/main.py", code)
+                    command = " ".join(
+                        shlex.quote(part)
+                        for part in (
+                            f"{self._workdir}/bin/run-sandboxed",
+                            folder,
+                            str(int(self._timeout_s)),
+                        )
                     )
-                )
-                started = time.perf_counter()
-                done = await self._runner.run(command, timeout_s=self._timeout_s + 20)
-                seconds = time.perf_counter() - started
-            except PythonError:
+                    started = time.perf_counter()
+                    done = await self._runner.run(command, timeout_s=self._timeout_s + 20)
+                    seconds = time.perf_counter() - started
+                except PythonError:
+                    await self._discard(folder)
+                    raise
+                except Exception as error:
+                    await self._discard(folder)
+                    raise PythonError(f"couldn't reach the compute host: {error}") from error
                 await self._discard(folder)
-                raise
-            except Exception as error:
-                await self._discard(folder)
-                raise PythonError(f"couldn't reach the compute host: {error}") from error
-            await self._discard(folder)
+        except HostBusy as busy:
+            raise PythonError(str(busy)) from None
         if done.exit_code == EXIT_NOT_FOUND and "run-sandboxed" in done.stderr:
             logger.error("the compute host has no run-sandboxed script: %s", done.stderr.strip())
             raise PythonError(
